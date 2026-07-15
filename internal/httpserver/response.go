@@ -6,7 +6,8 @@ import (
 )
 
 type errorEnvelope struct {
-	Error errorBody `json:"error"`
+	Detail string    `json:"detail"`
+	Error  errorBody `json:"error"`
 }
 
 type errorBody struct {
@@ -27,5 +28,8 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 // writeError 写入统一 JSON 错误信封。
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	// 1. 使用标准响应编码器返回错误信息。
-	writeJSON(w, status, errorEnvelope{Error: errorBody{Code: code, Message: message}})
+	writeJSON(w, status, errorEnvelope{
+		Detail: message,
+		Error:  errorBody{Code: code, Message: message},
+	})
 }

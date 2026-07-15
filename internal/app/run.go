@@ -9,10 +9,16 @@ import (
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/auth"
+	"github.com/howiedata/aowugong-go/internal/client"
 	"github.com/howiedata/aowugong-go/internal/config"
 	"github.com/howiedata/aowugong-go/internal/database"
 	"github.com/howiedata/aowugong-go/internal/httpserver"
+	"github.com/howiedata/aowugong-go/internal/mahjong"
+	"github.com/howiedata/aowugong-go/internal/monitoring"
 	"github.com/howiedata/aowugong-go/internal/rbac"
+	"github.com/howiedata/aowugong-go/internal/subscription"
+	"github.com/howiedata/aowugong-go/internal/weread"
+	"github.com/howiedata/aowugong-go/internal/work"
 )
 
 const developmentJWTSecret = "aowugong-development-only-secret"
@@ -50,14 +56,29 @@ func Run(ctx context.Context, cfg config.Config) error {
 		auth.NewRepository(db),
 		auth.NewTokenManager(jwtSecret, cfg.Auth.TokenLifetime),
 	)
+	subscriptionService := subscription.NewService(subscription.NewRepository(db))
+	mahjongService := mahjong.NewService(mahjong.NewRepository(db))
+	workService := work.NewService(cfg.Storage.WorkNavigationPath)
+	httpClient := &http.Client{Timeout: 20 * time.Second}
+	wereadService := weread.NewService(client.NewWeReadClient(cfg.Clients.WeRead, httpClient))
+	monitoringService := monitoring.NewService(
+		monitoring.NewRepository(db),
+		client.NewMonitoringClient(httpClient),
+		cfg.Clients,
+	)
 
 	// 3. 启动 HTTP 服务并等待服务错误或取消信号。
 	server := &http.Server{
 		Addr: cfg.HTTP.Address,
 		Handler: httpserver.NewRouter(httpserver.Dependencies{
-			StaticDir: cfg.HTTP.StaticDir,
-			Auth:      authService,
-			RBAC:      rbacService,
+			StaticDir:    cfg.HTTP.StaticDir,
+			Auth:         authService,
+			RBAC:         rbacService,
+			Subscription: subscriptionService,
+			Mahjong:      mahjongService,
+			Work:         workService,
+			WeRead:       wereadService,
+			Monitoring:   monitoringService,
 		}),
 	}
 	serverErrors := make(chan error, 1)

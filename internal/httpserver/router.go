@@ -7,14 +7,24 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/howiedata/aowugong-go/internal/auth"
+	"github.com/howiedata/aowugong-go/internal/mahjong"
+	"github.com/howiedata/aowugong-go/internal/monitoring"
 	"github.com/howiedata/aowugong-go/internal/rbac"
+	"github.com/howiedata/aowugong-go/internal/subscription"
+	"github.com/howiedata/aowugong-go/internal/weread"
+	"github.com/howiedata/aowugong-go/internal/work"
 )
 
 // Dependencies 描述路由器启动所需的依赖。
 type Dependencies struct {
-	StaticDir string
-	Auth      *auth.Service
-	RBAC      *rbac.Service
+	StaticDir    string
+	Auth         *auth.Service
+	RBAC         *rbac.Service
+	Subscription *subscription.Service
+	Mahjong      *mahjong.Service
+	Work         *work.Service
+	WeRead       *weread.Service
+	Monitoring   *monitoring.Service
 }
 
 type router struct {
@@ -40,6 +50,21 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 	if deps.Auth != nil && deps.RBAC != nil {
 		registerPermissionRoutes(api, deps.Auth, deps.RBAC)
+	}
+	if deps.Auth != nil && deps.RBAC != nil && deps.Subscription != nil {
+		registerSubscriptionRoutes(api, deps.Auth, deps.RBAC, deps.Subscription)
+	}
+	if deps.Auth != nil && deps.RBAC != nil && deps.Mahjong != nil {
+		registerMahjongRoutes(api, deps.Auth, deps.RBAC, deps.Mahjong)
+	}
+	if deps.Auth != nil && deps.RBAC != nil && deps.Work != nil {
+		registerWorkRoutes(api, deps.Auth, deps.RBAC, deps.Work)
+	}
+	if deps.Auth != nil && deps.RBAC != nil && deps.WeRead != nil {
+		registerWeReadRoutes(api, deps.Auth, deps.RBAC, deps.WeRead)
+	}
+	if deps.Auth != nil && deps.RBAC != nil && deps.Monitoring != nil {
+		registerMonitoringRoutes(api, deps.Auth, deps.RBAC, deps.Monitoring)
 	}
 
 	// 3. 组装 API 与 SPA 静态文件处理器。

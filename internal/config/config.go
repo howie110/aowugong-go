@@ -4,16 +4,19 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	defaultEnvironment   = "development"
-	defaultHTTPAddress   = "0.0.0.0:2346"
-	defaultDatabasePath  = "storage/data/aowugong.db"
-	defaultStaticDir     = "web/dist"
-	defaultTokenLifetime = 72 * time.Hour
+	defaultEnvironment        = "development"
+	defaultHTTPAddress        = "0.0.0.0:2346"
+	defaultDatabasePath       = "storage/data/aowugong.db"
+	defaultStaticDir          = "web/dist"
+	defaultTokenLifetime      = 72 * time.Hour
+	defaultWorkNavigationPath = "storage/private/work/navigation.json"
+	defaultBackupDir          = "storage/backup"
 )
 
 // LookupEnv 定义查询环境变量的函数类型。
@@ -26,6 +29,10 @@ type Config struct {
 	HTTP          HTTP
 	Database      Database
 	Auth          Auth
+	Storage       Storage
+	Clients       Clients
+	Finance       Finance
+	Scheduler     Scheduler
 }
 
 // HTTP 描述 HTTP 服务配置。
@@ -46,6 +53,76 @@ type Auth struct {
 	TokenLifetime time.Duration
 }
 
+// Storage 描述运行时文件位置和 SQLite 备份保留策略。
+type Storage struct {
+	WorkNavigationPath string
+	BackupDir          string
+	BackupRetention    int
+}
+
+// Clients 描述当前可达业务使用的外部 HTTP 服务配置。
+type Clients struct {
+	WeRead                WeRead
+	DeepSeek              DeepSeek
+	Tushare               Tushare
+	OpenILink             OpenILink
+	ArticleRSSURL         string
+	WeChatRSSMonitorURL   string
+	ServiceMonitorTargets string
+	PositionOCR           PositionOCR
+}
+
+// WeRead 描述微信读书 Agent Gateway 配置。
+type WeRead struct {
+	GatewayURL   string
+	APIKey       string
+	SkillVersion string
+}
+
+// DeepSeek 描述投资文章结构化分析客户端配置。
+type DeepSeek struct {
+	BaseURL string
+	APIKey  string
+	Model   string
+}
+
+// Tushare 描述 Tushare HTTP API 配置。
+type Tushare struct {
+	BaseURL string
+	Token   string
+}
+
+// OpenILink 描述微信通知和链路监控配置。
+type OpenILink struct {
+	HubURL     string
+	MonitorURL string
+	AppToken   string
+	DefaultTo  string
+	DBPath     string
+}
+
+// PositionOCR 描述仓位截图 OCR 配置。
+type PositionOCR struct {
+	Provider        string
+	UploadMaxMB     int
+	AccessKeyID     string
+	AccessKeySecret string
+	Endpoint        string
+}
+
+// Finance 描述交易保护和现有交易端配置状态。
+type Finance struct {
+	EnableRealTrade bool
+	QMTAccount      string
+	BinanceAPIKey   string
+	OKXAPIKey       string
+}
+
+// Scheduler 描述内嵌任务调度器开关。
+type Scheduler struct {
+	Enabled bool
+}
+
 // Load 从环境变量加载并校验应用配置。
 func Load(lookup LookupEnv) (Config, error) {
 	// 1. 建立所有运行环境共用的默认配置。
@@ -58,6 +135,30 @@ func Load(lookup LookupEnv) (Config, error) {
 		Database: Database{Path: defaultDatabasePath},
 		Auth: Auth{
 			TokenLifetime: defaultTokenLifetime,
+		},
+		Storage: Storage{
+			WorkNavigationPath: defaultWorkNavigationPath,
+			BackupDir:          defaultBackupDir,
+			BackupRetention:    7,
+		},
+		Clients: Clients{
+			WeRead: WeRead{
+				GatewayURL:   "https://i.weread.qq.com/api/agent/gateway",
+				SkillVersion: "1.0.4",
+			},
+			DeepSeek: DeepSeek{BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"},
+			Tushare:  Tushare{BaseURL: "https://api.tushare.pro"},
+			OpenILink: OpenILink{
+				HubURL:     "http://127.0.0.1:9800",
+				MonitorURL: "http://8.138.123.59:9800/",
+				DBPath:     "/var/lib/openilink-hub/openilink.db",
+			},
+			WeChatRSSMonitorURL: "http://8.138.123.59:5000/api/admin/status",
+			PositionOCR: PositionOCR{
+				Provider:    "aliyun",
+				UploadMaxMB: 10,
+				Endpoint:    "ocr-api.cn-hangzhou.aliyuncs.com",
+			},
 		},
 	}
 
@@ -83,10 +184,49 @@ func Load(lookup LookupEnv) (Config, error) {
 	if value, ok := lookup("AOWUGONG_ENCRYPTION_KEY"); ok {
 		cfg.Auth.EncryptionKey = strings.TrimSpace(value)
 	}
+	loadString(lookup, "AOWUGONG_WORK_NAVIGATION_PATH", &cfg.Storage.WorkNavigationPath)
+	loadString(lookup, "AOWUGONG_BACKUP_DIR", &cfg.Storage.BackupDir)
+	loadString(lookup, "WEREAD_GATEWAY_URL", &cfg.Clients.WeRead.GatewayURL)
+	loadString(lookup, "WEREAD_API_KEY", &cfg.Clients.WeRead.APIKey)
+	loadString(lookup, "WEREAD_SKILL_VERSION", &cfg.Clients.WeRead.SkillVersion)
+	loadString(lookup, "DEEPSEEK_BASE_URL", &cfg.Clients.DeepSeek.BaseURL)
+	loadString(lookup, "DEEPSEEK_API_KEY", &cfg.Clients.DeepSeek.APIKey)
+	loadString(lookup, "DEEPSEEK_MODEL", &cfg.Clients.DeepSeek.Model)
+	loadString(lookup, "TUSHARE_BASE_URL", &cfg.Clients.Tushare.BaseURL)
+	loadString(lookup, "TUSHARE_TOKEN", &cfg.Clients.Tushare.Token)
+	loadString(lookup, "OPENILINK_HUB_URL", &cfg.Clients.OpenILink.HubURL)
+	loadString(lookup, "OPENILINK_MONITOR_URL", &cfg.Clients.OpenILink.MonitorURL)
+	loadString(lookup, "OPENILINK_APP_TOKEN", &cfg.Clients.OpenILink.AppToken)
+	loadString(lookup, "OPENILINK_DEFAULT_TO", &cfg.Clients.OpenILink.DefaultTo)
+	loadString(lookup, "OPENILINK_DB_PATH", &cfg.Clients.OpenILink.DBPath)
+	loadString(lookup, "INVESTMENT_ARTICLE_AGGREGATE_RSS_URL", &cfg.Clients.ArticleRSSURL)
+	loadString(lookup, "WECHAT_RSS_MONITOR_URL", &cfg.Clients.WeChatRSSMonitorURL)
+	loadString(lookup, "SERVICE_MONITOR_TARGETS", &cfg.Clients.ServiceMonitorTargets)
+	loadString(lookup, "POSITION_OCR_PROVIDER", &cfg.Clients.PositionOCR.Provider)
+	loadString(lookup, "ALIYUN_OCR_ACCESS_KEY_ID", &cfg.Clients.PositionOCR.AccessKeyID)
+	loadString(lookup, "ALIYUN_OCR_ACCESS_KEY_SECRET", &cfg.Clients.PositionOCR.AccessKeySecret)
+	loadString(lookup, "ALIYUN_OCR_ENDPOINT", &cfg.Clients.PositionOCR.Endpoint)
+	loadString(lookup, "QMT_ACCOUNT", &cfg.Finance.QMTAccount)
+	loadString(lookup, "BINANCE_API_KEY", &cfg.Finance.BinanceAPIKey)
+	loadString(lookup, "OKX_API_KEY", &cfg.Finance.OKXAPIKey)
+	if err := loadInt(lookup, "AOWUGONG_BACKUP_RETENTION", &cfg.Storage.BackupRetention, 1, 365); err != nil {
+		return Config{}, err
+	}
+	if err := loadInt(lookup, "POSITION_UPLOAD_MAX_MB", &cfg.Clients.PositionOCR.UploadMaxMB, 1, 100); err != nil {
+		return Config{}, err
+	}
+	if err := loadBool(lookup, "FINANCE_ENABLE_REAL_TRADE", &cfg.Finance.EnableRealTrade); err != nil {
+		return Config{}, err
+	}
+	if err := loadBool(lookup, "AOWUGONG_SCHEDULER_ENABLED", &cfg.Scheduler.Enabled); err != nil {
+		return Config{}, err
+	}
 
 	// 3. 清理路径并验证生产环境的必填密钥。
 	cfg.Database.Path = filepath.Clean(cfg.Database.Path)
 	cfg.HTTP.StaticDir = filepath.Clean(cfg.HTTP.StaticDir)
+	cfg.Storage.WorkNavigationPath = filepath.Clean(cfg.Storage.WorkNavigationPath)
+	cfg.Storage.BackupDir = filepath.Clean(cfg.Storage.BackupDir)
 	if cfg.MigrationsDir != "" {
 		cfg.MigrationsDir = filepath.Clean(cfg.MigrationsDir)
 	}
@@ -95,4 +235,55 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// loadString 使用非空环境变量覆盖字符串配置。
+// 输入：lookup 是环境查询函数，key 是变量名，target 是目标字段。
+// 输出：无。
+// 副作用：可能修改 target。
+func loadString(lookup LookupEnv, key string, target *string) {
+	// 1. 清理并应用非空环境变量。
+	if value, ok := lookup(key); ok && strings.TrimSpace(value) != "" {
+		*target = strings.TrimSpace(value)
+	}
+}
+
+// loadBool 解析可选布尔环境变量。
+// 输入：lookup 是环境查询函数，key 是变量名，target 是目标字段。
+// 输出：格式无效时返回带变量名的错误。
+// 副作用：可能修改 target。
+func loadBool(lookup LookupEnv, key string, target *bool) error {
+	// 1. 缺失或空值保持默认配置。
+	value, ok := lookup(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return nil
+	}
+
+	// 2. 使用标准库接受 true/false、1/0 等常见形式。
+	parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		return fmt.Errorf("环境变量 %s 必须是布尔值: %w", key, err)
+	}
+	*target = parsed
+	return nil
+}
+
+// loadInt 解析并约束可选整数环境变量。
+// 输入：lookup 是环境查询函数，key 是变量名，target 是目标字段，min 和 max 是闭区间。
+// 输出：格式或范围无效时返回错误。
+// 副作用：可能修改 target。
+func loadInt(lookup LookupEnv, key string, target *int, min, max int) error {
+	// 1. 缺失或空值保持默认配置。
+	value, ok := lookup(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return nil
+	}
+
+	// 2. 解析十进制整数并检查范围。
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed < min || parsed > max {
+		return fmt.Errorf("环境变量 %s 必须在 %d 到 %d 之间", key, min, max)
+	}
+	*target = parsed
+	return nil
 }
