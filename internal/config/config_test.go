@@ -1,7 +1,9 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -26,8 +28,22 @@ func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 	if cfg.Auth.TokenLifetime != 72*time.Hour {
 		t.Errorf("TokenLifetime = %s, want %s", cfg.Auth.TokenLifetime, 72*time.Hour)
 	}
-	if cfg.Database.Path != filepath.Clean("data/aowugong.db") {
-		t.Errorf("Database.Path = %q, want %q", cfg.Database.Path, filepath.Clean("data/aowugong.db"))
+	if cfg.Database.Path != filepath.Clean("storage/data/aowugong.db") {
+		t.Errorf("Database.Path = %q, want %q", cfg.Database.Path, filepath.Clean("storage/data/aowugong.db"))
+	}
+}
+
+// TestEnvironmentExampleUsesDefaultDatabasePath 验证环境示例使用精确默认数据库路径。
+func TestEnvironmentExampleUsesDefaultDatabasePath(t *testing.T) {
+	// 1. 读取仓库中的环境变量示例。
+	content, err := os.ReadFile(filepath.Join("..", "..", "configs", ".env.example"))
+	if err != nil {
+		t.Fatalf("os.ReadFile() error = %v", err)
+	}
+
+	// 2. 断言示例中的数据库路径与运行时默认值一致。
+	if !strings.Contains(string(content), "AOWUGONG_DATABASE_PATH=storage/data/aowugong.db") {
+		t.Errorf(".env.example database path is not storage/data/aowugong.db")
 	}
 }
 
@@ -98,6 +114,23 @@ func TestLoadNormalizesPaths(t *testing.T) {
 	}
 	if cfg.HTTP.StaticDir != filepath.Clean("public/../web/dist") {
 		t.Errorf("StaticDir = %q, want %q", cfg.HTTP.StaticDir, filepath.Clean("public/../web/dist"))
+	}
+}
+
+// TestLoadUsesMigrationsDirectoryOverride 验证迁移目录可由环境变量覆盖并规范化。
+func TestLoadUsesMigrationsDirectoryOverride(t *testing.T) {
+	// 1. 提供包含相对路径片段的迁移目录。
+	cfg, err := Load(newLookup(map[string]string{
+		"AOWUGONG_MIGRATIONS_DIR": "deploy/../release/migrations",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// 2. 断言显式迁移目录已被保留并规范化。
+	want := filepath.Clean("deploy/../release/migrations")
+	if cfg.MigrationsDir != want {
+		t.Errorf("MigrationsDir = %q, want %q", cfg.MigrationsDir, want)
 	}
 }
 
