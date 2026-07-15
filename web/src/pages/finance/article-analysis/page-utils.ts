@@ -1,0 +1,57 @@
+import type { ArticleItem, TargetSignalStat } from "@/lib/article-analysis";
+
+export type AccountStat = {
+  name: string;
+  count: number;
+};
+
+export function formatShortDate(value?: string | null) {
+  if (!value) {
+    return "未知";
+  }
+  return new Date(value).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
+
+export function filterArticlesBySignal(articles: ArticleItem[], signal: TargetSignalStat | null) {
+  if (!signal) {
+    return articles;
+  }
+  return articles.filter((article) => {
+    return article.recommendation_names.includes(signal.name) || article.risk_names.includes(signal.name);
+  });
+}
+
+export function buildAccountStats(articles: ArticleItem[]) {
+  const counts = new Map<string, number>();
+  for (const article of articles) {
+    const name = getArticleAccountName(article);
+    if (!name) {
+      continue;
+    }
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name, "zh-CN"));
+}
+
+export function isSameSignal(left: TargetSignalStat | null, right: TargetSignalStat) {
+  return Boolean(left && left.name === right.name && left.type === right.type);
+}
+
+export function getSignalToneClass(tone: "recommend" | "risk") {
+  return tone === "recommend" ? "border-transparent bg-red-50 text-red-700" : "border-transparent bg-emerald-50 text-emerald-700";
+}
+
+function getArticleAccountName(article: ArticleItem) {
+  const title = article.title.trim();
+  const matched = title.match(/^[\[【]([^\]】]{1,20})[\]】]/);
+  if (matched?.[1]) {
+    return matched[1].trim();
+  }
+  const author = (article.author || "").trim();
+  if (author && author !== article.source_name) {
+    return author;
+  }
+  return "";
+}
