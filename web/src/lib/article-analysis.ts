@@ -1,4 +1,4 @@
-import { clearToken, getToken } from "@/lib/auth";
+import { authorizedFetch } from "@/lib/auth";
 
 export type ArticleSource = {
   id: number;
@@ -87,6 +87,14 @@ export type AnalysisBatchResult = {
   items: Array<Record<string, unknown>>;
 };
 
+export type JobRunResult = {
+  id: number;
+  name: string;
+  source: "manual" | "scheduler" | "cli";
+  status: string;
+  message?: string;
+};
+
 export async function fetchArticleSources() {
   return requestJson<ArticleSource[]>("/api/v1/finance/article-analysis/sources");
 }
@@ -147,6 +155,12 @@ export async function syncArticles(fetchLimit = 30, analyze = false, analysisLim
   });
 }
 
+export async function runScheduledArticleSync() {
+  return requestJson<JobRunResult>("/api/v1/finance/jobs/sync_investment_articles/run", {
+    method: "POST",
+  });
+}
+
 export async function analyzePendingArticles(limit = 10) {
   return requestJson<AnalysisBatchResult>(`/api/v1/finance/article-analysis/analyze?limit=${limit}`, {
     method: "POST",
@@ -154,21 +168,11 @@ export async function analyzePendingArticles(limit = 10) {
 }
 
 async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {
-  const token = getToken();
-  if (!token) {
-    throw new Error("未登录");
-  }
-
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${token}`);
   if (init.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await fetch(input, { ...init, headers });
-  if (response.status === 401) {
-    clearToken();
-    window.location.href = "/login";
-  }
+  const response = await authorizedFetch(input, { ...init, headers });
   if (!response.ok) {
     const data = await response.json().catch(() => null);
     const error = new Error(data?.detail || "投资文章分析接口请求失败");

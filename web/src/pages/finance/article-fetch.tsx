@@ -10,9 +10,8 @@ import {
   analyzePendingArticles,
   fetchArticleFetchSummary,
   fetchArticleSources,
-  syncArticles,
+  runScheduledArticleSync,
 } from "@/lib/article-analysis";
-import { buildArticleSyncNotification } from "@/lib/article-sync-notification";
 import { notify } from "@/lib/notify";
 
 type FetchSummary = {
@@ -53,13 +52,8 @@ export function ArticleFetchPage() {
   async function handleSync() {
     setIsWorking(true);
     try {
-      const result = await syncArticles(100, true, 50);
-      const notification = buildArticleSyncNotification(result);
-      if (notification.level === "warning") {
-        notify.warning(notification.title, notification.description);
-      } else {
-        notify.success(notification.title, notification.description);
-      }
+      const result = await runScheduledArticleSync();
+      notify.success("抓取并分析完成", result.message || "生产同步任务执行成功。");
       await loadData();
     } catch (error) {
       notify.errorFrom(error, "抓取文章失败");

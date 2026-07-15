@@ -1,4 +1,4 @@
-import { clearToken, getToken } from "@/lib/auth";
+import { authorizedFetch } from "@/lib/auth";
 import type { WeReadDashboardData } from "@/lib/weread";
 
 export type FinancePageKey =
@@ -110,7 +110,7 @@ export const pageMetaMap: Record<FinancePageKey, { title: string; description: s
   },
   jobs: {
     title: "定时任务",
-    description: "crontab 和任务入口状态。",
+    description: "Go 进程内调度和统一任务入口状态。",
   },
   trading: {
     title: "交易",
@@ -240,21 +240,9 @@ export class ApiError extends Error {
 }
 
 export async function fetchFinancePage(pageKey: FinancePageKey): Promise<FinancePageData> {
-  const token = getToken();
-  if (!token) {
-    throw new Error("未登录");
-  }
-
-  const response = await fetch(pageEndpointMap[pageKey], {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  const response = await authorizedFetch(pageEndpointMap[pageKey]);
 
   if (!response.ok) {
-    if (response.status === 401) {
-      clearToken();
-    }
     const data = await response.json().catch(() => null);
     throw new ApiError(data?.detail || "获取页面数据失败", response.status);
   }

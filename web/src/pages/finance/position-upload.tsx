@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { clearToken, getToken } from "@/lib/auth";
+import { authorizedFetch } from "@/lib/auth";
 import { notify } from "@/lib/notify";
 
 type AssetSnapshot = {
@@ -39,22 +39,6 @@ function getTodayText() {
   const now = new Date();
   const offset = now.getTimezoneOffset() * 60000;
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
-}
-
-async function authorizedFetch(input: RequestInfo | URL, init: RequestInit = {}) {
-  const token = getToken();
-  if (!token) {
-    throw new Error("未登录");
-  }
-
-  const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(input, { ...init, headers });
-  if (response.status === 401) {
-    clearToken();
-    window.location.href = "/login";
-  }
-  return response;
 }
 
 export function PositionUploadPage() {

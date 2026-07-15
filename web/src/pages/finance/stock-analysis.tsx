@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { clearToken, getToken } from "@/lib/auth";
+import { authorizedFetch } from "@/lib/auth";
 import { AccountGrid } from "./stock-analysis/account-cards";
 import { EmptyAnalysis } from "./stock-analysis/empty-analysis";
 import { HoldingDistributionCard } from "./stock-analysis/holding-distribution-card";
@@ -11,22 +11,6 @@ import { RecentTimelineTable } from "./stock-analysis/recent-timeline-table";
 import { SummaryGrid } from "./stock-analysis/summary-grid";
 import { CombinedTrendCard } from "./stock-analysis/trend-chart";
 import type { StockAnalysisReport } from "./stock-analysis/types";
-
-async function authorizedFetch(input: RequestInfo | URL, init: RequestInit = {}) {
-  const token = getToken();
-  if (!token) {
-    throw new Error("未登录");
-  }
-
-  const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(input, { ...init, headers });
-  if (response.status === 401) {
-    clearToken();
-    window.location.href = "/login";
-  }
-  return response;
-}
 
 export function StockAnalysisPage({ isSensitiveMasked }: { isSensitiveMasked: boolean }) {
   const [report, setReport] = useState<StockAnalysisReport | null>(null);

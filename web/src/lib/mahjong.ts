@@ -1,4 +1,4 @@
-import { clearToken, getToken } from "@/lib/auth";
+import { authorizedFetch } from "@/lib/auth";
 
 export type MahjongRecord = {
   id: number;
@@ -96,22 +96,6 @@ export type MahjongRecordWriteResponse = {
   status: string;
   record: MahjongRecord;
 };
-
-async function authorizedFetch(input: RequestInfo | URL, init: RequestInit = {}) {
-  const token = getToken();
-  if (!token) {
-    throw new Error("未登录");
-  }
-
-  const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(input, { ...init, headers });
-  if (response.status === 401) {
-    clearToken();
-    window.location.href = "/login";
-  }
-  return response;
-}
 
 export async function fetchMahjongReport(tableFee = "9") {
   const response = await authorizedFetch(`/api/v1/mahjong/report?table_fee=${encodeURIComponent(tableFee)}`);

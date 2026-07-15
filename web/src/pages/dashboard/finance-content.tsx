@@ -41,10 +41,10 @@ export function JobsContent({ pageData }: { pageData: FinancePageData }) {
   return (
     <>
       <div className="grid gap-4 md:grid-cols-2">
-        <InfoCard title="任务入口" value={pageData.runner || "未知"} description="job_runner 只负责接收任务、执行任务、失败通知。" />
+        <InfoCard title="任务入口" value={pageData.runner || "未知"} description="Registry 统一接收自动、页面和 CLI 执行。" />
         <InfoCard title="失败通知" value={pageData.fail_notify || "未知"} description="通知通过 OpeniLink 微信 Bot 发送。" />
       </div>
-      <TableCard title="crontab 任务" description="频率来自 app/scheduler/crontab。" items={pageData.jobs || []} />
+      <TableCard title="进程内任务" description="频率来自 Go 任务注册表，统一使用 Asia/Shanghai。" items={pageData.jobs || []} />
     </>
   );
 }

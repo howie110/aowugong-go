@@ -1,4 +1,5 @@
 import { ApiError } from "@/lib/finance";
+import { authorizedFetch } from "@/lib/auth";
 
 export type WorkNavigationLink = {
   title: string;
@@ -20,7 +21,7 @@ export type WorkNavigationData = {
 };
 
 export async function fetchWorkNavigation(): Promise<WorkNavigationData> {
-  const response = await fetch("/api/v1/work/navigation");
+  const response = await authorizedFetch("/api/v1/work/navigation");
 
   if (!response.ok) {
     const data = await response.json().catch(() => null);

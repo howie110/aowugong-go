@@ -1,4 +1,4 @@
-import { clearToken, getToken } from "@/lib/auth";
+import { authorizedFetch } from "@/lib/auth";
 
 export type WeReadMetric = {
   label: string;
@@ -76,22 +76,9 @@ export type WeReadHeatmapData = {
 };
 
 async function fetchWeReadApi<T>(url: string, fallbackMessage: string): Promise<T> {
-  const token = getToken();
-  if (!token) {
-    throw new Error("未登录");
-  }
-
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  const response = await authorizedFetch(url);
 
   if (!response.ok) {
-    if (response.status === 401) {
-      clearToken();
-      window.location.href = "/login";
-    }
     const data = await response.json().catch(() => null);
     throw new Error(data?.detail || fallbackMessage);
   }

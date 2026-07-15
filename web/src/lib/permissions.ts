@@ -1,4 +1,4 @@
-import { getToken } from "@/lib/auth";
+import { authorizedFetch } from "@/lib/auth";
 
 export type RoleRead = {
   id: number;
@@ -18,19 +18,9 @@ export type PermissionUser = {
 };
 
 async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const token = getToken();
-  if (!token) {
-    throw new Error("未登录");
-  }
-
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(options.headers || {}),
-    },
-  });
+  const headers = new Headers(options.headers);
+  headers.set("Content-Type", "application/json");
+  const response = await authorizedFetch(url, { ...options, headers });
 
   if (!response.ok) {
     const data = await response.json().catch(() => null);

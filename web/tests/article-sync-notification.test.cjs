@@ -6,6 +6,7 @@ const vm = require("node:vm");
 const ts = require("../node_modules/typescript");
 
 const modulePath = path.resolve(__dirname, "../src/lib/article-sync-notification.ts");
+const articleAPIPath = path.resolve(__dirname, "../src/lib/article-analysis.ts");
 
 /** 编译并加载文章同步通知 TypeScript 模块。 */
 function loadModule() {
@@ -54,4 +55,11 @@ test("存在失败来源时生成包含原因的警告通知", () => {
   assert.equal(result.level, "warning");
   assert.match(result.title, /存在失败来源/);
   assert.match(result.description, /公众号聚合：轮询器未启动/);
+});
+
+test("页面生产同步入口调用统一任务注册表", () => {
+  const source = fs.readFileSync(articleAPIPath, "utf8");
+
+  assert.match(source, /\/api\/v1\/finance\/jobs\/sync_investment_articles\/run/);
+  assert.match(source, /export async function runScheduledArticleSync/);
 });

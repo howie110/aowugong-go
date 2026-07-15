@@ -89,8 +89,8 @@ export function LoginPage() {
               <div className="mt-1 text-muted-foreground">统一端口</div>
             </div>
             <div className="rounded-md border bg-background p-4">
-              <div className="tabular-nums text-xl font-semibold">API</div>
-              <div className="mt-1 text-muted-foreground">FastAPI</div>
+              <div className="tabular-nums text-xl font-semibold">Go</div>
+              <div className="mt-1 text-muted-foreground">统一服务</div>
             </div>
           </div>
         </section>

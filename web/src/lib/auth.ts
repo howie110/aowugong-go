@@ -30,6 +30,22 @@ export function isAuthenticated() {
   return Boolean(getToken());
 }
 
+export async function authorizedFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  const token = getToken();
+  if (!token) {
+    throw new Error("未登录");
+  }
+
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(input, { ...init, headers });
+  if (response.status === 401) {
+    clearToken();
+    window.location.href = "/login";
+  }
+  return response;
+}
+
 export async function login(username: string, password: string): Promise<LoginResponse> {
   const formData = new URLSearchParams();
   formData.set("username", username);
@@ -54,21 +70,9 @@ export async function login(username: string, password: string): Promise<LoginRe
 }
 
 export async function getProfile(): Promise<UserProfile> {
-  const token = getToken();
-  if (!token) {
-    throw new Error("未登录");
-  }
-
-  const response = await fetch("/api/v1/auth/profile", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  const response = await authorizedFetch("/api/v1/auth/profile");
 
   if (!response.ok) {
-    if (response.status === 401) {
-      clearToken();
-    }
     throw new Error("获取用户信息失败");
   }
 

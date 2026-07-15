@@ -1,4 +1,4 @@
-import { clearToken, getToken } from "@/lib/auth";
+import { authorizedFetch } from "@/lib/auth";
 
 export type SubscriptionRecord = {
   id: number;
@@ -25,22 +25,6 @@ export type SubscriptionRecordPayload = {
   starts_on?: string | null;
   expires_on: string;
 };
-
-async function authorizedFetch(input: RequestInfo | URL, init: RequestInit = {}) {
-  const token = getToken();
-  if (!token) {
-    throw new Error("未登录");
-  }
-
-  const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(input, { ...init, headers });
-  if (response.status === 401) {
-    clearToken();
-    window.location.href = "/login";
-  }
-  return response;
-}
 
 export async function fetchSubscriptions() {
   const response = await authorizedFetch("/api/v1/subscriptions/records");
