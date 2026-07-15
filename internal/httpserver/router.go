@@ -4,37 +4,65 @@ package httpserver
 import (
 	"net/http"
 	"strings"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/howiedata/aowugong-go/internal/auth"
+	"github.com/howiedata/aowugong-go/internal/rbac"
 )
 
 // Dependencies 描述路由器启动所需的依赖。
 type Dependencies struct {
 	StaticDir string
+	Auth      *auth.Service
+	RBAC      *rbac.Service
 }
 
 type router struct {
+	api http.Handler
 	spa spaHandler
 }
 
 // NewRouter 创建应用的 HTTP 路由器。
 func NewRouter(deps Dependencies) http.Handler {
-	// 1. 组装 API 路由与 SPA 静态文件处理器。
-	return router{spa: newSPAHandler(deps.StaticDir)}
+	// 1. 创建 API 路由并统一注册 JSON 404 和方法错误。
+	api := chi.NewRouter()
+	api.NotFound(func(w http.ResponseWriter, request *http.Request) {
+		writeError(w, http.StatusNotFound, "not_found", "API route not found")
+	})
+	api.MethodNotAllowed(func(w http.ResponseWriter, request *http.Request) {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
+	})
+	api.Get("/api/v1/health", healthHandler)
+
+	// 2. 依赖可用时注册认证和权限接口，便于最小健康检查测试独立运行。
+	if deps.Auth != nil {
+		registerAuthRoutes(api, deps.Auth)
+	}
+	if deps.Auth != nil && deps.RBAC != nil {
+		registerPermissionRoutes(api, deps.Auth, deps.RBAC)
+	}
+
+	// 3. 组装 API 与 SPA 静态文件处理器。
+	return router{api: api, spa: newSPAHandler(deps.StaticDir)}
 }
 
 // ServeHTTP 按请求路径分发 API 和 SPA 请求。
 func (r router) ServeHTTP(w http.ResponseWriter, request *http.Request) {
-	// 1. 处理已注册的健康检查端点。
-	if request.Method == http.MethodGet && request.URL.Path == "/api/v1/health" {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	// 1. 将全部 API 请求交给 chi 路由，阻止进入 SPA 回退。
+	if request.URL.Path == "/api" || strings.HasPrefix(request.URL.Path, "/api/") {
+		r.api.ServeHTTP(w, request)
 		return
 	}
 
-	// 2. 阻止未知 API 请求进入 SPA 回退。
-	if strings.HasPrefix(request.URL.Path, "/api/") {
-		writeError(w, http.StatusNotFound, "not_found", "API route not found")
-		return
-	}
-
-	// 3. 将其他请求交给静态文件与 SPA 处理器。
+	// 2. 将其他请求交给静态文件与 SPA 处理器。
 	r.spa.ServeHTTP(w, request)
+}
+
+// healthHandler 返回进程级健康状态。
+// 输入：request 是健康检查请求。
+// 输出：写入 status=ok 的 JSON。
+// 副作用：写入 HTTP 响应。
+func healthHandler(w http.ResponseWriter, request *http.Request) {
+	// 1. 返回不依赖外部服务的存活状态。
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
