@@ -10,8 +10,8 @@ import (
 
 const migrationDirectoryName = "migrations"
 
-// resolveMigrationsDirectory 解析当前运行方式应使用的迁移目录。
-func resolveMigrationsDirectory(configuredDirectory, executablePath string) (string, error) {
+// resolveMigrationsDirectory 按运行环境解析应使用的迁移目录。
+func resolveMigrationsDirectory(environment, configuredDirectory, executablePath string) (string, error) {
 	// 1. 显式配置始终覆盖自动解析结果。
 	if configuredDirectory != "" {
 		return filepath.Clean(configuredDirectory), nil
@@ -23,14 +23,22 @@ func resolveMigrationsDirectory(configuredDirectory, executablePath string) (str
 		return executableDirectory, nil
 	}
 
-	// 3. 从当前源码文件定位仓库根目录中的迁移目录。
+	// 3. 生产与未知环境禁止使用编译时源码目录。
+	if environment == "production" {
+		return "", fmt.Errorf("生产环境缺少迁移目录: %s", executableDirectory)
+	}
+	if environment != "development" && environment != "test" {
+		return "", fmt.Errorf("环境 %q 不允许源码迁移目录回退", environment)
+	}
+
+	// 4. 从当前源码文件定位仓库根目录中的迁移目录。
 	_, sourceFile, _, ok := runtime.Caller(0)
 	if !ok {
 		return "", fmt.Errorf("无法定位源码迁移目录")
 	}
 	sourceDirectory := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", "..", migrationDirectoryName))
 
-	// 4. 验证源码迁移目录存在且为目录。
+	// 5. 验证源码迁移目录存在且为目录。
 	info, err := os.Stat(sourceDirectory)
 	if err != nil {
 		return "", fmt.Errorf("检查源码迁移目录: %w", err)

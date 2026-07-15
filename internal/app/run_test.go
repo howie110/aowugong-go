@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,8 +34,9 @@ func TestRunShutsDownOnContextCancellation(t *testing.T) {
 	go func() {
 		// 4. 将运行结果交给测试协程。
 		done <- Run(ctx, config.Config{
-			HTTP:     config.HTTP{Address: address},
-			Database: config.Database{Path: databasePath},
+			Environment: "development",
+			HTTP:        config.HTTP{Address: address},
+			Database:    config.Database{Path: databasePath},
 		})
 	}()
 	waitForServer(t, address, done)
@@ -51,8 +53,26 @@ func TestRunShutsDownOnContextCancellation(t *testing.T) {
 	}
 }
 
-// TestResolveMigrationsDirectoryPrefersExecutableSibling 验证生产布局优先使用可执行文件同级迁移目录。
-func TestResolveMigrationsDirectoryPrefersExecutableSibling(t *testing.T) {
+// TestRunRejectsMissingProductionMigrations 验证生产环境不会回退到编译时源码迁移目录。
+func TestRunRejectsMissingProductionMigrations(t *testing.T) {
+	// 1. 使用无显式迁移目录的生产配置启动应用。
+	err := Run(context.Background(), config.Config{
+		Environment: "production",
+		HTTP:        config.HTTP{Address: "invalid"},
+		Database:    config.Database{Path: filepath.Join(t.TempDir(), "runtime.db")},
+	})
+
+	// 2. 断言启动在迁移阶段返回明确中文错误。
+	if err == nil {
+		t.Fatal("Run() error = nil, want missing production migrations error")
+	}
+	if !strings.Contains(err.Error(), "生产环境缺少迁移目录") {
+		t.Errorf("Run() error = %q, want production migrations error", err)
+	}
+}
+
+// TestResolveMigrationsDirectoryUsesProductionExecutableSibling 验证生产环境使用可执行文件同级迁移目录。
+func TestResolveMigrationsDirectoryUsesProductionExecutableSibling(t *testing.T) {
 	// 1. 创建模拟生产压缩包中的可执行文件同级迁移目录。
 	executableDirectory := t.TempDir()
 	want := filepath.Join(executableDirectory, migrationDirectoryName)
@@ -61,7 +81,7 @@ func TestResolveMigrationsDirectoryPrefersExecutableSibling(t *testing.T) {
 	}
 
 	// 2. 解析默认迁移目录并断言生产目录优先。
-	got, err := resolveMigrationsDirectory("", filepath.Join(executableDirectory, "aowugong.exe"))
+	got, err := resolveMigrationsDirectory("production", "", filepath.Join(executableDirectory, "aowugong.exe"))
 	if err != nil {
 		t.Fatalf("resolveMigrationsDirectory() error = %v", err)
 	}
@@ -70,8 +90,8 @@ func TestResolveMigrationsDirectoryPrefersExecutableSibling(t *testing.T) {
 	}
 }
 
-// TestResolveMigrationsDirectoryUsesExplicitOverride 验证显式迁移目录覆盖自动解析结果。
-func TestResolveMigrationsDirectoryUsesExplicitOverride(t *testing.T) {
+// TestResolveMigrationsDirectoryUsesProductionOverride 验证生产环境可使用显式迁移目录。
+func TestResolveMigrationsDirectoryUsesProductionOverride(t *testing.T) {
 	// 1. 创建显式迁移目录和模拟生产迁移目录。
 	overrideDirectory := filepath.Join(t.TempDir(), "custom-migrations")
 	if err := os.Mkdir(overrideDirectory, 0o750); err != nil {
@@ -83,12 +103,50 @@ func TestResolveMigrationsDirectoryUsesExplicitOverride(t *testing.T) {
 	}
 
 	// 2. 解析迁移目录并断言显式配置优先。
-	got, err := resolveMigrationsDirectory(overrideDirectory, filepath.Join(executableDirectory, "aowugong.exe"))
+	got, err := resolveMigrationsDirectory("production", overrideDirectory, filepath.Join(executableDirectory, "aowugong.exe"))
 	if err != nil {
 		t.Fatalf("resolveMigrationsDirectory() error = %v", err)
 	}
 	if got != overrideDirectory {
 		t.Errorf("resolveMigrationsDirectory() = %q, want %q", got, overrideDirectory)
+	}
+}
+
+// TestResolveMigrationsDirectoryRejectsMissingProductionDirectory 验证生产环境缺少发布迁移目录时返回明确错误。
+func TestResolveMigrationsDirectoryRejectsMissingProductionDirectory(t *testing.T) {
+	// 1. 使用没有同级迁移目录的模拟生产可执行文件。
+	executablePath := filepath.Join(t.TempDir(), "aowugong.exe")
+
+	// 2. 断言解析失败且错误说明生产迁移目录缺失。
+	got, err := resolveMigrationsDirectory("production", "", executablePath)
+	if err == nil {
+		t.Fatal("resolveMigrationsDirectory() error = nil, want missing production migrations error")
+	}
+	if got != "" {
+		t.Errorf("resolveMigrationsDirectory() = %q, want empty path", got)
+	}
+	if !strings.Contains(err.Error(), "生产环境缺少迁移目录") {
+		t.Errorf("resolveMigrationsDirectory() error = %q, want production migrations error", err)
+	}
+}
+
+// TestResolveMigrationsDirectoryUsesSourceFallbackOutsideProduction 验证开发和测试环境允许源码目录回退。
+func TestResolveMigrationsDirectoryUsesSourceFallbackOutsideProduction(t *testing.T) {
+	// 1. 计算测试源码对应的仓库根迁移目录。
+	want, err := filepath.Abs(filepath.Join("..", "..", migrationDirectoryName))
+	if err != nil {
+		t.Fatalf("filepath.Abs() error = %v", err)
+	}
+
+	// 2. 断言开发和测试环境均回退到源码迁移目录。
+	for _, environment := range []string{"development", "test"} {
+		got, err := resolveMigrationsDirectory(environment, "", filepath.Join(t.TempDir(), "aowugong.exe"))
+		if err != nil {
+			t.Fatalf("resolveMigrationsDirectory(%q) error = %v", environment, err)
+		}
+		if got != want {
+			t.Errorf("resolveMigrationsDirectory(%q) = %q, want %q", environment, got, want)
+		}
 	}
 }
 

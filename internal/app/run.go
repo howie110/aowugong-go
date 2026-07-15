@@ -25,7 +25,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("获取可执行文件路径: %w", err)
 	}
-	migrationsDirectory, err := resolveMigrationsDirectory(cfg.MigrationsDir, executablePath)
+	migrationsDirectory, err := resolveMigrationsDirectory(cfg.Environment, cfg.MigrationsDir, executablePath)
 	if err != nil {
 		return fmt.Errorf("解析迁移目录: %w", err)
 	}
