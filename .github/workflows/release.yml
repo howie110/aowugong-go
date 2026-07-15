@@ -1,0 +1,75 @@
+name: Test and release Linux artifact
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Test and build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Verify Go backend
+        run: |
+          go test ./...
+          go test -race ./...
+          go vet ./...
+
+      - name: Verify server scripts
+        run: bash -n scripts/*.sh
+
+      - name: Build Linux amd64 release
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          version="${GITHUB_REF_NAME}"
+          package="aowugong-go-${version}-linux-amd64"
+          mkdir -p "dist/${package}/web"
+          go build -trimpath -ldflags="-s -w" -o "dist/${package}/aowugong" ./cmd/aowugong
+          go build -trimpath -ldflags="-s -w" -o "dist/${package}/aowugong-migrate" ./cmd/migrate
+          cp -R web/dist "dist/${package}/web/dist"
+          cp -R migrations configs init scripts "dist/${package}/"
+          cp README.md "dist/${package}/README.md"
+          printf '%s\n' "${version}" > "dist/${package}/VERSION"
+          chmod +x "dist/${package}/aowugong" "dist/${package}/aowugong-migrate" "dist/${package}/scripts/"*.sh
+          tar -C dist -czf "dist/${package}.tar.gz" "${package}"
+          (cd dist && sha256sum "${package}.tar.gz" > "${package}.tar.gz.sha256")
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME}"
+          package="aowugong-go-${version}-linux-amd64"
+          gh release create "${version}" \
+            "dist/${package}.tar.gz" \
+            "dist/${package}.tar.gz.sha256" \
+            --verify-tag --generate-notes --title "${version}"

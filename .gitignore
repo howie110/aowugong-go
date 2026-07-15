@@ -21,6 +21,10 @@ profile.cov
 # vendor/
 web/node_modules/
 web/dist/
+dist/
+
+# Runtime data and generated migration reports
+storage/
 
 # Go workspace file
 go.work
