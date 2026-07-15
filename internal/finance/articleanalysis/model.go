@@ -145,6 +145,7 @@ type SyncResult struct {
 	AnalyzedCount int                 `json:"analyzed_count"`
 	SkippedCount  int                 `json:"skipped_count"`
 	ErrorCount    int                 `json:"error_count"`
+	PendingCount  int                 `json:"pending_count"`
 }
 
 // AnalysisBatchResult 描述一批待分析文章的处理统计。

@@ -14,6 +14,12 @@ import (
 
 var fencedJSONPattern = regexp.MustCompile("(?s)```(?:json)?\\s*(.*?)```")
 
+const (
+	scheduledFetchLimit         = 2000
+	scheduledAnalysisBatchLimit = 50
+	scheduledAnalysisMaxBatches = 10
+)
+
 // RSSGateway 定义投资文章服务需要的 RSS 抓取和 WeChatRSS 刷新能力。
 type RSSGateway interface {
 	Poll(ctx context.Context, feedURL string) error
@@ -47,8 +53,8 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 	if fetchLimit < 1 {
 		fetchLimit = 30
 	}
-	if fetchLimit > 100 {
-		fetchLimit = 100
+	if fetchLimit > scheduledFetchLimit {
+		fetchLimit = scheduledFetchLimit
 	}
 
 	// 2. 逐来源刷新、抓取并 upsert，单来源错误写入统计。
@@ -106,6 +112,80 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 		result.ErrorCount = analysisResult.ErrorCount
 	}
 	return result, nil
+}
+
+// SyncScheduled 执行生产任务使用的完整抓取和分批分析流程。
+// 输入：ctx 控制最多两千篇抓取和最多十个五十篇分析批次。
+// 输出：返回累计同步统计；来源失败、模型缺失或仍有待分析文章时返回错误。
+// 副作用：调用 WeChatRSS、RSS、DeepSeek，并写入 SQLite。
+func (s *Service) SyncScheduled(ctx context.Context) (SyncResult, error) {
+	// 1. 抓取全部来源的当前文章，来源失败时保留明细并立即升级为任务错误。
+	result, err := s.Sync(ctx, scheduledFetchLimit, false, 0)
+	if err != nil {
+		return result, fmt.Errorf("抓取投资文章: %w", err)
+	}
+	if len(result.FailedSources) > 0 {
+		return result, fmt.Errorf("投资文章抓取存在失败来源: %s", formatFailedSources(result.FailedSources))
+	}
+
+	// 2. 读取抓取后 pending；模型未配置时保留数据并明确失败告警。
+	counts, err := s.repository.counts(ctx)
+	if err != nil {
+		return result, fmt.Errorf("读取文章分析进度: %w", err)
+	}
+	result.PendingCount = counts.PendingCount
+	if s.options.Analyzer == nil || !s.options.Analyzer.Configured() {
+		if result.PendingCount > 0 {
+			return result, fmt.Errorf("未配置 DEEPSEEK_API_KEY，仍有 %d 篇投资文章等待分析", result.PendingCount)
+		}
+		return result, nil
+	}
+
+	// 3. 最多执行十个五十篇批次，持续累计并在没有成功进展时停止重试。
+	for batch := 0; batch < scheduledAnalysisMaxBatches && result.PendingCount > 0; batch++ {
+		analysisResult, analyzeErr := s.AnalyzePending(ctx, scheduledAnalysisBatchLimit)
+		if analyzeErr != nil {
+			return result, fmt.Errorf("分析第 %d 批投资文章: %w", batch+1, analyzeErr)
+		}
+		result.AnalyzedCount += analysisResult.AnalyzedCount
+		result.SkippedCount += analysisResult.SkippedCount
+		result.ErrorCount += analysisResult.ErrorCount
+		counts, err = s.repository.counts(ctx)
+		if err != nil {
+			return result, fmt.Errorf("读取第 %d 批文章分析进度: %w", batch+1, err)
+		}
+		result.PendingCount = counts.PendingCount
+		if analysisResult.AnalyzedCount == 0 {
+			break
+		}
+	}
+
+	// 4. pending、跳过或错误都视为未完整完成，交给任务包装器发送失败通知。
+	if result.PendingCount > 0 || result.SkippedCount > 0 || result.ErrorCount > 0 {
+		return result, fmt.Errorf("投资文章分析未正常完成: 待分析=%d, 已分析=%d, 已跳过=%d, 错误=%d",
+			result.PendingCount, result.AnalyzedCount, result.SkippedCount, result.ErrorCount)
+	}
+	return result, nil
+}
+
+// formatFailedSources 把失败文章来源和原因合并为通知可读文本。
+// 输入：sources 是同步结果中的失败来源映射。
+// 输出：返回使用分号分隔的来源与错误文本。
+// 副作用：无。
+func formatFailedSources(sources []map[string]string) string {
+	// 1. 为缺失字段提供稳定名称并按原抓取顺序连接。
+	details := make([]string, 0, len(sources))
+	for _, source := range sources {
+		name, message := strings.TrimSpace(source["source"]), strings.TrimSpace(source["error"])
+		if name == "" {
+			name = "未知来源"
+		}
+		if message == "" {
+			message = "未知错误"
+		}
+		details = append(details, name+":"+message)
+	}
+	return strings.Join(details, "; ")
 }
 
 // AnalyzePending 调用模型分析最近待处理文章。

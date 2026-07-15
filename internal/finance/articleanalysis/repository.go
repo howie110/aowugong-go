@@ -84,6 +84,13 @@ func (r *Repository) SyncDefaultSource(ctx context.Context, feedURL string) erro
 			is_active = excluded.is_active,
 			description = excluded.description,
 			updated_at = CURRENT_TIMESTAMP
+		WHERE excluded.feed_url <> '' AND (
+			investment_article_source.source_name IS NOT excluded.source_name OR
+			investment_article_source.source_type IS NOT excluded.source_type OR
+			investment_article_source.feed_url IS NOT excluded.feed_url OR
+			investment_article_source.is_active IS NOT excluded.is_active OR
+			investment_article_source.description IS NOT excluded.description
+		)
 	`, feedURL, active, status, nullableArticleText(message))
 	if err != nil {
 		return fmt.Errorf("同步默认文章来源: %w", err)

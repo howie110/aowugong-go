@@ -2,7 +2,9 @@ package articleanalysis
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/howiedata/aowugong-go/internal/client"
@@ -12,6 +14,36 @@ import (
 
 type fixedRSSGateway struct {
 	pollCount int
+}
+
+type manyRSSGateway struct {
+	count int
+}
+
+// Poll 模拟批量文章任务的上游刷新。
+// 输入：ctx 和 feedURL 模拟正式 RSS 客户端。
+// 输出：始终成功。
+// 副作用：无。
+func (manyRSSGateway) Poll(context.Context, string) error {
+	// 1. 返回刷新成功。
+	return nil
+}
+
+// Fetch 返回跨越单批分析上限的文章集合。
+// 输入：ctx、sourceID、feedURL 和 limit 模拟正式客户端。
+// 输出：返回 count 篇具有唯一键的文章。
+// 副作用：无。
+func (g manyRSSGateway) Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.RSSItem, error) {
+	// 1. 按配置数量生成稳定文章，验证任务会继续下一分析批次。
+	items := make([]client.RSSItem, 0, g.count)
+	for index := 0; index < g.count; index++ {
+		items = append(items, client.RSSItem{
+			ArticleKey: fmt.Sprintf("scheduled-%03d", index), ExternalID: fmt.Sprintf("scheduled-%03d", index),
+			Title: fmt.Sprintf("定时文章 %03d", index), Link: fmt.Sprintf("https://example.com/scheduled/%d", index),
+			Author: "完整作者", PublishedAt: shanghaiNowText(), Summary: "摘要", Content: "正文",
+		})
+	}
+	return items, nil
 }
 
 // Poll 记录文章同步测试中的上游刷新调用。
@@ -95,5 +127,69 @@ func TestServiceSyncsRSSAndAnalyzesThroughUnifiedEntry(t *testing.T) {
 	}
 	if articles[0].MarketMood != "neutral" || len(articles[0].RecommendationNames) != 1 {
 		t.Errorf("article = %#v", articles[0])
+	}
+}
+
+// TestServiceScheduledSyncDrainsMultipleAnalysisBatches 验证生产任务会清空多批待分析文章。
+// 输入：一次抓取五十一篇文章，单批分析上限为五十。
+// 输出：返回五十一篇成功、零待处理，证明不是只执行一批。
+// 副作用：在测试临时目录创建并写入 SQLite 文件。
+func TestServiceScheduledSyncDrainsMultipleAnalysisBatches(t *testing.T) {
+	// 1. 创建包含默认来源的临时数据库和批量文章服务。
+	ctx := context.Background()
+	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "scheduled-sync.db")})
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+	repository := NewRepository(db)
+	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000/rss/all.xml"); err != nil {
+		t.Fatalf("SyncDefaultSource() error = %v", err)
+	}
+	service := NewService(repository, ServiceOptions{
+		Model: "test-model", RSS: manyRSSGateway{count: 51}, Analyzer: fixedAnalysisGateway{},
+	})
+
+	// 2. 执行生产同步入口并核对跨批累计和最终 pending。
+	result, err := service.SyncScheduled(ctx)
+	if err != nil {
+		t.Fatalf("SyncScheduled() error = %v", err)
+	}
+	if result.FetchedCount != 51 || result.AnalyzedCount != 51 || result.PendingCount != 0 {
+		t.Errorf("result = %#v", result)
+	}
+}
+
+// TestServiceScheduledSyncFailsWithPendingArticles 验证模型未配置时任务必须失败告警。
+// 输入：抓取一篇文章且不配置 DeepSeek 客户端。
+// 输出：返回 pending=1 和包含未配置密钥的错误。
+// 副作用：在测试临时目录创建并写入 SQLite 文件。
+func TestServiceScheduledSyncFailsWithPendingArticles(t *testing.T) {
+	// 1. 创建无分析客户端的临时文章服务。
+	ctx := context.Background()
+	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "scheduled-pending.db")})
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+	repository := NewRepository(db)
+	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000/rss/all.xml"); err != nil {
+		t.Fatalf("SyncDefaultSource() error = %v", err)
+	}
+	service := NewService(repository, ServiceOptions{RSS: manyRSSGateway{count: 1}})
+
+	// 2. 执行生产入口并要求 pending 不会被静默吞掉。
+	result, err := service.SyncScheduled(ctx)
+	if err == nil || !strings.Contains(err.Error(), "未配置 DEEPSEEK_API_KEY") {
+		t.Fatalf("SyncScheduled() error = %v, result = %#v", err, result)
+	}
+	if result.PendingCount != 1 {
+		t.Errorf("pending = %d, want 1", result.PendingCount)
 	}
 }

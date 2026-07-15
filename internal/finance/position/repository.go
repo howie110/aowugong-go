@@ -45,6 +45,8 @@ func (r *Repository) SyncDefaultAccounts(ctx context.Context) error {
 				account_alias = excluded.account_alias,
 				is_active = 1,
 				updated_at = CURRENT_TIMESTAMP
+			WHERE finance_broker_account.account_alias IS NOT excluded.account_alias
+				OR finance_broker_account.is_active <> 1
 		`, account.BrokerName, account.AccountSuffix, account.AccountAlias)
 		if err != nil {
 			return fmt.Errorf("同步默认账户 %s: %w", account.AccountSuffix, err)

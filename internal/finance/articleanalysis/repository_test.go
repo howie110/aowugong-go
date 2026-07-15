@@ -79,3 +79,44 @@ func TestRepositoryAndReportPreserveArticleContracts(t *testing.T) {
 		t.Errorf("mood distribution = %#v", report.MoodDistribution)
 	}
 }
+
+// TestSyncDefaultSourcePreservesMigratedSourceWithoutConfig 验证空配置不会禁用已迁移文章来源。
+// 输入：一条含真实 URL、启用状态和历史更新时间的现有来源。
+// 输出：空配置同步后 URL、状态和更新时间保持不变。
+// 副作用：在测试临时目录创建并写入 SQLite 文件。
+func TestSyncDefaultSourcePreservesMigratedSourceWithoutConfig(t *testing.T) {
+	// 1. 创建迁移库并写入模拟 MySQL 迁移来源。
+	ctx := context.Background()
+	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "source-default.db")})
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+	const feedURL = "http://8.138.123.59:5000/api/rss/all"
+	const historical = "2026-07-15 20:02:18"
+	if _, err := db.ExecContext(ctx, `INSERT INTO investment_article_source(
+		source_code, source_name, source_type, feed_url, weight, is_active, description,
+		last_fetch_status, created_at, updated_at
+	) VALUES('wechat_aggregate','公众号聚合','wechat_rss_aggregate',?,1,1,'微信公众号聚合 RSS。','success',?,?)`,
+		feedURL, historical, historical); err != nil {
+		t.Fatalf("insert migrated source: %v", err)
+	}
+
+	// 2. 空配置只负责缺失行初始化，不能覆盖持久化来源。
+	repository := NewRepository(db)
+	if err := repository.SyncDefaultSource(ctx, ""); err != nil {
+		t.Fatalf("SyncDefaultSource() error = %v", err)
+	}
+	var storedURL, updatedAt string
+	var active int
+	if err := db.QueryRowContext(ctx, `SELECT feed_url, is_active, updated_at
+		FROM investment_article_source WHERE source_code = 'wechat_aggregate'`).Scan(&storedURL, &active, &updatedAt); err != nil {
+		t.Fatalf("query source: %v", err)
+	}
+	if storedURL != feedURL || active != 1 || updatedAt != historical {
+		t.Fatalf("source = url:%q active:%d updated:%q", storedURL, active, updatedAt)
+	}
+}

@@ -7,10 +7,14 @@ require (
 	github.com/alibabacloud-go/ocr-api-20210707/v3 v3.1.3
 	github.com/alibabacloud-go/tea v1.2.2
 	github.com/alibabacloud-go/tea-utils/v2 v2.0.6
+	github.com/go-sql-driver/mysql v1.9.3
+	github.com/robfig/cron/v3 v3.0.1
+	golang.org/x/image v0.44.0
 	modernc.org/sqlite v1.53.0
 )
 
 require (
+	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/alibabacloud-go/alibabacloud-gateway-spi v0.0.5 // indirect
 	github.com/alibabacloud-go/debug v1.0.1 // indirect
 	github.com/alibabacloud-go/endpoint-util v1.1.0 // indirect
@@ -27,7 +31,6 @@ require (
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/xuri/efp v0.0.1 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
-	golang.org/x/image v0.44.0 // indirect
 	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect

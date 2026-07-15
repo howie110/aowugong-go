@@ -18,6 +18,7 @@ import (
 	financeservice "github.com/howiedata/aowugong-go/internal/finance/service"
 	"github.com/howiedata/aowugong-go/internal/finance/stockanalysis"
 	"github.com/howiedata/aowugong-go/internal/rbac"
+	"github.com/howiedata/aowugong-go/internal/scheduler"
 )
 
 // TestFinanceSummaryRoutesRequirePermissionAndReturnCurrentData 验证 finance 摘要路由受权限保护并读取 SQLite。
@@ -49,9 +50,17 @@ func TestFinanceSummaryRoutesRequirePermissionAndReturnCurrentData(t *testing.T)
 		t.Fatalf("SyncDefaultSource() error = %v", err)
 	}
 	articleService := articleanalysis.NewService(articleRepository, articleanalysis.ServiceOptions{Model: "test-model"})
+	jobRegistry := scheduler.NewRegistry(db, nil, nil)
+	if err := jobRegistry.Register(scheduler.Definition{
+		Name: "test_job", Schedule: "0 9 * * *", Timeout: time.Minute,
+		Run: func(context.Context) (string, error) { return "manual-ok", nil },
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
 	handler := NewRouter(Dependencies{
 		Auth: authService, RBAC: rbacService, Finance: financeService,
 		Position: positionService, StockAnalysis: stockService, ArticleAnalysis: articleService,
+		Jobs: jobRegistry,
 	})
 
 	// 2. 创建两个角色用户并登录。
@@ -89,6 +98,13 @@ func TestFinanceSummaryRoutesRequirePermissionAndReturnCurrentData(t *testing.T)
 	}
 	if body := adminRecorder.Body.String(); !containsAll(body, `"name":"SQLite"`, `"title":"数据"`) {
 		t.Errorf("admin body = %s, want SQLite data summary", body)
+	}
+	manualRequest := httptest.NewRequest(http.MethodPost, "/api/v1/finance/jobs/test_job/run", nil)
+	manualRequest.Header.Set("Authorization", "Bearer "+adminToken)
+	manualRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(manualRecorder, manualRequest)
+	if manualRecorder.Code != http.StatusOK || !strings.Contains(manualRecorder.Body.String(), `"message":"manual-ok"`) {
+		t.Errorf("manual job status = %d, body = %s", manualRecorder.Code, manualRecorder.Body.String())
 	}
 
 	// 4. 投资者缺少数据页权限时必须得到 403。

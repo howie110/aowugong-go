@@ -76,3 +76,40 @@ func TestRepositoryUpsertsDailyAccountAndReplacesHoldings(t *testing.T) {
 		t.Errorf("alias = %q, want 东莞证券-邓子豪", alias)
 	}
 }
+
+// TestSyncDefaultAccountsDoesNotRewriteUnchangedRows 验证启动初始化不会污染已迁移账户时间。
+// 输入：内容已等于默认值但 updated_at 为历史时间的账户。
+// 输出：再次同步后历史更新时间保持不变。
+// 副作用：在测试临时目录创建并写入 SQLite 文件。
+func TestSyncDefaultAccountsDoesNotRewriteUnchangedRows(t *testing.T) {
+	// 1. 创建迁移库、默认账户并设置可识别的历史更新时间。
+	ctx := context.Background()
+	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "account-defaults.db")})
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+	repository := NewRepository(db)
+	if err := repository.SyncDefaultAccounts(ctx); err != nil {
+		t.Fatalf("first SyncDefaultAccounts() error = %v", err)
+	}
+	const historical = "2026-06-16 13:46:25"
+	if _, err := db.ExecContext(ctx, "UPDATE finance_broker_account SET updated_at = ?", historical); err != nil {
+		t.Fatalf("set historical updated_at: %v", err)
+	}
+
+	// 2. 相同默认值再次同步不能产生 UPDATE。
+	if err := repository.SyncDefaultAccounts(ctx); err != nil {
+		t.Fatalf("second SyncDefaultAccounts() error = %v", err)
+	}
+	var updatedAt string
+	if err := db.QueryRowContext(ctx, "SELECT updated_at FROM finance_broker_account WHERE account_suffix = '5042'").Scan(&updatedAt); err != nil {
+		t.Fatalf("query updated_at: %v", err)
+	}
+	if updatedAt != historical {
+		t.Fatalf("updated_at = %q, want %q", updatedAt, historical)
+	}
+}
