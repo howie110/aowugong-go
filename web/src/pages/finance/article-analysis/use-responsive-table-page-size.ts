@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 const COMPACT_TABLE_PAGE_SIZE = 8;
-const DEFAULT_DENSE_TABLE_PAGE_SIZE = 23;
+const DEFAULT_DENSE_TABLE_PAGE_SIZE = 15;
 const MIN_DENSE_TABLE_PAGE_SIZE = 8;
 const MAX_DENSE_TABLE_PAGE_SIZE = 80;
 const FALLBACK_TABLE_HEAD_HEIGHT = 40;

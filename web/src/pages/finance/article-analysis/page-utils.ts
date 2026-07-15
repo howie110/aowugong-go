@@ -47,11 +47,15 @@ function getArticleAccountName(article: ArticleItem) {
   const title = article.title.trim();
   const matched = title.match(/^[\[【]([^\]】]{1,20})[\]】]/);
   if (matched?.[1]) {
-    return matched[1].trim();
+    return firstCharacter(matched[1]);
   }
   const author = (article.author || "").trim();
   if (author && author !== article.source_name) {
-    return author;
+    return firstCharacter(author);
   }
   return "";
+}
+
+function firstCharacter(value: string) {
+  return Array.from(value.trim())[0] || "";
 }

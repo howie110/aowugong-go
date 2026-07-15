@@ -7,6 +7,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/howiedata/aowugong-go/internal/auth"
+	"github.com/howiedata/aowugong-go/internal/finance/articleanalysis"
+	"github.com/howiedata/aowugong-go/internal/finance/position"
+	financeservice "github.com/howiedata/aowugong-go/internal/finance/service"
+	"github.com/howiedata/aowugong-go/internal/finance/stockanalysis"
 	"github.com/howiedata/aowugong-go/internal/mahjong"
 	"github.com/howiedata/aowugong-go/internal/monitoring"
 	"github.com/howiedata/aowugong-go/internal/rbac"
@@ -17,14 +21,18 @@ import (
 
 // Dependencies 描述路由器启动所需的依赖。
 type Dependencies struct {
-	StaticDir    string
-	Auth         *auth.Service
-	RBAC         *rbac.Service
-	Subscription *subscription.Service
-	Mahjong      *mahjong.Service
-	Work         *work.Service
-	WeRead       *weread.Service
-	Monitoring   *monitoring.Service
+	StaticDir       string
+	Auth            *auth.Service
+	RBAC            *rbac.Service
+	Subscription    *subscription.Service
+	Mahjong         *mahjong.Service
+	Work            *work.Service
+	WeRead          *weread.Service
+	Monitoring      *monitoring.Service
+	Finance         *financeservice.DashboardService
+	Position        *position.Service
+	StockAnalysis   *stockanalysis.Service
+	ArticleAnalysis *articleanalysis.Service
 }
 
 type router struct {
@@ -65,6 +73,18 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 	if deps.Auth != nil && deps.RBAC != nil && deps.Monitoring != nil {
 		registerMonitoringRoutes(api, deps.Auth, deps.RBAC, deps.Monitoring)
+	}
+	if deps.Auth != nil && deps.RBAC != nil && deps.Finance != nil {
+		registerFinanceRoutes(api, deps.Auth, deps.RBAC, deps.Finance)
+	}
+	if deps.Auth != nil && deps.RBAC != nil && deps.Position != nil {
+		registerPositionRoutes(api, deps.Auth, deps.RBAC, deps.Position)
+	}
+	if deps.Auth != nil && deps.RBAC != nil && deps.StockAnalysis != nil {
+		registerStockAnalysisRoutes(api, deps.Auth, deps.RBAC, deps.StockAnalysis)
+	}
+	if deps.Auth != nil && deps.RBAC != nil && deps.ArticleAnalysis != nil {
+		registerArticleAnalysisRoutes(api, deps.Auth, deps.RBAC, deps.ArticleAnalysis)
 	}
 
 	// 3. 组装 API 与 SPA 静态文件处理器。

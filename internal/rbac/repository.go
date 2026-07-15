@@ -186,6 +186,35 @@ func (r *Repository) PermissionsForUser(ctx context.Context, userID int64) ([]st
 	return scanStrings(ctx, r.db, query, args...)
 }
 
+// HasRole 判断用户是否拥有指定启用角色。
+// 输入：ctx 是调用上下文，userID 是用户主键，roleCode 是角色编码。
+// 输出：用户拥有角色或是超级用户时返回 true。
+// 副作用：读取 SQLite。
+func (r *Repository) HasRole(ctx context.Context, userID int64, roleCode string) (bool, error) {
+	// 1. 超级用户直接视为拥有系统角色，并同时确认用户存在。
+	var isSuperuser bool
+	if err := r.db.QueryRowContext(ctx, `SELECT is_superuser FROM aowugong_fastapi_users WHERE id = ?`, userID).Scan(&isSuperuser); errors.Is(err, sql.ErrNoRows) {
+		return false, ErrUserNotFound
+	} else if err != nil {
+		return false, fmt.Errorf("查询用户角色身份: %w", err)
+	}
+	if isSuperuser {
+		return true, nil
+	}
+
+	// 2. 查询启用角色关联是否存在。
+	var count int
+	if err := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM aowugong_user_roles user_role
+		JOIN aowugong_roles role ON role.id = user_role.role_id
+		WHERE user_role.user_id = ? AND role.code = ? AND role.is_active = 1
+	`, userID, roleCode).Scan(&count); err != nil {
+		return false, fmt.Errorf("检查用户角色: %w", err)
+	}
+	return count > 0, nil
+}
+
 // ListRoles 返回全部启用角色。
 // 输入：ctx 是调用上下文。
 // 输出：返回按主键排序的角色。

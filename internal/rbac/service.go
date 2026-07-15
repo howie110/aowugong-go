@@ -80,6 +80,19 @@ func (s *Service) HasPermission(ctx context.Context, userID int64, permissionCod
 	return false, nil
 }
 
+// HasRole 判断用户是否拥有指定角色。
+// 输入：ctx 是调用上下文，userID 是用户主键，roleCode 是角色编码。
+// 输出：拥有角色时返回 true；用户不存在或查询失败时返回错误。
+// 副作用：读取 SQLite。
+func (s *Service) HasRole(ctx context.Context, userID int64, roleCode string) (bool, error) {
+	// 1. 委托仓储执行唯一角色判断逻辑。
+	result, err := s.repository.HasRole(ctx, userID, roleCode)
+	if err != nil {
+		return false, fmt.Errorf("检查用户角色: %w", err)
+	}
+	return result, nil
+}
+
 // ListRoles 同步基线后返回可分配的启用角色。
 // 输入：ctx 是调用上下文。
 // 输出：返回按主键排序的角色列表。

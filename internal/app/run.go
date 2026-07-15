@@ -12,6 +12,10 @@ import (
 	"github.com/howiedata/aowugong-go/internal/client"
 	"github.com/howiedata/aowugong-go/internal/config"
 	"github.com/howiedata/aowugong-go/internal/database"
+	"github.com/howiedata/aowugong-go/internal/finance/articleanalysis"
+	"github.com/howiedata/aowugong-go/internal/finance/position"
+	financeservice "github.com/howiedata/aowugong-go/internal/finance/service"
+	"github.com/howiedata/aowugong-go/internal/finance/stockanalysis"
 	"github.com/howiedata/aowugong-go/internal/httpserver"
 	"github.com/howiedata/aowugong-go/internal/mahjong"
 	"github.com/howiedata/aowugong-go/internal/monitoring"
@@ -66,19 +70,56 @@ func Run(ctx context.Context, cfg config.Config) error {
 		client.NewMonitoringClient(httpClient),
 		cfg.Clients,
 	)
+	financeService := financeservice.NewDashboardService(db, financeservice.DashboardOptions{
+		HTTPAddress:         cfg.HTTP.Address,
+		OpenILinkConfigured: cfg.Clients.OpenILink.AppToken != "",
+		SchedulerEnabled:    cfg.Scheduler.Enabled,
+		RealTradeEnabled:    cfg.Finance.EnableRealTrade,
+		QMTConfigured:       cfg.Finance.QMTAccount != "",
+		BinanceConfigured:   cfg.Finance.BinanceAPIKey != "",
+		OKXConfigured:       cfg.Finance.OKXAPIKey != "",
+	})
+	positionRepository := position.NewRepository(db)
+	if err := positionRepository.SyncDefaultAccounts(ctx); err != nil {
+		return fmt.Errorf("初始化仓位账户: %w", err)
+	}
+	positionService := position.NewService(
+		positionRepository,
+		client.NewAliyunOCRClient(cfg.Clients.PositionOCR),
+		position.UploadOptions{
+			UploadDir:   cfg.Storage.PositionUploadDir,
+			TempDir:     cfg.Storage.PositionTempDir,
+			MaxBytes:    cfg.Clients.PositionOCR.UploadMaxMB * 1024 * 1024,
+			OCRProvider: cfg.Clients.PositionOCR.Provider,
+		},
+	)
+	stockAnalysisService := stockanalysis.NewService(stockanalysis.NewRepository(db))
+	articleRepository := articleanalysis.NewRepository(db)
+	if err := articleRepository.SyncDefaultSource(ctx, cfg.Clients.ArticleRSSURL); err != nil {
+		return fmt.Errorf("初始化投资文章来源: %w", err)
+	}
+	articleService := articleanalysis.NewService(articleRepository, articleanalysis.ServiceOptions{
+		Model:    cfg.Clients.DeepSeek.Model,
+		RSS:      client.NewRSSClient(&http.Client{Timeout: 180 * time.Second}),
+		Analyzer: client.NewDeepSeekClient(cfg.Clients.DeepSeek, &http.Client{Timeout: 60 * time.Second}),
+	})
 
 	// 3. 启动 HTTP 服务并等待服务错误或取消信号。
 	server := &http.Server{
 		Addr: cfg.HTTP.Address,
 		Handler: httpserver.NewRouter(httpserver.Dependencies{
-			StaticDir:    cfg.HTTP.StaticDir,
-			Auth:         authService,
-			RBAC:         rbacService,
-			Subscription: subscriptionService,
-			Mahjong:      mahjongService,
-			Work:         workService,
-			WeRead:       wereadService,
-			Monitoring:   monitoringService,
+			StaticDir:       cfg.HTTP.StaticDir,
+			Auth:            authService,
+			RBAC:            rbacService,
+			Subscription:    subscriptionService,
+			Mahjong:         mahjongService,
+			Work:            workService,
+			WeRead:          wereadService,
+			Monitoring:      monitoringService,
+			Finance:         financeService,
+			Position:        positionService,
+			StockAnalysis:   stockAnalysisService,
+			ArticleAnalysis: articleService,
 		}),
 	}
 	serverErrors := make(chan error, 1)

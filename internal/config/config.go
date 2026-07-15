@@ -17,6 +17,8 @@ const (
 	defaultTokenLifetime      = 72 * time.Hour
 	defaultWorkNavigationPath = "storage/private/work/navigation.json"
 	defaultBackupDir          = "storage/backup"
+	defaultPositionUploadDir  = "storage/uploads/positions"
+	defaultPositionTempDir    = "storage/temp/positions"
 )
 
 // LookupEnv 定义查询环境变量的函数类型。
@@ -58,6 +60,8 @@ type Storage struct {
 	WorkNavigationPath string
 	BackupDir          string
 	BackupRetention    int
+	PositionUploadDir  string
+	PositionTempDir    string
 }
 
 // Clients 描述当前可达业务使用的外部 HTTP 服务配置。
@@ -140,6 +144,8 @@ func Load(lookup LookupEnv) (Config, error) {
 			WorkNavigationPath: defaultWorkNavigationPath,
 			BackupDir:          defaultBackupDir,
 			BackupRetention:    7,
+			PositionUploadDir:  defaultPositionUploadDir,
+			PositionTempDir:    defaultPositionTempDir,
 		},
 		Clients: Clients{
 			WeRead: WeRead{
@@ -186,6 +192,8 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 	loadString(lookup, "AOWUGONG_WORK_NAVIGATION_PATH", &cfg.Storage.WorkNavigationPath)
 	loadString(lookup, "AOWUGONG_BACKUP_DIR", &cfg.Storage.BackupDir)
+	loadString(lookup, "AOWUGONG_POSITION_UPLOAD_DIR", &cfg.Storage.PositionUploadDir)
+	loadString(lookup, "AOWUGONG_POSITION_TEMP_DIR", &cfg.Storage.PositionTempDir)
 	loadString(lookup, "WEREAD_GATEWAY_URL", &cfg.Clients.WeRead.GatewayURL)
 	loadString(lookup, "WEREAD_API_KEY", &cfg.Clients.WeRead.APIKey)
 	loadString(lookup, "WEREAD_SKILL_VERSION", &cfg.Clients.WeRead.SkillVersion)
@@ -227,6 +235,8 @@ func Load(lookup LookupEnv) (Config, error) {
 	cfg.HTTP.StaticDir = filepath.Clean(cfg.HTTP.StaticDir)
 	cfg.Storage.WorkNavigationPath = filepath.Clean(cfg.Storage.WorkNavigationPath)
 	cfg.Storage.BackupDir = filepath.Clean(cfg.Storage.BackupDir)
+	cfg.Storage.PositionUploadDir = filepath.Clean(cfg.Storage.PositionUploadDir)
+	cfg.Storage.PositionTempDir = filepath.Clean(cfg.Storage.PositionTempDir)
 	if cfg.MigrationsDir != "" {
 		cfg.MigrationsDir = filepath.Clean(cfg.MigrationsDir)
 	}

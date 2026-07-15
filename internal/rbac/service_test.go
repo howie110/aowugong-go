@@ -54,6 +54,10 @@ func TestServiceAdminHasEveryPermission(t *testing.T) {
 	if len(permissions) != len(DefaultPermissions) {
 		t.Errorf("permission count = %d, want %d", len(permissions), len(DefaultPermissions))
 	}
+	hasAdminRole, err := service.HasRole(context.Background(), userID, AdminRoleCode)
+	if err != nil || !hasAdminRole {
+		t.Errorf("HasRole(admin) = %v, %v, want true", hasAdminRole, err)
+	}
 }
 
 // TestServiceInvestorGetsOnlyArticleAnalysis 验证 investor 仅有文章分析权限。
@@ -75,6 +79,10 @@ func TestServiceInvestorGetsOnlyArticleAnalysis(t *testing.T) {
 	}
 	if len(permissions) != 1 || permissions[0] != PermissionFinanceArticleAnalysis {
 		t.Errorf("permissions = %v, want [%s]", permissions, PermissionFinanceArticleAnalysis)
+	}
+	hasAdminRole, err := service.HasRole(context.Background(), userID, AdminRoleCode)
+	if err != nil || hasAdminRole {
+		t.Errorf("HasRole(admin) = %v, %v, want false", hasAdminRole, err)
 	}
 }
 
