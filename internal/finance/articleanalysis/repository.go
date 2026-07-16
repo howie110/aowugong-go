@@ -55,10 +55,10 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-// SyncDefaultSource 初始化或更新当前唯一的公众号聚合 RSS 来源。
+// SyncDefaultSource 初始化当前唯一的公众号聚合 RSS 来源。
 // 输入：ctx 控制数据库操作，feedURL 是聚合 RSS 地址。
 // 输出：成功返回 nil，失败返回错误。
-// 副作用：写入 investment_article_source。
+// 副作用：写入 investment_article_source；已有非空地址不会被当前进程覆盖。
 func (r *Repository) SyncDefaultSource(ctx context.Context, feedURL string) error {
 	// 1. 根据 RSS 地址决定默认来源是否启用。
 	feedURL = strings.TrimSpace(feedURL)
@@ -85,7 +85,7 @@ func (r *Repository) SyncDefaultSource(ctx context.Context, feedURL string) erro
 		return nil
 	}
 
-	// 3. 有效地址按来源编码更新可变配置，不删除已迁移文章引用。
+	// 3. 有效地址只补充缺失地址，并更新不区分运行环境的来源元数据。
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO investment_article_source (
 			source_code, source_name, source_type, feed_url, is_active,
@@ -94,7 +94,7 @@ func (r *Repository) SyncDefaultSource(ctx context.Context, feedURL string) erro
 		ON DUPLICATE KEY UPDATE
 			source_name = '公众号聚合',
 			source_type = 'wechat_rss_aggregate',
-			feed_url = ?,
+			feed_url = IF(feed_url = '', ?, feed_url),
 			is_active = ?,
 			description = '微信公众号聚合 RSS。',
 			updated_at = CURRENT_TIMESTAMP

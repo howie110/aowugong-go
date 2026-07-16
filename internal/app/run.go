@@ -256,6 +256,7 @@ func newTaskServices(cfg config.Config, db *sql.DB) taskServices {
 		articleRepository: articleRepository,
 		articles: articleanalysis.NewService(articleRepository, articleanalysis.ServiceOptions{
 			Model:    cfg.Clients.DeepSeek.Model,
+			FeedURL:  cfg.Clients.ArticleRSSURL,
 			RSS:      client.NewRSSClient(&http.Client{Timeout: 180 * time.Second}),
 			Analyzer: client.NewDeepSeekClient(cfg.Clients.DeepSeek, &http.Client{Timeout: 60 * time.Second}),
 		}),

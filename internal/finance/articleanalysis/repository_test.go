@@ -2,13 +2,46 @@ package articleanalysis
 
 import (
 	"context"
+	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
+
+// TestSyncDefaultSourceOnlyFillsEmptyFeedURL 验证运行环境地址不会覆盖共享来源地址。
+// 输入：当前进程提供一个有效 RSS 地址。
+// 输出：重复来源只在原地址为空时补值。
+// 副作用：执行一条模拟来源 upsert。
+func TestSyncDefaultSourceOnlyFillsEmptyFeedURL(t *testing.T) {
+	// 1. 使用查询匹配器拒绝无条件覆盖 feed_url 的 upsert。
+	matcher := sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		statement := strings.Join(strings.Fields(actualSQL), " ")
+		if !strings.Contains(statement, "feed_url = IF(feed_url = '', ?, feed_url)") {
+			return fmt.Errorf("feed_url must only be filled when empty: %s", statement)
+		}
+		return nil
+	})
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(matcher))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+	mock.ExpectExec("runtime-safe source upsert").
+		WithArgs("http://127.0.0.1:15000/api/rss/all", 1, "ready", nil, "http://127.0.0.1:15000/api/rss/all", 1).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	// 2. 同步默认来源并核对 SQL 满足只补空值约束。
+	if err := NewRepository(db).SyncDefaultSource(context.Background(), "http://127.0.0.1:15000/api/rss/all"); err != nil {
+		t.Fatalf("SyncDefaultSource() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("database expectations = %v", err)
+	}
+}
 
 // TestRepositorySkipsExistingArticle 验证已入库文章不会再次写入大字段。
 // 输入：数据库已存在同一 article_key 的文章。

@@ -31,9 +31,10 @@ type AnalysisGateway interface {
 	SimpleChat(ctx context.Context, prompt string, maxTokens int) (string, error)
 }
 
-// ServiceOptions 描述投资文章服务的模型展示配置。
+// ServiceOptions 描述投资文章服务的当前进程 RSS 和模型配置。
 type ServiceOptions struct {
 	Model    string
+	FeedURL  string
 	RSS      RSSGateway
 	Analyzer AnalysisGateway
 }
@@ -64,7 +65,11 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 			result.FailedSources = append(result.FailedSources, map[string]string{"source": source.SourceName, "error": message})
 			continue
 		}
-		items, err := s.options.RSS.Fetch(ctx, source.ID, source.FeedURL, fetchLimit)
+		feedURL := source.FeedURL
+		if source.SourceType == "wechat_rss_aggregate" && s.options.FeedURL != "" {
+			feedURL = s.options.FeedURL
+		}
+		items, err := s.options.RSS.Fetch(ctx, source.ID, feedURL, fetchLimit)
 		if err != nil {
 			message := err.Error()
 			_ = s.repository.UpdateSourceStatus(ctx, source.ID, "error", message)
@@ -298,6 +303,7 @@ func NewService(repository *Repository, options ServiceOptions) *Service {
 	if options.Model == "" {
 		options.Model = "deepseek-v4-pro"
 	}
+	options.FeedURL = strings.TrimSpace(options.FeedURL)
 	return &Service{repository: repository, options: options}
 }
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/howiedata/aowugong-go/internal/client"
 	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
@@ -14,6 +15,55 @@ type fixedRSSGateway struct{}
 
 type manyRSSGateway struct {
 	count int
+}
+
+type recordingRSSGateway struct {
+	feedURL string
+}
+
+// Fetch 记录当前进程实际使用的 RSS 地址。
+// 输入：ctx、sourceID、feedURL 和 limit 模拟正式客户端。
+// 输出：返回空文章集合。
+// 副作用：把 feedURL 保存到测试替身。
+func (g *recordingRSSGateway) Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.RSSItem, error) {
+	// 1. 记录地址并返回稳定空集合。
+	g.feedURL = feedURL
+	return []client.RSSItem{}, nil
+}
+
+// TestServiceUsesRuntimeFeedURL 验证共享数据库地址不会覆盖当前进程配置。
+// 输入：数据库保存服务器地址，当前进程配置本地 SSH 隧道地址。
+// 输出：RSS 客户端收到当前进程配置地址。
+// 副作用：执行模拟来源查询和状态更新。
+func TestServiceUsesRuntimeFeedURL(t *testing.T) {
+	// 1. 创建包含服务器持久化地址的模拟文章来源。
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT id, source_code, source_name, source_type, feed_url, is_active").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "source_code", "source_name", "source_type", "feed_url", "is_active",
+			"description", "last_fetch_at", "last_fetch_status", "last_fetch_message",
+		}).AddRow(1, "wechat_aggregate", "公众号聚合", "wechat_rss_aggregate",
+			"http://127.0.0.1:5000/api/rss/all", 1, "", "", "success", ""))
+	mock.ExpectExec("UPDATE investment_article_source").WillReturnResult(sqlmock.NewResult(0, 1))
+
+	// 2. 执行本地同步并核对只使用本地进程的隧道地址。
+	rss := &recordingRSSGateway{}
+	service := NewService(NewRepository(db), ServiceOptions{
+		RSS: rss, FeedURL: "http://127.0.0.1:15000/api/rss/all",
+	})
+	if _, err := service.Sync(context.Background(), 30, false, 0); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	if rss.feedURL != "http://127.0.0.1:15000/api/rss/all" {
+		t.Fatalf("Fetch() feedURL = %q", rss.feedURL)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("database expectations = %v", err)
+	}
 }
 
 // Fetch 返回跨越单批分析上限的文章集合。
