@@ -79,7 +79,7 @@ type Service struct {
 }
 
 // NewService 创建仓位上传服务。
-// 输入：repository 提供 SQLite 写入，ocr 提供外部识别，options 提供目录和限制。
+// 输入：repository 提供 MySQL 写入，ocr 提供外部识别，options 提供目录和限制。
 // 输出：返回可并发复用的仓位服务。
 // 副作用：无，不创建目录或访问外部接口。
 func NewService(repository *Repository, ocr OCRClient, options UploadOptions) *Service {
@@ -94,9 +94,9 @@ func NewService(repository *Repository, ocr OCRClient, options UploadOptions) *S
 }
 
 // Summary 读取仓位导入页面摘要。
-// 输入：ctx 控制 SQLite 查询。
+// 输入：ctx 控制 MySQL 查询。
 // 输出：返回 OCR 能力和最新导入日期；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (s *Service) Summary(ctx context.Context) (ImportSummary, error) {
 	// 1. 读取有限条最近记录用于确定最新日期。
 	recent, err := s.repository.Recent(ctx, 10)
@@ -122,7 +122,7 @@ func (s *Service) Summary(ctx context.Context) (ImportSummary, error) {
 // Recent 读取最近仓位导入记录。
 // 输入：ctx 控制查询，limit 是记录上限。
 // 输出：返回最近快照；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (s *Service) Recent(ctx context.Context, limit int) ([]Snapshot, error) {
 	// 1. 复用仓储层唯一查询入口。
 	return s.repository.Recent(ctx, limit)
@@ -131,7 +131,7 @@ func (s *Service) Recent(ctx context.Context, limit int) ([]Snapshot, error) {
 // ProcessBatch 顺序处理一批截图并隔离单文件失败。
 // 输入：ctx 控制处理，request 包含日期、账户来源、用户和文件。
 // 输出：返回每张图片的 saved 或 failed 结果。
-// 副作用：写入图片、临时裁剪图、SQLite，并调用阿里云 OCR。
+// 副作用：写入图片、临时裁剪图、MySQL，并调用阿里云 OCR。
 func (s *Service) ProcessBatch(ctx context.Context, request BatchRequest) UploadResponse {
 	// 1. 应用页面沿用的券商和来源默认值。
 	if strings.TrimSpace(request.BrokerName) == "" {
@@ -157,7 +157,7 @@ func (s *Service) ProcessBatch(ctx context.Context, request BatchRequest) Upload
 // processOne 处理单张仓位截图并写入快照。
 // 输入：ctx 控制处理，request 提供公共参数，upload 提供文件名和内容。
 // 输出：成功返回 saved 结果；任一步失败时返回错误。
-// 副作用：写入文件和 SQLite，并调用阿里云 OCR 两次。
+// 副作用：写入文件和 MySQL，并调用阿里云 OCR 两次。
 func (s *Service) processOne(ctx context.Context, request BatchRequest, upload Upload) (UploadResult, error) {
 	// 1. 校验日期、文件名、大小和图片像素。
 	if _, err := time.Parse(time.DateOnly, request.SnapshotDate); err != nil {

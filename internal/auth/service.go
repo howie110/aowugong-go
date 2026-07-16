@@ -26,7 +26,7 @@ func NewService(repository *Repository, tokens *TokenManager) *Service {
 // Login 校验用户名、启用状态和 bcrypt 密码并签发令牌。
 // 输入：ctx 是调用上下文，req 是用户名和明文密码。
 // 输出：返回有效期由 TokenManager 固定的 Bearer 令牌。
-// 副作用：读取 SQLite。
+// 副作用：读取 MySQL。
 func (s *Service) Login(ctx context.Context, req LoginRequest) (TokenResponse, error) {
 	// 1. 清理用户名并拒绝缺失凭据。
 	req.Username = strings.TrimSpace(req.Username)
@@ -64,7 +64,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (TokenResponse, e
 // Register 创建公开注册用户并立即签发令牌。
 // 输入：ctx 是调用上下文，req 是用户名和明文密码。
 // 输出：返回新用户的 Bearer 令牌；用户名冲突时返回 ErrConflict。
-// 副作用：写入 SQLite。
+// 副作用：写入 MySQL。
 func (s *Service) Register(ctx context.Context, req RegisterRequest) (TokenResponse, error) {
 	// 1. 校验用户名和密码并生成与旧项目兼容的默认邮箱。
 	username := strings.TrimSpace(req.Username)
@@ -97,7 +97,7 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (TokenRespo
 // Authenticate 校验 Bearer 令牌并返回当前活动用户。
 // 输入：ctx 是调用上下文，token 是不带 Bearer 前缀的 JWT。
 // 输出：返回认证用户；令牌无效或用户停用时返回 ErrUnauthorized。
-// 副作用：读取 SQLite。
+// 副作用：读取 MySQL。
 func (s *Service) Authenticate(ctx context.Context, token string) (User, error) {
 	// 1. 校验令牌并读取其用户名声明。
 	claims, err := s.tokens.Parse(token, s.now())
@@ -116,7 +116,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (User, error) 
 // Profile 返回当前用户以及其角色和页面权限。
 // 输入：ctx 是调用上下文，userID 是已认证用户主键。
 // 输出：返回资料结构；失败时返回带业务上下文的错误。
-// 副作用：读取 SQLite。
+// 副作用：读取 MySQL。
 func (s *Service) Profile(ctx context.Context, userID int64) (Profile, error) {
 	// 1. 通过唯一仓储入口组装用户、角色和权限。
 	profile, err := s.repository.Profile(ctx, userID)

@@ -42,7 +42,7 @@ type ServiceOptions struct {
 // Sync 抓取全部启用来源，并按选项继续分析待处理文章。
 // 输入：ctx 控制处理，fetchLimit 是每来源上限，analyze 控制是否分析，analysisLimit 是分析上限。
 // 输出：返回来源、抓取、写入和分析统计；基础数据库失败时返回错误。
-// 副作用：调用 WeChatRSS/RSS/DeepSeek，并写入 SQLite。
+// 副作用：调用 WeChatRSS/RSS/DeepSeek，并写入 MySQL。
 func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analysisLimit int) (SyncResult, error) {
 	// 1. 读取启用来源并初始化稳定空数组结果。
 	sources, err := s.repository.sourceRecords(ctx)
@@ -117,7 +117,7 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 // SyncScheduled 执行生产任务使用的完整抓取和分批分析流程。
 // 输入：ctx 控制最多两千篇抓取和最多十个五十篇分析批次。
 // 输出：返回累计同步统计；来源失败、模型缺失或仍有待分析文章时返回错误。
-// 副作用：调用 WeChatRSS、RSS、DeepSeek，并写入 SQLite。
+// 副作用：调用 WeChatRSS、RSS、DeepSeek，并写入 MySQL。
 func (s *Service) SyncScheduled(ctx context.Context) (SyncResult, error) {
 	// 1. 抓取全部来源的当前文章，来源失败时保留明细并立即升级为任务错误。
 	result, err := s.Sync(ctx, scheduledFetchLimit, false, 0)
@@ -191,7 +191,7 @@ func formatFailedSources(sources []map[string]string) string {
 // AnalyzePending 调用模型分析最近待处理文章。
 // 输入：ctx 控制处理，limit 是 1 到 50 的文章上限。
 // 输出：返回成功、跳过、错误及逐篇结果；数据库失败时返回错误。
-// 副作用：调用 DeepSeek 并写入 SQLite 分析表。
+// 副作用：调用 DeepSeek 并写入 MySQL 分析表。
 func (s *Service) AnalyzePending(ctx context.Context, limit int) (AnalysisBatchResult, error) {
 	// 1. 读取待分析文章并准备非 nil 结果数组。
 	articles, err := s.repository.pendingArticles(ctx, limit)
@@ -222,7 +222,7 @@ func (s *Service) AnalyzePending(ctx context.Context, limit int) (AnalysisBatchR
 // analyzeOne 分析单篇文章并持久化最终状态。
 // 输入：ctx 控制模型请求，article 是待分析文章。
 // 输出：返回页面结果项、业务状态和仅数据库失败时使用的错误。
-// 副作用：调用 DeepSeek 并写入 SQLite。
+// 副作用：调用 DeepSeek 并写入 MySQL。
 func (s *Service) analyzeOne(ctx context.Context, article pendingArticle) (map[string]any, string, error) {
 	// 1. 未配置模型时保留 pending，便于配置后重试。
 	if s.options.Analyzer == nil || !s.options.Analyzer.Configured() {
@@ -296,7 +296,7 @@ type Service struct {
 }
 
 // NewService 创建投资文章分析服务。
-// 输入：repository 提供 SQLite 访问，options 提供模型名称。
+// 输入：repository 提供 MySQL 访问，options 提供模型名称。
 // 输出：返回文章服务。
 // 副作用：无。
 func NewService(repository *Repository, options ServiceOptions) *Service {
@@ -308,9 +308,9 @@ func NewService(repository *Repository, options ServiceOptions) *Service {
 }
 
 // AnalysisSummary 构建投资文章分析页面摘要。
-// 输入：ctx 控制 SQLite 查询。
+// 输入：ctx 控制 MySQL 查询。
 // 输出：返回文章和已分析计数；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (s *Service) AnalysisSummary(ctx context.Context) (PageSummary, error) {
 	// 1. 读取统一计数口径。
 	counts, err := s.repository.counts(ctx)
@@ -331,9 +331,9 @@ func (s *Service) AnalysisSummary(ctx context.Context) (PageSummary, error) {
 }
 
 // FetchSummary 构建投资文章抓取页面摘要。
-// 输入：ctx 控制 SQLite 查询。
+// 输入：ctx 控制 MySQL 查询。
 // 输出：返回来源、文章、待分析和已分析计数；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (s *Service) FetchSummary(ctx context.Context) (PageSummary, error) {
 	// 1. 读取统一计数口径。
 	counts, err := s.repository.counts(ctx)
@@ -356,9 +356,9 @@ func (s *Service) FetchSummary(ctx context.Context) (PageSummary, error) {
 }
 
 // Sources 返回页面展示的信息源列表。
-// 输入：ctx 控制 SQLite 查询。
+// 输入：ctx 控制 MySQL 查询。
 // 输出：返回全部来源；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (s *Service) Sources(ctx context.Context) ([]Source, error) {
 	// 1. 页面需要同时看到未配置来源状态。
 	return s.repository.Sources(ctx, false)
@@ -367,7 +367,7 @@ func (s *Service) Sources(ctx context.Context) ([]Source, error) {
 // Articles 返回指定天数内已分析文章。
 // 输入：ctx 控制查询，days 和 limit 限制范围。
 // 输出：返回文章列表；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (s *Service) Articles(ctx context.Context, days, limit int) ([]ArticleItem, error) {
 	// 1. 复用仓储层受限查询。
 	return s.repository.Articles(ctx, days, limit)
@@ -376,7 +376,7 @@ func (s *Service) Articles(ctx context.Context, days, limit int) ([]ArticleItem,
 // Detail 返回单篇文章详情。
 // 输入：ctx 控制查询，articleID 是文章主键。
 // 输出：返回详情或 nil；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (s *Service) Detail(ctx context.Context, articleID int64) (*ArticleDetail, error) {
 	// 1. 复用仓储层详情映射。
 	return s.repository.Detail(ctx, articleID)
@@ -385,7 +385,7 @@ func (s *Service) Detail(ctx context.Context, articleID int64) (*ArticleDetail, 
 // UpdatePromptFeedback 保存管理员修正意见并返回最新详情。
 // 输入：ctx 控制写入，articleID 是文章主键，feedback 是修正意见。
 // 输出：返回详情或 nil；失败时返回错误。
-// 副作用：写入 SQLite。
+// 副作用：写入 MySQL。
 func (s *Service) UpdatePromptFeedback(ctx context.Context, articleID int64, feedback string) (*ArticleDetail, error) {
 	// 1. 由仓储层统一截断并更新反馈。
 	return s.repository.UpdatePromptFeedback(ctx, articleID, feedback)
@@ -394,7 +394,7 @@ func (s *Service) UpdatePromptFeedback(ctx context.Context, articleID int64, fee
 // Report 构建信号榜和短期市场分布。
 // 输入：ctx 控制查询，targetDays 默认 60，marketDays 默认 3。
 // 输出：返回完整分析报告；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (s *Service) Report(ctx context.Context, targetDays, marketDays int) (Report, error) {
 	// 1. 分别读取信号榜和市场判断的独立日期范围。
 	if targetDays < 1 {
@@ -428,59 +428,114 @@ type signalAccumulator struct {
 	LatestAt string
 }
 
+type aggregatedSignal struct {
+	Name     string
+	Type     string
+	Count    int
+	LatestAt string
+}
+
 // buildSignalStats 合并推荐和风险为每个标的一行。
 // 输入：rows 是目标天数内分析行。
 // 输出：按总次数和最近出现时间倒序返回信号榜。
 // 副作用：无。
 func buildSignalStats(rows []analysisRow) []SignalStat {
-	// 1. 按标的名称累计两侧次数和最近日期。
+	// 1. 沿用旧服务顺序，先分别按名称和类型聚合推荐、风险。
+	recommendations := aggregateSignals(rows, true)
+	risks := aggregateSignals(rows, false)
+
+	// 2. 推荐聚合项先进入名称榜，风险项补充计数或追加纯风险标的。
 	grouped := make(map[string]*signalAccumulator)
-	merge := func(signals []Signal, recommendation bool, occurredAt string) {
+	ordered := make([]*signalAccumulator, 0, len(recommendations)+len(risks))
+	merge := func(signals []aggregatedSignal, recommendation bool) {
 		for _, signal := range signals {
-			if signal.Name == "" {
-				continue
-			}
 			item, exists := grouped[signal.Name]
 			if !exists {
-				item = &signalAccumulator{SignalStat: SignalStat{Name: signal.Name, Type: signal.Type}, LatestAt: occurredAt}
-				if item.Type == "" {
-					item.Type = "other"
-				}
+				item = &signalAccumulator{SignalStat: SignalStat{Name: signal.Name, Type: signal.Type}, LatestAt: signal.LatestAt}
 				grouped[signal.Name] = item
+				ordered = append(ordered, item)
 			}
 			if item.Type == "other" && signal.Type != "" && signal.Type != "other" {
 				item.Type = signal.Type
 			}
 			if recommendation {
-				item.RecommendationCount++
+				item.RecommendationCount += signal.Count
 			} else {
-				item.RiskCount++
+				item.RiskCount += signal.Count
+			}
+			item.Count += signal.Count
+			if signal.LatestAt > item.LatestAt {
+				item.LatestAt = signal.LatestAt
+			}
+		}
+	}
+	merge(recommendations, true)
+	merge(risks, false)
+
+	// 3. 稳定排序保证完全相同的总数和日期保留聚合插入顺序。
+	sort.SliceStable(ordered, func(left, right int) bool {
+		if ordered[left].Count == ordered[right].Count {
+			return ordered[left].LatestAt > ordered[right].LatestAt
+		}
+		return ordered[left].Count > ordered[right].Count
+	})
+	results := make([]SignalStat, 0, len(ordered))
+	for _, item := range ordered {
+		results = append(results, item.SignalStat)
+	}
+	return results
+}
+
+// aggregateSignals 按名称和类型聚合推荐或风险信号。
+// 输入：rows 是时间倒序分析行，recommendation 选择推荐或风险数组。
+// 输出：按次数、最近日期倒序返回聚合项，完全同分时保留首次出现顺序。
+// 副作用：无。
+func aggregateSignals(rows []analysisRow, recommendation bool) []aggregatedSignal {
+	// 1. 使用结构化键累计次数，并用切片保留仓储结果中的首次出现顺序。
+	type signalKey struct {
+		name string
+		kind string
+	}
+	grouped := make(map[signalKey]*aggregatedSignal)
+	ordered := make([]*aggregatedSignal, 0)
+	for _, row := range rows {
+		signals := row.Risks
+		if recommendation {
+			signals = row.Recommendations
+		}
+		for _, signal := range signals {
+			name := strings.TrimSpace(signal.Name)
+			if name == "" {
+				continue
+			}
+			kind := strings.TrimSpace(signal.Type)
+			if kind == "" {
+				kind = "other"
+			}
+			key := signalKey{name: name, kind: kind}
+			item, exists := grouped[key]
+			if !exists {
+				item = &aggregatedSignal{Name: name, Type: kind, LatestAt: row.OccurredAt}
+				grouped[key] = item
+				ordered = append(ordered, item)
 			}
 			item.Count++
-			if occurredAt > item.LatestAt {
-				item.LatestAt = occurredAt
+			if row.OccurredAt > item.LatestAt {
+				item.LatestAt = row.OccurredAt
 			}
 		}
 	}
-	for _, row := range rows {
-		merge(row.Recommendations, true, row.OccurredAt)
-		merge(row.Risks, false, row.OccurredAt)
-	}
 
-	// 2. 排序并移除内部最近日期字段。
-	items := make([]*signalAccumulator, 0, len(grouped))
-	for _, item := range grouped {
-		items = append(items, item)
-	}
-	sort.Slice(items, func(left, right int) bool {
-		if items[left].Count == items[right].Count {
-			return items[left].LatestAt > items[right].LatestAt
+	// 2. 稳定排序复刻旧服务按次数和最近日期倒序的聚合列表。
+	sort.SliceStable(ordered, func(left, right int) bool {
+		if ordered[left].Count == ordered[right].Count {
+			return ordered[left].LatestAt > ordered[right].LatestAt
 		}
-		return items[left].Count > items[right].Count
+		return ordered[left].Count > ordered[right].Count
 	})
-	results := make([]SignalStat, 0, len(items))
-	for _, item := range items {
-		results = append(results, item.SignalStat)
+	results := make([]aggregatedSignal, 0, len(ordered))
+	for _, item := range ordered {
+		results = append(results, *item)
 	}
 	return results
 }
@@ -490,12 +545,16 @@ func buildSignalStats(rows []analysisRow) []SignalStat {
 // 输出：按次数倒序、名称正序返回分布。
 // 副作用：无。
 func buildDistribution(rows []analysisRow, mood bool) []DistributionItem {
-	// 1. 规范化枚举并累计次数。
+	// 1. 规范化枚举并累计次数，同时记录仓储倒序结果中的首次出现顺序。
 	counts := make(map[string]int)
+	firstSeen := make(map[string]int)
 	for _, row := range rows {
 		key := normalizePrediction(row.Prediction)
 		if mood {
 			key = normalizeMood(row.MarketMood)
+		}
+		if _, exists := counts[key]; !exists {
+			firstSeen[key] = len(firstSeen)
 		}
 		counts[key]++
 	}
@@ -504,10 +563,10 @@ func buildDistribution(rows []analysisRow, mood bool) []DistributionItem {
 		results = append(results, DistributionItem{Name: name, Count: count})
 	}
 
-	// 2. 保持高频项优先并稳定同次数顺序。
+	// 2. 保持高频项优先，同次数时沿用旧接口的首次出现顺序。
 	sort.Slice(results, func(left, right int) bool {
 		if results[left].Count == results[right].Count {
-			return results[left].Name < results[right].Name
+			return firstSeen[results[left].Name] < firstSeen[results[right].Name]
 		}
 		return results[left].Count > results[right].Count
 	})
@@ -550,12 +609,34 @@ func buildAnalysisPrompt(article pendingArticle) string {
 4. 不要把同一个标的拆成多条。若文章详细分析一个标的的优点和缺点，请先综合权衡，最后只输出该标的一条最终结论。
 5. reason 要写清楚最终判断的核心依据，可以同时概括主要优点和主要风险，但必须服务于最终的推荐/风险结论。
 6. 标的 name 必须精简，适合网页表格展示；只保留核心可投资标的，不要句子、不要长描述、不要符号堆叠。
-7. 剔除纯结果导向的信息：例如已经发生的涨跌、排名、收益结果。
-8. 只有当文章给出面向未来的理由时才抽取标的，例如估值、盈利、政策、供需、周期、库存、订单、流动性、风险事件、配置价值、催化或基本面变化。
+7. 剔除纯结果导向的信息：例如“科技大涨虹吸传统行业”“年初至今盈利30-40%%”“涨幅领先”“一枝独秀”等已经发生的涨跌、排名、收益结果。
+8. 只有当文章给出面向未来的理由时才抽取标的，例如估值、盈利/业绩、政策、供需、周期、库存、订单、流动性、风险事件、配置价值、催化或基本面变化。
 9. 如果一句话只是描述当前涨跌、过去收益、资金当下流向，而没有未来判断，请不要抽取为 recommendations 或 risks。
 
 JSON 结构：
-{"summary":"80字以内中文摘要","recommendations":[{"name":"标的名称","type":"stock|sector|index|commodity|crypto|concept|other","reason":"80字以内综合原因"}],"risks":[],"market":{"mood":"very_optimistic|optimistic|neutral|pessimistic|very_pessimistic|unknown","mood_reason":"80字以内原因","prediction":"up|down|range|unknown","prediction_reason":"80字以内原因"}}
+{
+  "summary": "80字以内中文摘要",
+  "recommendations": [
+    {
+      "name": "标的名称",
+      "type": "stock|sector|index|commodity|crypto|concept|other",
+      "reason": "80字以内综合原因，说明为什么最终偏推荐"
+    }
+  ],
+  "risks": [
+    {
+      "name": "标的名称",
+      "type": "stock|sector|index|commodity|crypto|concept|other",
+      "reason": "80字以内综合原因，说明为什么最终偏风险"
+    }
+  ],
+  "market": {
+    "mood": "very_optimistic|optimistic|neutral|pessimistic|very_pessimistic|unknown",
+    "mood_reason": "80字以内原因，说明文章为什么体现这种短期市场氛围",
+    "prediction": "up|down|range|unknown",
+    "prediction_reason": "80字以内原因，说明文章为什么体现这种短期涨跌预测"
+  }
+}
 
 来源：%s
 来源类型：%s

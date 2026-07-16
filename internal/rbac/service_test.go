@@ -3,11 +3,9 @@ package rbac
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"testing"
 
-	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 // TestServiceSyncDefaultsIsIdempotent 验证默认角色和权限按 code 幂等同步。
@@ -86,18 +84,11 @@ func TestServiceInvestorGetsOnlyArticleAnalysis(t *testing.T) {
 	}
 }
 
-// newTestService 创建使用临时 SQLite 数据库的 RBAC 服务。
+// newTestService 创建使用隔离 MySQL 数据库的 RBAC 服务。
 func newTestService(t *testing.T) (*Service, *sql.DB) {
-	// 1. 打开并迁移独立的临时数据库。
+	// 1. 打开并迁移独立的 MySQL 测试 schema。
 	t.Helper()
-	db, err := database.OpenSQLite(context.Background(), config.Database{Path: filepath.Join(t.TempDir(), "rbac.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(context.Background(), db, filepath.Join("..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 
 	// 2. 组装 RBAC 仓储和服务。
 	return NewService(NewRepository(db)), db

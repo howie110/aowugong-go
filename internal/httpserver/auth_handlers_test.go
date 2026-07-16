@@ -7,15 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/auth"
-	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
 	"github.com/howiedata/aowugong-go/internal/rbac"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 // TestAuthLoginAndProfile 验证 OAuth2 表单登录后可以读取当前用户资料。
@@ -96,16 +94,9 @@ func TestPermissionsRequireAdminPermission(t *testing.T) {
 
 // newAuthenticatedTestRouter 创建完成迁移和 RBAC 同步的 HTTP 测试路由器。
 func newAuthenticatedTestRouter(t *testing.T) (http.Handler, *sql.DB) {
-	// 1. 创建临时 SQLite 并执行全部版本化迁移。
+	// 1. 创建隔离 MySQL schema 并执行全部版本化迁移。
 	t.Helper()
-	db, err := database.OpenSQLite(context.Background(), config.Database{Path: filepath.Join(t.TempDir(), "http.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(context.Background(), db, filepath.Join("..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 
 	// 2. 组装并同步认证和 RBAC 服务。
 	rbacService := rbac.NewService(rbac.NewRepository(db))

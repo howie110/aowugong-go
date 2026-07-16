@@ -2,11 +2,9 @@ package mahjong
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
-	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 // TestServiceSaveUsesDateUpsert 验证同一天页面录入会插入、跳过或覆盖。
@@ -73,18 +71,11 @@ func TestServiceReportMatchesLegacyCalculations(t *testing.T) {
 	}
 }
 
-// newTestService 创建使用临时 SQLite 的麻将测试服务。
+// newTestService 创建使用隔离 MySQL 的麻将测试服务。
 func newTestService(t *testing.T) *Service {
-	// 1. 打开临时数据库并执行完整迁移。
+	// 1. 打开隔离 MySQL schema 并执行完整迁移。
 	t.Helper()
-	db, err := database.OpenSQLite(context.Background(), config.Database{Path: filepath.Join(t.TempDir(), "mahjong.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(context.Background(), db, filepath.Join("..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 
 	// 2. 返回仓储和服务的真实组合。
 	return NewService(NewRepository(db))

@@ -2,29 +2,20 @@ package stockanalysis
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
-	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
 	"github.com/howiedata/aowugong-go/internal/finance/position"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 // TestServiceBuildsPortfolioReportAndTreatsStandardBondAsCash 验证组合聚合与现金等价物口径。
 // 输入：两日两个账户的资产快照，最新日包含“标准券”持仓。
 // 输出：报告正确聚合账户，并把标准券市值从股票仓位移入现金。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestServiceBuildsPortfolioReportAndTreatsStandardBondAsCash(t *testing.T) {
 	// 1. 创建完整迁移数据库并写入四条仓位快照。
 	ctx := context.Background()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "stock-analysis.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	defer db.Close()
-	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 	positionRepository := position.NewRepository(db)
 	seedStockAnalysisSnapshot(t, ctx, positionRepository, "2026-07-14", "5042", 100000, 60000, 40000, nil)
 	seedStockAnalysisSnapshot(t, ctx, positionRepository, "2026-07-14", "7521", 200000, 120000, 80000, nil)
@@ -60,6 +51,9 @@ func TestServiceBuildsPortfolioReportAndTreatsStandardBondAsCash(t *testing.T) {
 	if len(report.Holdings) != 2 || report.Holdings[0].SecurityName != "贵州茅台" || report.Holdings[1].SecurityName != "现金" {
 		t.Errorf("holdings = %#v, want stock and cash only", report.Holdings)
 	}
+	if report.Holdings[0].Accounts != "账户-5042 / 账户-7521" {
+		t.Errorf("holding accounts = %q, want account suffix order", report.Holdings[0].Accounts)
+	}
 	if summary.Metrics[0].Value != "330,000.00" || summary.Metrics[3].Value != "2" {
 		t.Errorf("summary metrics = %#v", summary.Metrics)
 	}
@@ -68,7 +62,7 @@ func TestServiceBuildsPortfolioReportAndTreatsStandardBondAsCash(t *testing.T) {
 // seedStockAnalysisSnapshot 写入仓位分析测试使用的单账户快照。
 // 输入：日期、账户、资产金额和可选持仓明细。
 // 输出：无，写入失败时终止测试。
-// 副作用：写入测试 SQLite 的资产和持仓表。
+// 副作用：写入测试 MySQL 的资产和持仓表。
 func seedStockAnalysisSnapshot(t *testing.T, ctx context.Context, repository *position.Repository, date, suffix string, total, market, cash float64, holdings []position.Holding) {
 	// 1. 组装账户快照并仅在提供明细时标记解析成功。
 	t.Helper()

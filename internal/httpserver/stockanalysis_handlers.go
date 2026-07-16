@@ -32,7 +32,7 @@ func registerStockAnalysisRoutes(router chi.Router, authService *auth.Service, r
 // summary 返回股票仓位分析页顶部摘要。
 // 输入：request 已通过认证和股票分析权限校验。
 // 输出：写入 Summary JSON。
-// 副作用：读取 SQLite 并写入 HTTP 响应。
+// 副作用：读取 MySQL 并写入 HTTP 响应。
 func (h stockAnalysisHandlers) summary(w http.ResponseWriter, request *http.Request) {
 	// 1. 生成摘要并统一转换服务错误。
 	result, err := h.service.Summary(request.Context())
@@ -46,7 +46,7 @@ func (h stockAnalysisHandlers) summary(w http.ResponseWriter, request *http.Requ
 // report 返回股票仓位完整分析报告。
 // 输入：查询参数 limit 可选，范围 1 到 2000。
 // 输出：写入 Report JSON。
-// 副作用：读取 SQLite 并写入 HTTP 响应。
+// 副作用：读取 MySQL 并写入 HTTP 响应。
 func (h stockAnalysisHandlers) report(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析并限制快照查询数量。
 	limit := 500

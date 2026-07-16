@@ -9,13 +9,13 @@ import (
 	"github.com/howiedata/aowugong-go/internal/money"
 )
 
-// Repository 负责麻将战绩的 SQLite 持久化。
+// Repository 负责麻将战绩的 MySQL 持久化。
 type Repository struct {
 	db *sql.DB
 }
 
 // NewRepository 创建麻将战绩仓储。
-// 输入：db 是已完成迁移的 SQLite 连接池。
+// 输入：db 是已完成迁移的 MySQL 连接池。
 // 输出：返回麻将仓储。
 // 副作用：无。
 func NewRepository(db *sql.DB) *Repository {
@@ -26,7 +26,7 @@ func NewRepository(db *sql.DB) *Repository {
 // Upsert 按日期批量新增、跳过或覆盖麻将战绩。
 // 输入：ctx 是调用上下文，records 是已校验记录，sourceFilename 和 createdBy 是来源信息。
 // 输出：返回写入统计和最后处理记录。
-// 副作用：在单个事务中写入 SQLite。
+// 副作用：在单个事务中写入 MySQL。
 func (r *Repository) Upsert(ctx context.Context, records []parsedRecord, sourceFilename, createdBy string) (writeStats, error) {
 	// 1. 开启事务并逐日期判断现有金额。
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -40,7 +40,7 @@ func (r *Repository) Upsert(ctx context.Context, records []parsedRecord, sourceF
 		var existingID int64
 		var existingAmount string
 		err := tx.QueryRowContext(ctx, `
-			SELECT id, CAST(result_amount AS TEXT)
+			SELECT id, result_amount
 			FROM mahjong_game_record
 			WHERE played_date = ?
 		`, record.playedDate).Scan(&existingID, &existingAmount)
@@ -101,11 +101,11 @@ func (r *Repository) Upsert(ctx context.Context, records []parsedRecord, sourceF
 // Get 按主键读取单条麻将战绩。
 // 输入：ctx 是调用上下文，recordID 是主键。
 // 输出：返回内部记录。
-// 副作用：读取 SQLite。
+// 副作用：读取 MySQL。
 func (r *Repository) Get(ctx context.Context, recordID int64) (storedRecord, error) {
 	// 1. 查询并复用统一行扫描。
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, played_date, CAST(result_amount AS TEXT), source_filename, created_by, created_at, updated_at
+		SELECT id, played_date, result_amount, source_filename, created_by, created_at, updated_at
 		FROM mahjong_game_record
 		WHERE id = ?
 	`, recordID)
@@ -119,11 +119,11 @@ func (r *Repository) Get(ctx context.Context, recordID int64) (storedRecord, err
 // ListRecentWindow 读取最近 limit 条记录并按日期正序返回。
 // 输入：ctx 是调用上下文，limit 是 1 到 5000 的查询上限。
 // 输出：返回日期正序记录。
-// 副作用：读取 SQLite。
+// 副作用：读取 MySQL。
 func (r *Repository) ListRecentWindow(ctx context.Context, limit int) ([]storedRecord, error) {
 	// 1. 在 SQL 内先限制最近记录，再恢复日期正序。
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, played_date, CAST(result_amount AS TEXT), source_filename, created_by, created_at, updated_at
+		SELECT id, played_date, result_amount, source_filename, created_by, created_at, updated_at
 		FROM (
 			SELECT id, played_date, result_amount, source_filename, created_by, created_at, updated_at
 			FROM mahjong_game_record
@@ -142,11 +142,11 @@ func (r *Repository) ListRecentWindow(ctx context.Context, limit int) ([]storedR
 // ListRecent 读取最近 limit 条记录并按日期倒序返回。
 // 输入：ctx 是调用上下文，limit 是 1 到 200 的查询上限。
 // 输出：返回日期倒序记录。
-// 副作用：读取 SQLite。
+// 副作用：读取 MySQL。
 func (r *Repository) ListRecent(ctx context.Context, limit int) ([]storedRecord, error) {
 	// 1. 使用日期索引直接限制最近记录。
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, played_date, CAST(result_amount AS TEXT), source_filename, created_by, created_at, updated_at
+		SELECT id, played_date, result_amount, source_filename, created_by, created_at, updated_at
 		FROM mahjong_game_record
 		ORDER BY played_date DESC
 		LIMIT ?

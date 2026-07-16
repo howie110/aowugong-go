@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 
 	"github.com/howiedata/aowugong-go/internal/money"
 )
@@ -29,13 +28,13 @@ type holdingRow struct {
 	Accounts     string
 }
 
-// Repository 负责股票仓位分析所需的受限 SQLite 查询。
+// Repository 负责股票仓位分析所需的受限 MySQL 查询。
 type Repository struct {
 	db *sql.DB
 }
 
 // NewRepository 创建股票仓位分析仓储。
-// 输入：db 是已经迁移的 SQLite 连接。
+// 输入：db 是已经迁移的 MySQL 连接。
 // 输出：返回只读分析仓储。
 // 副作用：无。
 func NewRepository(db *sql.DB) *Repository {
@@ -46,7 +45,7 @@ func NewRepository(db *sql.DB) *Repository {
 // snapshots 读取最近资产快照及其中的现金等价物金额。
 // 输入：ctx 控制查询，limit 是 1 到 2000 的快照上限。
 // 输出：按日期和账户正序返回内部行；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (r *Repository) snapshots(ctx context.Context, limit int) ([]snapshotRow, error) {
 	// 1. 限制大表读取范围。
 	if limit < 1 {
@@ -63,11 +62,11 @@ func (r *Repository) snapshots(ctx context.Context, limit int) ([]snapshotRow, e
 			       snapshot.broker_name,
 			       snapshot.account_suffix,
 			       COALESCE(snapshot.account_alias, '') AS account_alias,
-			       CAST(snapshot.total_asset AS TEXT) AS total_asset,
-			       CAST(snapshot.market_value AS TEXT) AS market_value,
-			       CAST(snapshot.available_cash AS TEXT) AS available_cash,
-			       CAST(snapshot.other_amount AS TEXT) AS other_amount,
-			       CAST(COALESCE(cash_equivalent.market_value, 0) AS TEXT) AS cash_equivalent_value
+			       snapshot.total_asset,
+			       snapshot.market_value,
+			       snapshot.available_cash,
+			       snapshot.other_amount,
+			       COALESCE(cash_equivalent.market_value, 0) AS cash_equivalent_value
 			FROM finance_asset_snapshot snapshot
 			LEFT JOIN (
 				SELECT snapshot_date, account_suffix, SUM(market_value) AS market_value
@@ -119,15 +118,16 @@ func (r *Repository) snapshots(ctx context.Context, limit int) ([]snapshotRow, e
 // holdings 读取指定日期按证券聚合的正市值持仓。
 // 输入：ctx 控制查询，snapshotDate 是 ISO 日期。
 // 输出：按市值倒序返回聚合持仓；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (r *Repository) holdings(ctx context.Context, snapshotDate string) ([]holdingRow, error) {
-	// 1. 按日期限制查询并在 SQLite 内完成账户聚合。
+	// 1. 按日期限制查询并在 MySQL 内完成账户聚合。
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT security_name,
-		       CAST(SUM(market_value) AS TEXT),
-		       CASE WHEN COUNT(quantity) > 0 THEN CAST(SUM(quantity) AS TEXT) END,
+		       SUM(market_value),
+		       CASE WHEN COUNT(quantity) > 0 THEN SUM(quantity) END,
 		       COUNT(DISTINCT account_suffix),
-		       GROUP_CONCAT(DISTINCT COALESCE(account_alias, account_suffix))
+		       GROUP_CONCAT(DISTINCT COALESCE(account_alias, account_suffix)
+		                    ORDER BY account_suffix SEPARATOR ' / ')
 		FROM finance_position_holding_snapshot
 		WHERE snapshot_date = ? AND market_value > 0
 		GROUP BY security_name
@@ -155,7 +155,7 @@ func (r *Repository) holdings(ctx context.Context, snapshotDate string) ([]holdi
 			item.Quantity = &quantity.String
 		}
 		if accounts.Valid {
-			item.Accounts = strings.ReplaceAll(accounts.String, ",", " / ")
+			item.Accounts = accounts.String
 		}
 		results = append(results, item)
 	}

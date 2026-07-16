@@ -19,7 +19,7 @@ type Snapshot struct {
 	OCRProvider       string    `json:"ocr_provider,omitempty"`
 	ProviderRequestID string    `json:"provider_request_id,omitempty"`
 	Warnings          []string  `json:"warnings"`
-	Holdings          []Holding `json:"holdings,omitempty"`
+	Holdings          []Holding `json:"holdings"`
 	HoldingsParsed    bool      `json:"holdings_parsed"`
 	CreatedBy         string    `json:"created_by,omitempty"`
 	CreatedAt         string    `json:"created_at,omitempty"`

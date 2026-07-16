@@ -2,12 +2,10 @@ package subscription
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 // TestServiceCRUDAndDerivedStatus 验证订阅增删改查和动态到期状态。
@@ -80,18 +78,11 @@ func TestServiceListExpiringUsesExactReminderDay(t *testing.T) {
 	}
 }
 
-// newTestService 创建使用临时 SQLite 的订阅测试服务。
+// newTestService 创建使用隔离 MySQL 的订阅测试服务。
 func newTestService(t *testing.T) *Service {
-	// 1. 打开临时数据库并执行完整迁移。
+	// 1. 打开隔离 MySQL schema 并执行完整迁移。
 	t.Helper()
-	db, err := database.OpenSQLite(context.Background(), config.Database{Path: filepath.Join(t.TempDir(), "subscription.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(context.Background(), db, filepath.Join("..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 
 	// 2. 返回仓储和服务的真实组合。
 	return NewService(NewRepository(db))

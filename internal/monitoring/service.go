@@ -35,7 +35,7 @@ func NewService(repository *Repository, monitorClient *client.MonitoringClient, 
 // CheckAll 探测全部当前目标并持久化结果。
 // 输入：ctx 是调用上下文。
 // 输出：返回正常、异常和总目标数量。
-// 副作用：调用外部 HTTP/API、只读检查 OpeniLink DB，并写入应用 SQLite。
+// 副作用：调用外部 HTTP/API、只读检查 OpeniLink DB，并写入应用 MySQL。
 func (s *Service) CheckAll(ctx context.Context) (CheckResult, error) {
 	// 1. 顺序探测小型目标清单，避免同时给外部服务制造突发请求。
 	targets := BuildTargets(s.config)
@@ -63,7 +63,7 @@ func (s *Service) CheckAll(ctx context.Context) (CheckResult, error) {
 // Summary 构建当前目标及最近一次结果的页面摘要。
 // 输入：ctx 是调用上下文。
 // 输出：返回四张指标卡和服务列表。
-// 副作用：读取应用 SQLite。
+// 副作用：读取应用 MySQL。
 func (s *Service) Summary(ctx context.Context) (Summary, error) {
 	// 1. 读取当前目标对应的最近一次结果。
 	targets := BuildTargets(s.config)

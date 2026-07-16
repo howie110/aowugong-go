@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,30 +11,23 @@ import (
 	"github.com/howiedata/aowugong-go/internal/auth"
 	"github.com/howiedata/aowugong-go/internal/client"
 	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
 	"github.com/howiedata/aowugong-go/internal/finance/articleanalysis"
 	"github.com/howiedata/aowugong-go/internal/finance/position"
 	financeservice "github.com/howiedata/aowugong-go/internal/finance/service"
 	"github.com/howiedata/aowugong-go/internal/finance/stockanalysis"
 	"github.com/howiedata/aowugong-go/internal/rbac"
 	"github.com/howiedata/aowugong-go/internal/scheduler"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
-// TestFinanceSummaryRoutesRequirePermissionAndReturnCurrentData 验证 finance 摘要路由受权限保护并读取 SQLite。
-// 输入：管理员和投资者测试用户、临时 SQLite 数据库。
+// TestFinanceSummaryRoutesRequirePermissionAndReturnCurrentData 验证 finance 摘要路由受权限保护并读取 MySQL。
+// 输入：管理员和投资者测试用户、隔离 MySQL schema。
 // 输出：管理员获得 200，缺少控制台权限的投资者获得 403。
-// 副作用：在测试临时目录创建 SQLite 文件并写入测试用户。
+// 副作用：创建隔离 MySQL schema 并写入测试用户。
 func TestFinanceSummaryRoutesRequirePermissionAndReturnCurrentData(t *testing.T) {
 	// 1. 创建完整迁移数据库并组装 finance 路由依赖。
 	ctx := context.Background()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "finance-http.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 	rbacService := rbac.NewService(rbac.NewRepository(db))
 	if err := rbacService.SyncDefaults(ctx); err != nil {
 		t.Fatalf("SyncDefaults() error = %v", err)
@@ -69,7 +61,7 @@ func TestFinanceSummaryRoutesRequirePermissionAndReturnCurrentData(t *testing.T)
 	adminToken := loginHTTPTestUser(t, handler, "admin", "password")
 	investorToken := loginHTTPTestUser(t, handler, "investor", "password")
 
-	// 3. 管理员读取数据摘要必须成功且响应包含 SQLite 数据源。
+	// 3. 管理员读取数据摘要必须成功且响应包含 MySQL 数据源。
 	adminRequest := httptest.NewRequest(http.MethodGet, "/api/v1/finance/data/summary", nil)
 	adminRequest.Header.Set("Authorization", "Bearer "+adminToken)
 	adminRecorder := httptest.NewRecorder()
@@ -96,8 +88,8 @@ func TestFinanceSummaryRoutesRequirePermissionAndReturnCurrentData(t *testing.T)
 			t.Errorf("GET %s status = %d, body = %s", path, recorder.Code, recorder.Body.String())
 		}
 	}
-	if body := adminRecorder.Body.String(); !containsAll(body, `"name":"SQLite"`, `"title":"数据"`) {
-		t.Errorf("admin body = %s, want SQLite data summary", body)
+	if body := adminRecorder.Body.String(); !containsAll(body, `"name":"MySQL"`, `"title":"数据"`) {
+		t.Errorf("admin body = %s, want MySQL data summary", body)
 	}
 	manualRequest := httptest.NewRequest(http.MethodPost, "/api/v1/finance/jobs/test_job/run", nil)
 	manualRequest.Header.Set("Authorization", "Bearer "+adminToken)

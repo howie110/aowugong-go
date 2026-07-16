@@ -2,28 +2,20 @@ package position
 
 import (
 	"context"
-	"path/filepath"
+	"encoding/json"
 	"testing"
 
-	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 // TestRepositoryUpsertsDailyAccountAndReplacesHoldings 验证仓位快照覆盖和明细替换规则。
 // 输入：同一日期、同一账户的两次仓位快照。
 // 输出：只保留一个最新资产快照，并以第二次持仓明细为准。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestRepositoryUpsertsDailyAccountAndReplacesHoldings(t *testing.T) {
 	// 1. 创建完整迁移数据库并同步默认账户别名。
 	ctx := context.Background()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "position.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	defer db.Close()
-	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 	repository := NewRepository(db)
 	if err := repository.SyncDefaultAccounts(ctx); err != nil {
 		t.Fatalf("SyncDefaultAccounts() error = %v", err)
@@ -77,21 +69,60 @@ func TestRepositoryUpsertsDailyAccountAndReplacesHoldings(t *testing.T) {
 	}
 }
 
+// TestRecentSnapshotKeepsEmptyHoldingsArray 验证最近快照保持旧接口的空持仓数组契约。
+// 输入：一条没有加载持仓明细的资产快照。
+// 输出：Holdings 非 nil，JSON 中 holdings 是空数组而不是缺失或 null。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
+func TestRecentSnapshotKeepsEmptyHoldingsArray(t *testing.T) {
+	// 1. 写入一条资产快照并通过最近记录入口重新读取。
+	ctx := context.Background()
+	db := testdatabase.Open(t)
+	repository := NewRepository(db)
+	_, err := repository.Upsert(ctx, Snapshot{
+		SnapshotDate: "2026-07-15", BrokerName: "东莞证券", SourceApp: "同花顺",
+		AccountSuffix: "5042", TotalAsset: 100000, MarketValue: 60000, AvailableCash: 40000,
+	}, map[string]any{}, "admin")
+	if err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+	recent, err := repository.Recent(ctx, 1)
+	if err != nil {
+		t.Fatalf("Recent() error = %v", err)
+	}
+	if len(recent) != 1 {
+		t.Fatalf("len(Recent()) = %d, want 1", len(recent))
+	}
+
+	// 2. 核对 Go 模型和最终 JSON 都保留显式空数组。
+	if recent[0].Holdings == nil {
+		t.Fatal("Recent()[0].Holdings = nil, want empty array")
+	}
+	payload, err := json.Marshal(recent[0])
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	holdings, exists := decoded["holdings"]
+	if !exists {
+		t.Fatal("JSON holdings is missing")
+	}
+	items, ok := holdings.([]any)
+	if !ok || len(items) != 0 {
+		t.Fatalf("JSON holdings = %#v, want empty array", holdings)
+	}
+}
+
 // TestSyncDefaultAccountsDoesNotRewriteUnchangedRows 验证启动初始化不会污染已迁移账户时间。
 // 输入：内容已等于默认值但 updated_at 为历史时间的账户。
 // 输出：再次同步后历史更新时间保持不变。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestSyncDefaultAccountsDoesNotRewriteUnchangedRows(t *testing.T) {
 	// 1. 创建迁移库、默认账户并设置可识别的历史更新时间。
 	ctx := context.Background()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "account-defaults.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	defer db.Close()
-	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 	repository := NewRepository(db)
 	if err := repository.SyncDefaultAccounts(ctx); err != nil {
 		t.Fatalf("first SyncDefaultAccounts() error = %v", err)

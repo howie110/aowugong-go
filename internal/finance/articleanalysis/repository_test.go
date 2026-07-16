@@ -2,29 +2,20 @@ package articleanalysis
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 // TestRepositoryAndReportPreserveArticleContracts 验证文章存储、详情和 60/3 天报告契约。
 // 输入：一篇当前文章和一条结构化分析结果。
 // 输出：列表、详情、信号榜和市场分布均返回前端需要的字段。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestRepositoryAndReportPreserveArticleContracts(t *testing.T) {
 	// 1. 创建完整迁移数据库并同步默认 RSS 来源。
 	ctx := context.Background()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "articles.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	defer db.Close()
-	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 	repository := NewRepository(db)
 	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000/rss/all.xml"); err != nil {
 		t.Fatalf("SyncDefaultSource() error = %v", err)
@@ -35,7 +26,7 @@ func TestRepositoryAndReportPreserveArticleContracts(t *testing.T) {
 	}
 
 	// 2. 写入文章和成功分析结果，作者保留全名。
-	now := time.Now().Format(time.RFC3339)
+	now := time.Now().Format("2006-01-02 15:04:05")
 	action, articleID, err := repository.UpsertArticle(ctx, sources[0].ID, FeedEntry{
 		ArticleKey: "article-key-1", ExternalID: "external-1", Title: "测试投资文章",
 		Link: "https://example.com/article", Author: "长江证券研究所", PublishedAt: now,
@@ -83,18 +74,11 @@ func TestRepositoryAndReportPreserveArticleContracts(t *testing.T) {
 // TestSyncDefaultSourcePreservesMigratedSourceWithoutConfig 验证空配置不会禁用已迁移文章来源。
 // 输入：一条含真实 URL、启用状态和历史更新时间的现有来源。
 // 输出：空配置同步后 URL、状态和更新时间保持不变。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestSyncDefaultSourcePreservesMigratedSourceWithoutConfig(t *testing.T) {
 	// 1. 创建迁移库并写入模拟 MySQL 迁移来源。
 	ctx := context.Background()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "source-default.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	defer db.Close()
-	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 	const feedURL = "http://8.138.123.59:5000/api/rss/all"
 	const historical = "2026-07-15 20:02:18"
 	if _, err := db.ExecContext(ctx, `INSERT INTO investment_article_source(

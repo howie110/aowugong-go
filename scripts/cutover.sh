@@ -10,7 +10,6 @@ GO_SERVICE="aowugong-go"
 LEGACY_SERVICE="${LEGACY_SERVICE:-aowugong-fastapi}"
 LEGACY_PROJECT="${LEGACY_PROJECT:-/www/wwwroot/docker-file/aowugong-fastapi}"
 LEGACY_RUN_USER="${LEGACY_RUN_USER:-$(stat -c '%U' "$LEGACY_PROJECT" 2>/dev/null || printf root)}"
-FINAL_MIGRATION="${FINAL_MIGRATION:-true}"
 cutover_id="$(date +%Y%m%d-%H%M%S)"
 crontab_backup="$APP_ROOT/shared/storage/backup/fastapi-crontab-$cutover_id"
 legacy_state="$crontab_backup.service-state"
@@ -50,10 +49,6 @@ if systemctl is-enabled --quiet "$LEGACY_SERVICE"; then
   die "旧 FastAPI 服务仍为 enabled，拒绝继续切换"
 fi
 
-if [ "$FINAL_MIGRATION" = "true" ]; then
-  LEGACY_ENV_FILE="$LEGACY_PROJECT/.env" APP_ROOT="$APP_ROOT" "$SCRIPT_DIR/migrate-mysql.sh"
-fi
-
 systemctl stop "$GO_SERVICE" || true
 set_env_value "$APP_ROOT/shared/.env" AOWUGONG_HTTP_ADDRESS "0.0.0.0:2345"
 set_env_value "$APP_ROOT/shared/.env" AOWUGONG_SCHEDULER_ENABLED true
@@ -62,4 +57,4 @@ wait_for_health "http://127.0.0.1:2345/api/v1/health" 30 || die "Go 切换到 23
 
 cutover_complete=1
 trap - EXIT
-printf '生产切换完成：Go 已接管 2345，内嵌调度已启用；MySQL 数据未删除。\n'
+printf '生产切换完成：Go 已接管 2345，内嵌调度已启用，FastAPI 与 Go 共用的 MySQL 数据保持原位。\n'

@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 type fakeNotifier struct {
@@ -30,7 +28,7 @@ func (n *fakeNotifier) Text(_ context.Context, _ []string, body, _ string) error
 // TestRegistryPreventsConcurrentRunsOfSameJob 验证同名任务不能并发执行。
 // 输入：一个等待释放信号的长任务和两次并发 Run。
 // 输出：第二次立即返回 ErrAlreadyRunning，第一次释放后成功。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestRegistryPreventsConcurrentRunsOfSameJob(t *testing.T) {
 	// 1. 创建注册表并注册可控阻塞任务。
 	registry := newTestRegistry(t, &fakeNotifier{})
@@ -71,7 +69,7 @@ func TestRegistryPreventsConcurrentRunsOfSameJob(t *testing.T) {
 // TestRegistryTimesOutRecordsAndNotifiesFailure 验证超时任务入库并发送四段失败通知。
 // 输入：超时时间短于任务等待时间的任务。
 // 输出：返回 deadline exceeded，记录 failed 和耗时，并发送标准失败正文。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestRegistryTimesOutRecordsAndNotifiesFailure(t *testing.T) {
 	// 1. 创建带可观察通知器的注册表并注册超时任务。
 	notifier := &fakeNotifier{}
@@ -112,7 +110,7 @@ func TestRegistryTimesOutRecordsAndNotifiesFailure(t *testing.T) {
 // TestRegistryKeepsLockUntilTimedOutJobExits 验证忽略取消的超时任务退出前不会释放同名锁。
 // 输入：一个超时后仍等待显式释放信号的任务。
 // 输出：超时后第二次运行返回 ErrAlreadyRunning，任务退出后可以再次获取执行权。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestRegistryKeepsLockUntilTimedOutJobExits(t *testing.T) {
 	// 1. 注册一个故意忽略上下文、只响应测试释放信号的任务。
 	registry := newTestRegistry(t, &fakeNotifier{})
@@ -154,7 +152,7 @@ func TestRegistryKeepsLockUntilTimedOutJobExits(t *testing.T) {
 // TestRegistryRecoversPanic 验证任务 panic 被包装器恢复为失败。
 // 输入：执行时 panic 的任务。
 // 输出：Run 返回带 panic 上下文的错误且进程继续运行。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestRegistryRecoversPanic(t *testing.T) {
 	// 1. 创建注册表并注册 panic 任务。
 	registry := newTestRegistry(t, &fakeNotifier{})
@@ -176,20 +174,12 @@ func TestRegistryRecoversPanic(t *testing.T) {
 
 // newTestRegistry 创建完成迁移的任务注册表测试实例。
 // 输入：t 管理临时目录和失败，notifier 接收失败通知。
-// 输出：返回连接独立临时 SQLite 的注册表。
-// 副作用：创建并迁移测试 SQLite 文件。
+// 输出：返回连接独立 MySQL schema 的注册表。
+// 副作用：创建并迁移测试 MySQL schema。
 func newTestRegistry(t *testing.T, notifier Notifier) *Registry {
-	// 1. 打开临时 SQLite 并注册测试清理。
+	// 1. 打开隔离 MySQL 测试 schema。
 	t.Helper()
-	ctx := context.Background()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "scheduler.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 
 	// 2. 返回丢弃测试日志的注册表。
 	return NewRegistry(db, notifier, slog.New(slog.NewTextHandler(discardWriter{}, nil)))

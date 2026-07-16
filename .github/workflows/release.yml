@@ -11,6 +11,25 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: test-root-password
+          MYSQL_DATABASE: aowugong_go_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptest-root-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      AOWUGONG_TEST_MYSQL_HOST: 127.0.0.1
+      AOWUGONG_TEST_MYSQL_PORT: "3306"
+      AOWUGONG_TEST_MYSQL_DATABASE: aowugong_go_test
+      AOWUGONG_TEST_MYSQL_USER: root
+      AOWUGONG_TEST_MYSQL_PASSWORD: test-root-password
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -54,12 +73,11 @@ jobs:
           package="aowugong-go-${version}-linux-amd64"
           mkdir -p "dist/${package}/web"
           go build -trimpath -ldflags="-s -w" -o "dist/${package}/aowugong" ./cmd/aowugong
-          go build -trimpath -ldflags="-s -w" -o "dist/${package}/aowugong-migrate" ./cmd/migrate
           cp -R web/dist "dist/${package}/web/dist"
           cp -R migrations configs init scripts "dist/${package}/"
           cp README.md "dist/${package}/README.md"
           printf '%s\n' "${version}" > "dist/${package}/VERSION"
-          chmod +x "dist/${package}/aowugong" "dist/${package}/aowugong-migrate" "dist/${package}/scripts/"*.sh
+          chmod +x "dist/${package}/aowugong" "dist/${package}/scripts/"*.sh
           tar -C dist -czf "dist/${package}.tar.gz" "${package}"
           (cd dist && sha256sum "${package}.tar.gz" > "${package}.tar.gz.sha256")
 

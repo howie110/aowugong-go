@@ -2,28 +2,19 @@ package data
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
-	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 // TestRepositoryReplacesDailyDateAndQueriesByRange 验证日线按交易日原子替换和范围查询。
 // 输入：同一交易日的两批日线以及一个代码和日期范围。
 // 输出：旧批次被完整替换，查询仅返回目标代码范围内的数据。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestRepositoryReplacesDailyDateAndQueriesByRange(t *testing.T) {
 	// 1. 创建完整迁移数据库和日线仓储。
 	ctx := context.Background()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "data.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	defer db.Close()
-	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 	repository := NewRepository(db)
 
 	// 2. 首次写入两个代码，再以同日单代码批次原子替换。
@@ -61,19 +52,12 @@ func TestRepositoryReplacesDailyDateAndQueriesByRange(t *testing.T) {
 // TestRepositoryListsMissingOpenDates 验证同步任务只选择缺少日线的开市日期。
 // 输入：三天交易日历，其中一天休市，一天已有日线。
 // 输出：只返回仍缺失的开市日。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestRepositoryListsMissingOpenDates(t *testing.T) {
 	// 1. 创建数据库并写入交易日历与一个已有交易日。
 	ctx := context.Background()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "dates.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	defer db.Close()
-	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
-	_, err = db.ExecContext(ctx, `INSERT INTO tushare_trade_cal(exchange, cal_date, is_open, pretrade_date) VALUES
+	db := testdatabase.Open(t)
+	_, err := db.ExecContext(ctx, `INSERT INTO tushare_trade_cal(exchange, cal_date, is_open, pretrade_date) VALUES
 		('SSE','2026-01-01',0,'2025-12-31'),('SSE','2026-01-02',1,'2025-12-31'),('SSE','2026-01-05',1,'2026-01-02')`)
 	if err != nil {
 		t.Fatalf("insert calendar: %v", err)

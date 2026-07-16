@@ -217,9 +217,9 @@ func normalizeFeedNode(sourceID int64, node feedNode) RSSItem {
 	}
 }
 
-// parseFeedTime 解析常见 RSS 和 Atom 时间并输出 RFC3339。
+// parseFeedTime 解析常见 RSS 和 Atom 时间并输出 MySQL DATETIME 可写入的 UTC 文本。
 // 输入：value 是 feed 时间文本。
-// 输出：识别成功返回 RFC3339，否则返回空字符串。
+// 输出：识别成功返回 YYYY-MM-DD HH:MM:SS，否则返回空字符串。
 // 副作用：无。
 func parseFeedTime(value string) string {
 	// 1. 按常见格式顺序尝试解析。
@@ -227,7 +227,7 @@ func parseFeedTime(value string) string {
 	for _, layout := range []string{time.RFC1123Z, time.RFC1123, time.RFC822Z, time.RFC822, time.RFC3339, "2006-01-02 15:04:05"} {
 		parsed, err := time.Parse(layout, value)
 		if err == nil {
-			return parsed.UTC().Format(time.RFC3339)
+			return parsed.UTC().Format("2006-01-02 15:04:05")
 		}
 	}
 	return ""

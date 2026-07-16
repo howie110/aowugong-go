@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Repository 负责投资文章、来源和分析结果的 SQLite 读写。
+// Repository 负责投资文章、来源和分析结果的 MySQL 读写。
 type Repository struct {
 	db *sql.DB
 }
@@ -46,8 +46,8 @@ type summaryCounts struct {
 	LatestAt      string
 }
 
-// NewRepository 创建投资文章 SQLite 仓储。
-// 输入：db 是已经执行版本化迁移的 SQLite 连接。
+// NewRepository 创建投资文章 MySQL 仓储。
+// 输入：db 是已经执行版本化迁移的 MySQL 连接。
 // 输出：返回文章仓储。
 // 副作用：无。
 func NewRepository(db *sql.DB) *Repository {
@@ -71,27 +71,34 @@ func (r *Repository) SyncDefaultSource(ctx context.Context, feedURL string) erro
 		message = ""
 	}
 
-	// 2. 使用来源编码 upsert 配置，不删除已迁移文章引用的来源。
+	// 2. 空地址只补建缺失来源，避免覆盖线上已经可用的地址。
+	if feedURL == "" {
+		_, err := r.db.ExecContext(ctx, `
+			INSERT IGNORE INTO investment_article_source (
+				source_code, source_name, source_type, feed_url, is_active,
+				description, last_fetch_status, last_fetch_message
+			) VALUES ('wechat_aggregate', '公众号聚合', 'wechat_rss_aggregate', ?, ?, '微信公众号聚合 RSS。', ?, ?)
+		`, feedURL, active, status, nullableArticleText(message))
+		if err != nil {
+			return fmt.Errorf("补建默认文章来源: %w", err)
+		}
+		return nil
+	}
+
+	// 3. 有效地址按来源编码更新可变配置，不删除已迁移文章引用。
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO investment_article_source (
 			source_code, source_name, source_type, feed_url, is_active,
 			description, last_fetch_status, last_fetch_message
 		) VALUES ('wechat_aggregate', '公众号聚合', 'wechat_rss_aggregate', ?, ?, '微信公众号聚合 RSS。', ?, ?)
-		ON CONFLICT(source_code) DO UPDATE SET
-			source_name = excluded.source_name,
-			source_type = excluded.source_type,
-			feed_url = excluded.feed_url,
-			is_active = excluded.is_active,
-			description = excluded.description,
+		ON DUPLICATE KEY UPDATE
+			source_name = '公众号聚合',
+			source_type = 'wechat_rss_aggregate',
+			feed_url = ?,
+			is_active = ?,
+			description = '微信公众号聚合 RSS。',
 			updated_at = CURRENT_TIMESTAMP
-		WHERE excluded.feed_url <> '' AND (
-			investment_article_source.source_name IS NOT excluded.source_name OR
-			investment_article_source.source_type IS NOT excluded.source_type OR
-			investment_article_source.feed_url IS NOT excluded.feed_url OR
-			investment_article_source.is_active IS NOT excluded.is_active OR
-			investment_article_source.description IS NOT excluded.description
-		)
-	`, feedURL, active, status, nullableArticleText(message))
+	`, feedURL, active, status, nullableArticleText(message), feedURL, active)
 	if err != nil {
 		return fmt.Errorf("同步默认文章来源: %w", err)
 	}
@@ -101,7 +108,7 @@ func (r *Repository) SyncDefaultSource(ctx context.Context, feedURL string) erro
 // Sources 列出文章来源。
 // 输入：ctx 控制查询，activeOnly 控制是否只返回启用且有地址的来源。
 // 输出：按主键正序返回来源；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (r *Repository) Sources(ctx context.Context, activeOnly bool) ([]Source, error) {
 	// 1. 构造固定查询条件并执行。
 	query := `
@@ -144,7 +151,7 @@ func (r *Repository) Sources(ctx context.Context, activeOnly bool) ([]Source, er
 // sourceRecords 返回同步任务需要的启用来源和 RSS 地址。
 // 输入：ctx 控制查询。
 // 输出：返回内部来源记录；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (r *Repository) sourceRecords(ctx context.Context) ([]sourceRecord, error) {
 	// 1. 复用来源查询并保留模型中的内部 FeedURL 字段。
 	sources, err := r.Sources(ctx, true)
@@ -185,31 +192,40 @@ func (r *Repository) UpsertArticle(ctx context.Context, sourceID int64, entry Fe
 		return "", 0, fmt.Errorf("序列化 RSS 原始文章: %w", err)
 	}
 
-	// 2. upsert 当前可变字段，并保留已有发布时间作为空值回退。
-	var articleID int64
-	err = r.db.QueryRowContext(ctx, `
+	// 2. upsert 当前可变字段，并通过 LAST_INSERT_ID 保留稳定主键。
+	externalID := nullableArticleText(truncateRunes(entry.ExternalID, 255))
+	title := fallbackTitle(truncateRunes(entry.Title, 480))
+	link := truncateRunes(entry.Link, 1000)
+	author = truncateRunes(author, 100)
+	publishedAt := nullableArticleText(entry.PublishedAt)
+	summary := nullableArticleText(entry.Summary)
+	content := nullableArticleText(entry.Content)
+	result, err := r.db.ExecContext(ctx, `
 		INSERT INTO investment_article (
 			source_id, article_key, external_id, title, link, author,
 			published_at, summary, content, raw_entry_json, fetch_status
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'fetched')
-		ON CONFLICT(article_key) DO UPDATE SET
-			source_id = excluded.source_id,
-			external_id = excluded.external_id,
-			title = excluded.title,
-			link = excluded.link,
-			author = excluded.author,
-			published_at = COALESCE(excluded.published_at, investment_article.published_at),
-			summary = excluded.summary,
-			content = excluded.content,
-			raw_entry_json = excluded.raw_entry_json,
+		ON DUPLICATE KEY UPDATE
+			id = LAST_INSERT_ID(id),
+			source_id = ?,
+			external_id = ?,
+			title = ?,
+			link = ?,
+			author = ?,
+			published_at = COALESCE(?, published_at),
+			summary = ?,
+			content = ?,
+			raw_entry_json = ?,
 			fetch_status = 'fetched',
 			updated_at = CURRENT_TIMESTAMP
-		RETURNING id
-	`, sourceID, entry.ArticleKey, nullableArticleText(truncateRunes(entry.ExternalID, 255)),
-		fallbackTitle(truncateRunes(entry.Title, 480)), truncateRunes(entry.Link, 1000), truncateRunes(author, 100),
-		nullableArticleText(entry.PublishedAt), nullableArticleText(entry.Summary), nullableArticleText(entry.Content), string(rawJSON)).Scan(&articleID)
+	`, sourceID, entry.ArticleKey, externalID, title, link, author, publishedAt, summary, content, string(rawJSON),
+		sourceID, externalID, title, link, author, publishedAt, summary, content, string(rawJSON))
 	if err != nil {
 		return "", 0, fmt.Errorf("写入投资文章: %w", err)
+	}
+	articleID, err := result.LastInsertId()
+	if err != nil {
+		return "", 0, fmt.Errorf("读取投资文章主键: %w", err)
 	}
 	return action, articleID, nil
 }
@@ -234,9 +250,9 @@ func (r *Repository) UpdateSourceStatus(ctx context.Context, sourceID int64, sta
 // Articles 读取指定天数内分析成功的文章列表。
 // 输入：ctx 控制查询，days 是日期范围，limit 是 1 到 200 的上限。
 // 输出：按业务日期倒序返回文章；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (r *Repository) Articles(ctx context.Context, days, limit int) ([]ArticleItem, error) {
-	// 1. 限制查询范围并按 SQLite datetime 比较业务日期。
+	// 1. 限制查询范围并按 MySQL DATETIME 比较业务日期。
 	if days < 1 {
 		days = DefaultTargetDays
 	}
@@ -246,7 +262,7 @@ func (r *Repository) Articles(ctx context.Context, days, limit int) ([]ArticleIt
 	if limit > 200 {
 		limit = 200
 	}
-	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Format(time.RFC3339)
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Format("2006-01-02 15:04:05")
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT article.id, source.source_name, article.title, COALESCE(article.author, ''),
 		       COALESCE(article.published_at, ''), COALESCE(article.created_at, ''),
@@ -255,8 +271,8 @@ func (r *Repository) Articles(ctx context.Context, days, limit int) ([]ArticleIt
 		FROM investment_article article
 		JOIN investment_article_source source ON source.id = article.source_id
 		JOIN investment_article_analysis analysis ON analysis.article_id = article.id AND analysis.status = 'success'
-		WHERE datetime(COALESCE(article.published_at, article.created_at)) >= datetime(?)
-		ORDER BY datetime(COALESCE(article.published_at, article.created_at)) DESC, article.id DESC
+		WHERE COALESCE(article.published_at, article.created_at) >= ?
+		ORDER BY COALESCE(article.published_at, article.created_at) DESC, article.id DESC
 		LIMIT ?
 	`, cutoff, limit)
 	if err != nil {
@@ -282,7 +298,7 @@ func (r *Repository) Articles(ctx context.Context, days, limit int) ([]ArticleIt
 // Detail 按主键读取文章和完整分析结果。
 // 输入：ctx 控制查询，articleID 是文章主键。
 // 输出：存在时返回详情，不存在时返回 nil；查询失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (r *Repository) Detail(ctx context.Context, articleID int64) (*ArticleDetail, error) {
 	// 1. 一次联表读取文章、列表字段和完整分析字段。
 	row := r.db.QueryRowContext(ctx, `
@@ -366,7 +382,7 @@ func (r *Repository) UpdatePromptFeedback(ctx context.Context, articleID int64, 
 // pendingArticles 读取仍需模型分析的最近文章。
 // 输入：ctx 控制查询，limit 是 1 到 50 的上限。
 // 输出：返回内部待分析文章；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (r *Repository) pendingArticles(ctx context.Context, limit int) ([]pendingArticle, error) {
 	// 1. 限制批量分析规模并读取未成功记录。
 	if limit < 1 {
@@ -383,7 +399,7 @@ func (r *Repository) pendingArticles(ctx context.Context, limit int) ([]pendingA
 		JOIN investment_article_source source ON source.id = article.source_id
 		LEFT JOIN investment_article_analysis analysis ON analysis.article_id = article.id
 		WHERE analysis.id IS NULL OR analysis.status != 'success'
-		ORDER BY datetime(COALESCE(article.published_at, article.created_at)) DESC, article.id DESC
+		ORDER BY COALESCE(article.published_at, article.created_at) DESC, article.id DESC
 		LIMIT ?
 	`, limit)
 	if err != nil {
@@ -428,31 +444,36 @@ func (r *Repository) SaveAnalysis(ctx context.Context, articleID int64, status s
 	}
 
 	// 2. 使用文章唯一键 upsert 全部结构化字段。
+	values := []any{
+		status, nullableArticleText(model), nullableArticleText(promptVersion), nullableArticleText(result.Summary),
+		nullableArticleText(result.Market.Mood), nullableArticleText(result.Market.MoodReason),
+		nullableArticleText(result.Market.Prediction), nullableArticleText(result.Market.PredictionReason),
+		string(recommendationsJSON), string(risksJSON), string(rawJSON), nullableArticleText(truncateRunes(errorMessage, 1000)), analyzedAt,
+	}
+	arguments := append([]any{articleID}, values...)
+	arguments = append(arguments, values...)
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO investment_article_analysis (
 			article_id, status, model_name, prompt_version, summary,
 			market_mood, market_mood_reason, market_prediction, market_prediction_reason,
 			recommendations_json, risks_json, raw_result_json, error_message, analyzed_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(article_id) DO UPDATE SET
-			status = excluded.status,
-			model_name = excluded.model_name,
-			prompt_version = excluded.prompt_version,
-			summary = excluded.summary,
-			market_mood = excluded.market_mood,
-			market_mood_reason = excluded.market_mood_reason,
-			market_prediction = excluded.market_prediction,
-			market_prediction_reason = excluded.market_prediction_reason,
-			recommendations_json = excluded.recommendations_json,
-			risks_json = excluded.risks_json,
-			raw_result_json = excluded.raw_result_json,
-			error_message = excluded.error_message,
-			analyzed_at = excluded.analyzed_at,
+		ON DUPLICATE KEY UPDATE
+			status = ?,
+			model_name = ?,
+			prompt_version = ?,
+			summary = ?,
+			market_mood = ?,
+			market_mood_reason = ?,
+			market_prediction = ?,
+			market_prediction_reason = ?,
+			recommendations_json = ?,
+			risks_json = ?,
+			raw_result_json = ?,
+			error_message = ?,
+			analyzed_at = ?,
 			updated_at = CURRENT_TIMESTAMP
-	`, articleID, status, nullableArticleText(model), nullableArticleText(promptVersion), nullableArticleText(result.Summary),
-		nullableArticleText(result.Market.Mood), nullableArticleText(result.Market.MoodReason),
-		nullableArticleText(result.Market.Prediction), nullableArticleText(result.Market.PredictionReason),
-		string(recommendationsJSON), string(risksJSON), string(rawJSON), nullableArticleText(truncateRunes(errorMessage, 1000)), analyzedAt)
+	`, arguments...)
 	if err != nil {
 		return fmt.Errorf("保存投资文章分析结果: %w", err)
 	}
@@ -462,13 +483,13 @@ func (r *Repository) SaveAnalysis(ctx context.Context, articleID int64, status s
 // analysisRows 读取指定天数内分析成功的统计原始行。
 // 输入：ctx 控制查询，days 是至少一天的范围。
 // 输出：返回信号和市场枚举行；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (r *Repository) analysisRows(ctx context.Context, days int) ([]analysisRow, error) {
 	// 1. 使用业务日期范围限制分析查询。
 	if days < 1 {
 		days = 1
 	}
-	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Format(time.RFC3339)
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Format("2006-01-02 15:04:05")
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT COALESCE(analysis.recommendations_json, '[]'), COALESCE(analysis.risks_json, '[]'),
 		       COALESCE(analysis.market_mood, 'unknown'), COALESCE(analysis.market_prediction, 'unknown'),
@@ -476,8 +497,8 @@ func (r *Repository) analysisRows(ctx context.Context, days int) ([]analysisRow,
 		FROM investment_article_analysis analysis
 		JOIN investment_article article ON article.id = analysis.article_id
 		WHERE analysis.status = 'success'
-		  AND datetime(COALESCE(article.published_at, article.created_at)) >= datetime(?)
-		ORDER BY datetime(COALESCE(article.published_at, article.created_at)) DESC, article.id DESC
+		  AND COALESCE(article.published_at, article.created_at) >= ?
+		ORDER BY COALESCE(article.published_at, article.created_at) DESC, article.id DESC
 	`, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("查询文章分析统计行: %w", err)
@@ -511,7 +532,7 @@ func (r *Repository) analysisRows(ctx context.Context, days int) ([]analysisRow,
 // counts 读取文章页面顶部使用的轻量计数。
 // 输入：ctx 控制查询。
 // 输出：返回来源、文章、已分析、待分析和最新日期；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (r *Repository) counts(ctx context.Context) (summaryCounts, error) {
 	// 1. 使用单条聚合查询读取全部计数。
 	var result summaryCounts
@@ -613,7 +634,7 @@ func fallbackTitle(value string) string {
 	return value
 }
 
-// nullableArticleText 把空文章文本转换为 SQLite NULL。
+// nullableArticleText 把空文章文本转换为 MySQL NULL。
 // 输入：value 是待写入文本。
 // 输出：空白返回 nil，否则返回原文本。
 // 副作用：无。
@@ -626,7 +647,7 @@ func nullableArticleText(value string) any {
 }
 
 // dateOnly 把数据库时间统一转换为 YYYY-MM-DD。
-// 输入：value 是 RFC3339 或 SQLite/MySQL 时间文本。
+// 输入：value 是 RFC3339 或 MySQL/MySQL 时间文本。
 // 输出：能识别时返回日期，空值返回空字符串。
 // 副作用：无。
 func dateOnly(value string) string {

@@ -45,3 +45,18 @@ func TestRSSClientPollsAndParsesFeed(t *testing.T) {
 		t.Errorf("item key/date = %q/%q", items[0].ArticleKey, items[0].PublishedAt)
 	}
 }
+
+// TestParseFeedTimeReturnsMySQLCompatibleUTC 验证 feed 时间转换为 MySQL DATETIME 可写入的 UTC 文本。
+// 输入：提供等价于线上异常值的东八区 RSS 时间。
+// 输出：返回 YYYY-MM-DD HH:MM:SS，不包含 RFC3339 的 T 和 Z。
+// 副作用：无。
+func TestParseFeedTimeReturnsMySQLCompatibleUTC(t *testing.T) {
+	// 1. 解析线上文章对应的东八区发布时间。
+	got := parseFeedTime("Thu, 16 Jul 2026 14:44:07 +0800")
+
+	// 2. 核对结果保留旧 FastAPI 的 UTC 无时区入库语义。
+	want := "2026-07-16 06:44:07"
+	if got != want {
+		t.Fatalf("parseFeedTime() = %q, want %q", got, want)
+	}
+}

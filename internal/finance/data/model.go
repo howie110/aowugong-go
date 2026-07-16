@@ -1,7 +1,7 @@
-// Package data 提供 finance 行情数据的 SQLite 仓储和同步服务。
+// Package data 提供 finance 行情数据的 MySQL 仓储和同步服务。
 package data
 
-// Daily 描述 SQLite 中的一条股票日线行情。
+// Daily 描述 MySQL 中的一条股票日线行情。
 type Daily struct {
 	ID         int64   `json:"id,omitempty"`
 	TSCode     string  `json:"ts_code"`

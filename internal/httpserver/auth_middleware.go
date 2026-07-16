@@ -14,7 +14,7 @@ type currentUserContextKey struct{}
 // authenticate 要求有效 Bearer 令牌并把当前用户写入请求上下文。
 // 输入：service 是认证服务，next 是受保护处理器。
 // 输出：返回认证中间件。
-// 副作用：读取 SQLite，失败或成功时写入 HTTP 响应或请求上下文。
+// 副作用：读取 MySQL，失败或成功时写入 HTTP 响应或请求上下文。
 func authenticate(service *auth.Service) func(http.Handler) http.Handler {
 	// 1. 返回逐请求解析 Authorization 头的中间件。
 	return func(next http.Handler) http.Handler {
@@ -43,7 +43,7 @@ func authenticate(service *auth.Service) func(http.Handler) http.Handler {
 // requirePermission 要求当前用户拥有指定页面权限。
 // 输入：service 是 RBAC 服务，permissionCode 是权限编码。
 // 输出：返回权限中间件。
-// 副作用：读取 SQLite，失败时写入 HTTP 响应。
+// 副作用：读取 MySQL，失败时写入 HTTP 响应。
 func requirePermission(service *rbac.Service, permissionCode string) func(http.Handler) http.Handler {
 	// 1. 返回基于已认证用户主键检查权限的中间件。
 	return func(next http.Handler) http.Handler {

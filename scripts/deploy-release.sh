@@ -13,7 +13,9 @@ RUN_GROUP="${RUN_GROUP:-aowugong}"
 APP_PORT="${APP_PORT:-2346}"
 SCHEDULER_ENABLED="${SCHEDULER_ENABLED:-false}"
 ENV_FILE="${ENV_FILE:-}"
+RELEASE_ARCHIVE="${RELEASE_ARCHIVE:-}"
 SERVICE_NAME="aowugong-go"
+HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-180}"
 
 require_root
 for command_name in curl tar sha256sum systemctl install sed useradd swapon swapoff mkswap sysctl df; do
@@ -74,8 +76,15 @@ cleanup_deploy() {
 }
 trap cleanup_deploy EXIT
 
-curl --fail --location --retry 3 --output "$temporary_directory/$archive" "$download_base/$archive"
-curl --fail --location --retry 3 --output "$temporary_directory/$archive.sha256" "$download_base/$archive.sha256"
+if [ -n "$RELEASE_ARCHIVE" ]; then
+  [ -f "$RELEASE_ARCHIVE" ] || die "本地发布包不存在: $RELEASE_ARCHIVE"
+  [ -f "${RELEASE_ARCHIVE}.sha256" ] || die "本地发布包缺少校验文件: ${RELEASE_ARCHIVE}.sha256"
+  install -m 0644 "$RELEASE_ARCHIVE" "$temporary_directory/$archive"
+  install -m 0644 "${RELEASE_ARCHIVE}.sha256" "$temporary_directory/$archive.sha256"
+else
+  curl --fail --location --retry 3 --output "$temporary_directory/$archive" "$download_base/$archive"
+  curl --fail --location --retry 3 --output "$temporary_directory/$archive.sha256" "$download_base/$archive.sha256"
+fi
 (
   cd "$temporary_directory"
   sha256sum --check "$archive.sha256"
@@ -83,11 +92,11 @@ curl --fail --location --retry 3 --output "$temporary_directory/$archive.sha256"
 )
 
 source_release="$temporary_directory/$package"
-for required_path in aowugong aowugong-migrate web/dist/index.html migrations configs/.env.example init/systemd/aowugong-go.service; do
+for required_path in aowugong web/dist/index.html migrations/mysql configs/.env.example init/systemd/aowugong-go.service; do
   [ -e "$source_release/$required_path" ] || die "发布包缺少: $required_path"
 done
 
-mkdir -p "$APP_ROOT/releases" "$APP_ROOT/shared/storage/data" "$APP_ROOT/shared/storage/backup" \
+mkdir -p "$APP_ROOT/releases" "$APP_ROOT/shared/storage/backup" \
   "$APP_ROOT/shared/storage/exports" "$APP_ROOT/shared/storage/uploads" "$APP_ROOT/shared/storage/temp" \
   "$APP_ROOT/shared/storage/logs" "$APP_ROOT/shared/storage/private"
 release_directory="$APP_ROOT/releases/$VERSION"
@@ -95,7 +104,7 @@ if [ ! -d "$release_directory" ]; then
   mv "$source_release" "$release_directory"
 fi
 chown -R root:root "$release_directory"
-chmod 0755 "$release_directory/aowugong" "$release_directory/aowugong-migrate" "$release_directory/scripts/"*.sh
+chmod 0755 "$release_directory/aowugong" "$release_directory/scripts/"*.sh
 chown -R "$RUN_USER:$RUN_GROUP" "$APP_ROOT/shared"
 chmod 0750 "$APP_ROOT/shared" "$APP_ROOT/shared/storage"
 
@@ -110,15 +119,34 @@ fi
 
 set_env_value "$shared_env" AOWUGONG_ENV production
 set_env_value "$shared_env" AOWUGONG_HTTP_ADDRESS "0.0.0.0:$APP_PORT"
-set_env_value "$shared_env" AOWUGONG_DATABASE_PATH "$APP_ROOT/shared/storage/data/aowugong.db"
+set_env_default "$shared_env" AOWUGONG_MYSQL_HOST "127.0.0.1"
+set_env_default "$shared_env" AOWUGONG_MYSQL_PORT "3306"
+set_env_default "$shared_env" AOWUGONG_MYSQL_DATABASE "aowugong"
+set_env_default "$shared_env" AOWUGONG_MYSQL_USER "aowugong_app"
+if command -v mysqldump >/dev/null 2>&1; then
+  set_env_value "$shared_env" AOWUGONG_MYSQL_DUMP_COMMAND "$(command -v mysqldump)"
+elif [ "$SCHEDULER_ENABLED" = "true" ]; then
+  die "启用生产调度前必须安装 mysqldump"
+else
+  set_env_value "$shared_env" AOWUGONG_MYSQL_DUMP_COMMAND mysqldump
+fi
+set_env_value "$shared_env" AOWUGONG_MYSQL_SKIP_MIGRATIONS false
 set_env_value "$shared_env" AOWUGONG_STATIC_DIR "$APP_ROOT/current/web/dist"
-set_env_value "$shared_env" AOWUGONG_MIGRATIONS_DIR "$APP_ROOT/current/migrations"
+set_env_value "$shared_env" AOWUGONG_MIGRATIONS_DIR "$APP_ROOT/current/migrations/mysql"
 set_env_value "$shared_env" AOWUGONG_WORK_NAVIGATION_PATH "$APP_ROOT/shared/storage/private/work/navigation.json"
 set_env_value "$shared_env" AOWUGONG_BACKUP_DIR "$APP_ROOT/shared/storage/backup"
 set_env_value "$shared_env" AOWUGONG_POSITION_UPLOAD_DIR "$APP_ROOT/shared/storage/uploads/positions"
 set_env_value "$shared_env" AOWUGONG_POSITION_TEMP_DIR "$APP_ROOT/shared/storage/temp/positions"
 set_env_value "$shared_env" AOWUGONG_SCHEDULER_ENABLED "$SCHEDULER_ENABLED"
 chown "$RUN_USER:$RUN_GROUP" "$shared_env"
+
+for required_key in AOWUGONG_MYSQL_PASSWORD AOWUGONG_JWT_SECRET AOWUGONG_ENCRYPTION_KEY; do
+  value="$(read_env_value "$shared_env" "$required_key")"
+  [ -n "$value" ] || die "$shared_env 缺少必需配置: $required_key"
+  case "$value" in
+    replace-with-*) die "$shared_env 仍使用示例值: $required_key" ;;
+  esac
+done
 
 if [ -L "$APP_ROOT/current" ]; then
   old_current_target="$(readlink -f "$APP_ROOT/current")"
@@ -138,7 +166,7 @@ systemctl enable "$SERVICE_NAME" >/dev/null
 systemctl restart "$SERVICE_NAME"
 
 health_url="http://127.0.0.1:${APP_PORT}/api/v1/health"
-if ! wait_for_health "$health_url" 30; then
+if ! wait_for_health "$health_url" "$HEALTH_ATTEMPTS"; then
   systemctl status "$SERVICE_NAME" --no-pager || true
   die "新版本健康检查失败"
 fi

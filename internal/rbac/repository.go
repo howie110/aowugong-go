@@ -7,13 +7,13 @@ import (
 	"fmt"
 )
 
-// Repository 负责 SQLite 中的角色、权限和关联关系。
+// Repository 负责 MySQL 中的角色、权限和关联关系。
 type Repository struct {
 	db *sql.DB
 }
 
 // NewRepository 创建 RBAC 仓储。
-// 输入：db 是已完成迁移的 SQLite 连接池。
+// 输入：db 是已完成迁移的 MySQL 连接池。
 // 输出：返回 RBAC 仓储。
 // 副作用：无。
 func NewRepository(db *sql.DB) *Repository {
@@ -24,7 +24,7 @@ func NewRepository(db *sql.DB) *Repository {
 // SyncDefaults 幂等同步系统角色、页面权限及默认绑定。
 // 输入：ctx 是调用上下文，permissions 和 roles 是代码基线。
 // 输出：成功返回 nil。
-// 副作用：在单个事务中写入 SQLite。
+// 副作用：在单个事务中写入 MySQL。
 func (r *Repository) SyncDefaults(ctx context.Context, permissions []Permission, roles []Role) error {
 	// 1. 开启事务，避免角色和权限处于半同步状态。
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -35,14 +35,12 @@ func (r *Repository) SyncDefaults(ctx context.Context, permissions []Permission,
 
 	// 2. 按 code 更新或创建全部系统权限。
 	for _, permission := range permissions {
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO aowugong_permissions (code, name, "group", description)
-			VALUES (?, ?, ?, ?)
-			ON CONFLICT(code) DO UPDATE SET
-				name = excluded.name,
-				"group" = excluded."group",
-				description = excluded.description
-		`, permission.Code, permission.Name, permission.Group, permission.Description)
+		_, err := tx.ExecContext(ctx,
+			"INSERT INTO aowugong_permissions (code, name, `group`, description) "+
+				"VALUES (?, ?, ?, ?) "+
+				"ON DUPLICATE KEY UPDATE name = ?, `group` = ?, description = ?",
+			permission.Code, permission.Name, permission.Group, permission.Description,
+			permission.Name, permission.Group, permission.Description)
 		if err != nil {
 			return fmt.Errorf("同步权限 %s: %w", permission.Code, err)
 		}
@@ -53,12 +51,13 @@ func (r *Repository) SyncDefaults(ctx context.Context, permissions []Permission,
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO aowugong_roles (code, name, description, is_active, is_system)
 			VALUES (?, ?, ?, ?, ?)
-			ON CONFLICT(code) DO UPDATE SET
-				name = excluded.name,
-				description = excluded.description,
-				is_active = excluded.is_active,
-				is_system = excluded.is_system
-		`, role.Code, role.Name, role.Description, role.IsActive, role.IsSystem)
+			ON DUPLICATE KEY UPDATE
+				name = ?,
+				description = ?,
+				is_active = ?,
+				is_system = ?
+		`, role.Code, role.Name, role.Description, role.IsActive, role.IsSystem,
+			role.Name, role.Description, role.IsActive, role.IsSystem)
 		if err != nil {
 			return fmt.Errorf("同步角色 %s: %w", role.Code, err)
 		}
@@ -100,7 +99,7 @@ func (r *Repository) SyncDefaults(ctx context.Context, permissions []Permission,
 // AssignRole 幂等地给用户分配一个启用角色。
 // 输入：ctx 是调用上下文，userID 是用户主键，roleCode 是角色编码。
 // 输出：用户或角色不存在时返回对应业务错误。
-// 副作用：写入 SQLite 用户角色关联。
+// 副作用：写入 MySQL 用户角色关联。
 func (r *Repository) AssignRole(ctx context.Context, userID int64, roleCode string) error {
 	// 1. 确认用户存在，避免把外键错误暴露给服务层。
 	var userExists int
@@ -113,7 +112,7 @@ func (r *Repository) AssignRole(ctx context.Context, userID int64, roleCode stri
 
 	// 2. 查找启用角色并幂等写入关联。
 	result, err := r.db.ExecContext(ctx, `
-		INSERT OR IGNORE INTO aowugong_user_roles (user_id, role_id)
+		INSERT IGNORE INTO aowugong_user_roles (user_id, role_id)
 		SELECT ?, id FROM aowugong_roles WHERE code = ? AND is_active = 1
 	`, userID, roleCode)
 	if err != nil {
@@ -144,7 +143,7 @@ func (r *Repository) AssignRole(ctx context.Context, userID int64, roleCode stri
 // PermissionsForUser 返回用户通过启用角色获得的全部权限。
 // 输入：ctx 是调用上下文，userID 是用户主键。
 // 输出：返回按 code 排序的权限；用户不存在时返回 ErrUserNotFound。
-// 副作用：读取 SQLite。
+// 副作用：读取 MySQL。
 func (r *Repository) PermissionsForUser(ctx context.Context, userID int64) ([]string, error) {
 	// 1. 确认用户存在并读取超级用户标记。
 	var isSuperuser bool
@@ -189,7 +188,7 @@ func (r *Repository) PermissionsForUser(ctx context.Context, userID int64) ([]st
 // HasRole 判断用户是否拥有指定启用角色。
 // 输入：ctx 是调用上下文，userID 是用户主键，roleCode 是角色编码。
 // 输出：用户拥有角色或是超级用户时返回 true。
-// 副作用：读取 SQLite。
+// 副作用：读取 MySQL。
 func (r *Repository) HasRole(ctx context.Context, userID int64, roleCode string) (bool, error) {
 	// 1. 超级用户直接视为拥有系统角色，并同时确认用户存在。
 	var isSuperuser bool
@@ -218,7 +217,7 @@ func (r *Repository) HasRole(ctx context.Context, userID int64, roleCode string)
 // ListRoles 返回全部启用角色。
 // 输入：ctx 是调用上下文。
 // 输出：返回按主键排序的角色。
-// 副作用：读取 SQLite。
+// 副作用：读取 MySQL。
 func (r *Repository) ListRoles(ctx context.Context) ([]Role, error) {
 	// 1. 查询权限页面可分配的启用角色。
 	rows, err := r.db.QueryContext(ctx, `
@@ -250,7 +249,7 @@ func (r *Repository) ListRoles(ctx context.Context) ([]Role, error) {
 // ListUsers 返回用户及其已分配角色。
 // 输入：ctx 是调用上下文。
 // 输出：返回按用户名排序的权限管理用户列表。
-// 副作用：读取 SQLite。
+// 副作用：读取 MySQL。
 func (r *Repository) ListUsers(ctx context.Context) ([]UserRoles, error) {
 	// 1. 查询用户基础字段，角色由后续有界查询补齐。
 	rows, err := r.db.QueryContext(ctx, `
@@ -293,9 +292,9 @@ func (r *Repository) ListUsers(ctx context.Context) ([]UserRoles, error) {
 }
 
 // scanStrings 扫描单列字符串查询结果。
-// 输入：ctx 是调用上下文，db 是 SQLite 连接，query 和 args 是参数化查询。
+// 输入：ctx 是调用上下文，db 是 MySQL 连接，query 和 args 是参数化查询。
 // 输出：返回字符串列表。
-// 副作用：读取 SQLite。
+// 副作用：读取 MySQL。
 func scanStrings(ctx context.Context, db *sql.DB, query string, args ...any) ([]string, error) {
 	// 1. 执行查询并确保释放游标。
 	rows, err := db.QueryContext(ctx, query, args...)

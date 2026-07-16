@@ -8,7 +8,7 @@ import (
 	"runtime"
 )
 
-const migrationDirectoryName = "migrations"
+const migrationDirectoryName = "migrations/mysql"
 
 // resolveMigrationsDirectory 按运行环境解析应使用的迁移目录。
 func resolveMigrationsDirectory(environment, configuredDirectory, executablePath string) (string, error) {

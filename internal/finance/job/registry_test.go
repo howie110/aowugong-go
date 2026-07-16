@@ -2,18 +2,16 @@ package job
 
 import (
 	"context"
-	"database/sql"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
 	"github.com/howiedata/aowugong-go/internal/finance/articleanalysis"
 	financedata "github.com/howiedata/aowugong-go/internal/finance/data"
 	"github.com/howiedata/aowugong-go/internal/monitoring"
 	"github.com/howiedata/aowugong-go/internal/scheduler"
 	"github.com/howiedata/aowugong-go/internal/subscription"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 type fakeDataUpdater struct{}
@@ -74,25 +72,18 @@ func (fakeNotification) Text(context.Context, []string, string, string) error {
 // TestRegisterAllAddsSevenProductionJobs 验证固定任务名称和频率全部进入统一注册表。
 // 输入：完整的测试依赖和空任务注册表。
 // 输出：注册七项任务，并能通过同一 Run 入口执行测试任务。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestRegisterAllAddsSevenProductionJobs(t *testing.T) {
-	// 1. 创建完成迁移的 SQLite 和任务注册表。
+	// 1. 创建完成迁移的 MySQL 和任务注册表。
 	ctx := context.Background()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "jobs.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	defer db.Close()
-	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 	registry := scheduler.NewRegistry(db, fakeNotification{}, nil)
 	dependencies := Dependencies{
-		DB: db, Data: fakeDataUpdater{}, Articles: fakeArticleSyncer{}, Monitoring: fakeMonitor{},
+		DB: db, Database: config.Database{DumpCommand: "mysqldump"}, Data: fakeDataUpdater{}, Articles: fakeArticleSyncer{}, Monitoring: fakeMonitor{},
 		Subscriptions: fakeSubscription{}, Notification: fakeNotification{}, BackupDir: t.TempDir(),
 		BackupRetention: 7, Now: time.Now,
-		Backup: func(context.Context, *sql.DB, string, int, time.Time) (string, error) {
-			return "test-backup.db", nil
+		Backup: func(context.Context, config.Database, string, int, time.Time) (string, error) {
+			return "test-backup.sql.gz", nil
 		},
 	}
 
@@ -108,7 +99,7 @@ func TestRegisterAllAddsSevenProductionJobs(t *testing.T) {
 		"test_crontab": "0 9 * * *", "update_tushare_daily_data": "0 20 * * *",
 		"sync_investment_articles": "0 8,20 * * *", "check_service_monitors": "30 8 * * *",
 		"check_subscription_expiry_notify": "30 9 * * *", "openilink_reply_reminder": "0 10 * * *",
-		"backup_sqlite": "30 3 * * *",
+		"backup_mysql": "30 3 * * *",
 	}
 	for _, definition := range definitions {
 		if wanted[definition.Name] != definition.Schedule {

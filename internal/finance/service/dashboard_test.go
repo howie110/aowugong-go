@@ -3,22 +3,19 @@ package service
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"testing"
 
-	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
-// TestDashboardServiceBuildsRuntimeSummaries 验证 finance 摘要使用 SQLite 进度和 Go 运行时配置。
-// 输入：临时 SQLite 数据与关闭的真实交易配置。
+// TestDashboardServiceBuildsRuntimeSummaries 验证 finance 摘要使用 MySQL 进度和 Go 运行时配置。
+// 输入：隔离 MySQL 数据与关闭的真实交易配置。
 // 输出：各页面摘要包含最新日期、七个内嵌任务和安全交易状态。
-// 副作用：在测试临时目录创建 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestDashboardServiceBuildsRuntimeSummaries(t *testing.T) {
-	// 1. 创建包含当前行情日期的最小 SQLite 数据集。
+	// 1. 创建包含当前行情日期的最小 MySQL 数据集。
 	ctx := context.Background()
 	db := openDashboardTestDB(t, ctx)
-	defer db.Close()
 
 	// 2. 构造服务并读取数据、任务和交易摘要。
 	service := NewDashboardService(db, DashboardOptions{
@@ -51,31 +48,22 @@ func TestDashboardServiceBuildsRuntimeSummaries(t *testing.T) {
 	}
 }
 
-// openDashboardTestDB 创建 finance 摘要测试使用的最小 SQLite 数据库。
+// openDashboardTestDB 创建 finance 摘要测试使用的最小 MySQL 数据库。
 // 输入：t 管理测试生命周期，ctx 控制数据库操作。
 // 输出：返回已创建核心数据表和样例日期的数据库连接。
-// 副作用：在测试临时目录写入 SQLite 文件，失败时终止测试。
+// 副作用：创建并写入隔离 MySQL 测试 schema，失败时终止测试。
 func openDashboardTestDB(t *testing.T, ctx context.Context) *sql.DB {
-	// 1. 打开测试专用 SQLite 文件。
+	// 1. 打开已完成正式迁移的隔离 MySQL schema。
 	t.Helper()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "dashboard.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 
-	// 2. 创建摘要查询使用的白名单表并写入代表性日期。
+	// 2. 向摘要查询白名单表写入代表性日期。
 	statements := []string{
-		`CREATE TABLE tushare_trade_cal (cal_date TEXT)`,
-		`CREATE TABLE tushare_daily (trade_date TEXT)`,
-		`CREATE TABLE basic_operation (trade_date TEXT)`,
-		`CREATE TABLE tushare_stock_basic (update_date TEXT)`,
-		`CREATE TABLE tushare_etf_basic (update_date TEXT)`,
 		`INSERT INTO tushare_trade_cal(cal_date) VALUES ('2026-07-15')`,
 		`INSERT INTO tushare_daily(trade_date) VALUES ('2026-07-14')`,
 	}
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
-			db.Close()
 			t.Fatalf("prepare dashboard database: %v", err)
 		}
 	}

@@ -17,13 +17,13 @@ var defaultAccounts = []struct {
 	{BrokerName: "东莞证券", AccountSuffix: "7521", AccountAlias: "东莞证券-吴素尤"},
 }
 
-// Repository 负责仓位相关 SQLite 读写。
+// Repository 负责仓位相关 MySQL 读写。
 type Repository struct {
 	db *sql.DB
 }
 
-// NewRepository 创建仓位 SQLite 仓储。
-// 输入：db 是已经执行版本化迁移的 SQLite 连接。
+// NewRepository 创建仓位 MySQL 仓储。
+// 输入：db 是已经执行版本化迁移的 MySQL 连接。
 // 输出：返回仓位仓储。
 // 副作用：无，不访问数据库。
 func NewRepository(db *sql.DB) *Repository {
@@ -41,13 +41,12 @@ func (r *Repository) SyncDefaultAccounts(ctx context.Context) error {
 		_, err := r.db.ExecContext(ctx, `
 			INSERT INTO finance_broker_account (broker_name, account_suffix, account_alias, is_active)
 			VALUES (?, ?, ?, 1)
-			ON CONFLICT(broker_name, account_suffix) DO UPDATE SET
-				account_alias = excluded.account_alias,
+			ON DUPLICATE KEY UPDATE
+				updated_at = IF(NOT (account_alias <=> ?) OR is_active <> 1, CURRENT_TIMESTAMP, updated_at),
+				account_alias = ?,
 				is_active = 1,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE finance_broker_account.account_alias IS NOT excluded.account_alias
-				OR finance_broker_account.is_active <> 1
-		`, account.BrokerName, account.AccountSuffix, account.AccountAlias)
+				id = LAST_INSERT_ID(id)
+		`, account.BrokerName, account.AccountSuffix, account.AccountAlias, account.AccountAlias, account.AccountAlias)
 		if err != nil {
 			return fmt.Errorf("同步默认账户 %s: %w", account.AccountSuffix, err)
 		}
@@ -58,7 +57,7 @@ func (r *Repository) SyncDefaultAccounts(ctx context.Context) error {
 // AccountAlias 按券商和账户后四位读取唯一别名。
 // 输入：ctx 控制数据库操作，brokerName 和 accountSuffix 标识账户。
 // 输出：精确匹配或后四位唯一匹配时返回别名；不存在时返回空字符串。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (r *Repository) AccountAlias(ctx context.Context, brokerName, accountSuffix string) (string, error) {
 	// 1. 优先按券商和后四位精确查询。
 	var alias string
@@ -122,38 +121,51 @@ func (r *Repository) Upsert(ctx context.Context, snapshot Snapshot, rawOCR map[s
 	defer tx.Rollback()
 
 	// 2. 按日期和账户后四位 upsert 资产快照并取得稳定主键。
-	err = tx.QueryRowContext(ctx, `
+	arguments := []any{
+		snapshot.SnapshotDate, snapshot.BrokerName, snapshot.SourceApp, snapshot.AccountSuffix, nullableText(snapshot.AccountAlias),
+		snapshot.TotalAsset, snapshot.MarketValue, snapshot.AvailableCash, snapshot.OtherAmount, snapshot.PositionPercent,
+		nullableText(snapshot.ImagePath), nullableText(snapshot.ImageSHA256), nullableText(snapshot.OCRProvider), nullableText(snapshot.ProviderRequestID),
+		string(rawJSON), string(warningsJSON), nullableText(createdBy),
+	}
+	arguments = append(arguments,
+		snapshot.BrokerName, snapshot.SourceApp, nullableText(snapshot.AccountAlias),
+		snapshot.TotalAsset, snapshot.MarketValue, snapshot.AvailableCash, snapshot.OtherAmount, snapshot.PositionPercent,
+		nullableText(snapshot.ImagePath), nullableText(snapshot.ImageSHA256), nullableText(snapshot.OCRProvider), nullableText(snapshot.ProviderRequestID),
+		string(rawJSON), string(warningsJSON), nullableText(createdBy),
+	)
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO finance_asset_snapshot (
 			snapshot_date, broker_name, source_app, account_suffix, account_alias,
 			total_asset, market_value, available_cash, other_amount, position_percent,
 			image_path, image_sha256, ocr_provider, provider_request_id,
 			raw_ocr_json, warnings_json, parse_status, created_by
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'parsed', ?)
-		ON CONFLICT(snapshot_date, account_suffix) DO UPDATE SET
-			broker_name = excluded.broker_name,
-			source_app = excluded.source_app,
-			account_alias = excluded.account_alias,
-			total_asset = excluded.total_asset,
-			market_value = excluded.market_value,
-			available_cash = excluded.available_cash,
-			other_amount = excluded.other_amount,
-			position_percent = excluded.position_percent,
-			image_path = excluded.image_path,
-			image_sha256 = excluded.image_sha256,
-			ocr_provider = excluded.ocr_provider,
-			provider_request_id = excluded.provider_request_id,
-			raw_ocr_json = excluded.raw_ocr_json,
-			warnings_json = excluded.warnings_json,
+		ON DUPLICATE KEY UPDATE
+			id = LAST_INSERT_ID(id),
+			broker_name = ?,
+			source_app = ?,
+			account_alias = ?,
+			total_asset = ?,
+			market_value = ?,
+			available_cash = ?,
+			other_amount = ?,
+			position_percent = ?,
+			image_path = ?,
+			image_sha256 = ?,
+			ocr_provider = ?,
+			provider_request_id = ?,
+			raw_ocr_json = ?,
+			warnings_json = ?,
 			parse_status = 'parsed',
-			created_by = excluded.created_by,
+			created_by = ?,
 			updated_at = CURRENT_TIMESTAMP
-		RETURNING id
-	`, snapshot.SnapshotDate, snapshot.BrokerName, snapshot.SourceApp, snapshot.AccountSuffix, nullableText(snapshot.AccountAlias),
-		snapshot.TotalAsset, snapshot.MarketValue, snapshot.AvailableCash, snapshot.OtherAmount, snapshot.PositionPercent,
-		nullableText(snapshot.ImagePath), nullableText(snapshot.ImageSHA256), nullableText(snapshot.OCRProvider), nullableText(snapshot.ProviderRequestID),
-		string(rawJSON), string(warningsJSON), nullableText(createdBy)).Scan(&snapshot.ID)
+	`, arguments...)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("写入账户资产快照: %w", err)
+	}
+	snapshot.ID, err = result.LastInsertId()
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("读取账户资产快照主键: %w", err)
 	}
 
 	// 3. 仅在本次明细解析成功时整体替换旧持仓。
@@ -177,7 +189,7 @@ func (r *Repository) Upsert(ctx context.Context, snapshot Snapshot, rawOCR map[s
 // Recent 读取最近账户资产快照。
 // 输入：ctx 控制查询，limit 是 1 到 200 的记录上限。
 // 输出：按日期倒序、账户正序返回快照；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (r *Repository) Recent(ctx context.Context, limit int) ([]Snapshot, error) {
 	// 1. 约束查询范围，防止页面无条件读取全部历史数据。
 	if limit < 1 {
@@ -213,7 +225,7 @@ func (r *Repository) Recent(ctx context.Context, limit int) ([]Snapshot, error) 
 // ByID 按主键读取单个资产快照。
 // 输入：ctx 控制查询，id 是快照主键。
 // 输出：返回快照；不存在或查询失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (r *Repository) ByID(ctx context.Context, id int64) (Snapshot, error) {
 	// 1. 执行主键范围查询并复用统一扫描逻辑。
 	snapshot, err := scanSnapshot(r.db.QueryRowContext(ctx, snapshotSelect+" WHERE id = ?", id))
@@ -226,7 +238,7 @@ func (r *Repository) ByID(ctx context.Context, id int64) (Snapshot, error) {
 // HoldingsByDate 读取指定日期的全部持仓明细。
 // 输入：ctx 控制查询，snapshotDate 是 ISO 日期。
 // 输出：按市值倒序返回持仓；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (r *Repository) HoldingsByDate(ctx context.Context, snapshotDate string) ([]Holding, error) {
 	// 1. 使用日期范围约束查询并读取可空数值。
 	rows, err := r.db.QueryContext(ctx, `
@@ -335,13 +347,14 @@ func scanSnapshot(scanner rowScanner) (Snapshot, error) {
 	}
 	snapshot.PositionPercent = nullFloatPointer(positionPercent)
 
-	// 2. 解码提示数组并保证空值返回 JSON 数组。
+	// 2. 解码提示数组，并保证提示与未加载持仓都返回 JSON 空数组。
 	if err := json.Unmarshal([]byte(warningsJSON), &snapshot.Warnings); err != nil {
 		return Snapshot{}, fmt.Errorf("解析仓位提示 JSON: %w", err)
 	}
 	if snapshot.Warnings == nil {
 		snapshot.Warnings = []string{}
 	}
+	snapshot.Holdings = []Holding{}
 	return snapshot, nil
 }
 

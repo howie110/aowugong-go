@@ -4,12 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 const migratedBcryptPassword = "$2a$10$NY3688Y4F/CXkeYA3q118eMu7YCjEGKPaPGAFXZp9SewmzmAfE9Jy"
@@ -81,13 +79,16 @@ func TestServiceProfileIncludesRolesAndPermissions(t *testing.T) {
 	// 1. 写入带角色和权限关联的用户。
 	service, db := newTestService(t)
 	insertTestUser(t, db, "profile-user", "profile@example.com", migratedBcryptPassword, true)
-	if _, err := db.Exec(`
-		INSERT INTO aowugong_roles (code, name, description, is_active, is_system) VALUES ('reader', 'Reader', '', 1, 0);
-		INSERT INTO aowugong_permissions (code, name, "group", description) VALUES ('page:reader', 'Reader', 'test', '');
-		INSERT INTO aowugong_user_roles (user_id, role_id) SELECT id, (SELECT id FROM aowugong_roles WHERE code = 'reader') FROM aowugong_fastapi_users WHERE username = 'profile-user';
-		INSERT INTO aowugong_role_permissions (role_id, permission_id) SELECT (SELECT id FROM aowugong_roles WHERE code = 'reader'), id FROM aowugong_permissions WHERE code = 'page:reader';
-	`); err != nil {
-		t.Fatalf("insert profile RBAC data error = %v", err)
+	statements := []string{
+		`INSERT INTO aowugong_roles (code, name, description, is_active, is_system) VALUES ('reader', 'Reader', '', 1, 0)`,
+		"INSERT INTO aowugong_permissions (code, name, `group`, description) VALUES ('page:reader', 'Reader', 'test', '')",
+		`INSERT INTO aowugong_user_roles (user_id, role_id) SELECT id, (SELECT id FROM aowugong_roles WHERE code = 'reader') FROM aowugong_fastapi_users WHERE username = 'profile-user'`,
+		`INSERT INTO aowugong_role_permissions (role_id, permission_id) SELECT (SELECT id FROM aowugong_roles WHERE code = 'reader'), id FROM aowugong_permissions WHERE code = 'page:reader'`,
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatalf("insert profile RBAC data error = %v", err)
+		}
 	}
 
 	// 2. 查询资料必须返回关联角色和权限。
@@ -139,18 +140,11 @@ func TestTokenManagerRejectsMalformedAndExpiredToken(t *testing.T) {
 	}
 }
 
-// newTestService 创建使用临时 SQLite 数据库的认证服务。
+// newTestService 创建使用隔离 MySQL 数据库的认证服务。
 func newTestService(t *testing.T) (*Service, *sql.DB) {
-	// 1. 打开并迁移独立的临时数据库。
+	// 1. 打开并迁移独立的 MySQL 测试 schema。
 	t.Helper()
-	db, err := database.OpenSQLite(context.Background(), config.Database{Path: filepath.Join(t.TempDir(), "auth.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(context.Background(), db, filepath.Join("..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 
 	// 2. 组装认证仓储、令牌管理器和服务。
 	return NewService(NewRepository(db), NewTokenManager("test-secret", 72*time.Hour)), db

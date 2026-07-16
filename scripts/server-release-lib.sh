@@ -20,6 +20,8 @@ set_env_value() {
   local key="$2"
   local value="$3"
   local temp
+  local owner
+  local group
   temp="$(mktemp)"
   awk -v key="$key" -v value="$value" '
     BEGIN { replaced = 0 }
@@ -27,8 +29,17 @@ set_env_value() {
     { print }
     END { if (!replaced) print key "=" value }
   ' "$file" > "$temp"
-  install -m 0600 "$temp" "$file"
+  owner="$(stat -c '%u' "$file" 2>/dev/null || id -u)"
+  group="$(stat -c '%g' "$file" 2>/dev/null || id -g)"
+  install -m 0600 -o "$owner" -g "$group" "$temp" "$file"
   rm -f "$temp"
+}
+
+set_env_default() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  [ -n "$(read_env_value "$file" "$key")" ] || set_env_value "$file" "$key" "$value"
 }
 
 read_env_value() {
@@ -155,7 +166,7 @@ remove_legacy_crontab() {
   awk -v legacy="$legacy_project" -v removed="$backup_path" '
     $0 == "# BEGIN aowugong-fastapi" { skipping = 1; print >> removed; next }
     skipping { print >> removed; if ($0 == "# END aowugong-fastapi") skipping = 0; next }
-    index($0, legacy) && index($0, "app.finance.jobs.job_runner") { print >> removed; next }
+    index($0, "app.finance.jobs.job_runner") { print >> removed; next }
     { print }
   ' "$current_path" > "$filtered_path"
   crontab -u "$run_user" "$filtered_path"
@@ -180,7 +191,7 @@ restore_crontab() {
   awk -v legacy="$legacy_project" '
     $0 == "# BEGIN aowugong-fastapi" { skipping = 1; next }
     skipping { if ($0 == "# END aowugong-fastapi") skipping = 0; next }
-    legacy != "" && index($0, legacy) && index($0, "app.finance.jobs.job_runner") { next }
+    index($0, "app.finance.jobs.job_runner") { next }
     { print }
   ' "$current_path" > "$filtered_path"
   if [ -s "$backup_path" ]; then

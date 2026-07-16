@@ -6,15 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	appdatabase "github.com/howiedata/aowugong-go/internal/database"
 )
 
-// Repository 负责订阅记录的 SQLite 持久化。
+// Repository 负责订阅记录的 MySQL 持久化。
 type Repository struct {
 	db *sql.DB
 }
 
 // NewRepository 创建订阅仓储。
-// 输入：db 是已完成迁移的 SQLite 连接池。
+// 输入：db 是已完成迁移的 MySQL 连接池。
 // 输出：返回订阅仓储。
 // 副作用：无。
 func NewRepository(db *sql.DB) *Repository {
@@ -25,7 +27,7 @@ func NewRepository(db *sql.DB) *Repository {
 // SeedDefaults 在订阅表为空时写入旧项目的六条默认记录。
 // 输入：ctx 是调用上下文。
 // 输出：成功返回 nil。
-// 副作用：可能写入 SQLite。
+// 副作用：可能写入 MySQL。
 func (r *Repository) SeedDefaults(ctx context.Context) error {
 	// 1. 使用事务检查空表，避免覆盖页面后续修改。
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -74,12 +76,12 @@ func (r *Repository) SeedDefaults(ctx context.Context) error {
 // List 返回按到期日和名称排序的全部订阅记录。
 // 输入：ctx 是调用上下文。
 // 输出：返回数据库原始记录列表。
-// 副作用：读取 SQLite。
+// 副作用：读取 MySQL。
 func (r *Repository) List(ctx context.Context) ([]storedRecord, error) {
 	// 1. 执行小表全量查询并确保释放游标。
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, service_name, COALESCE(note, ''), category,
-		       CAST(annual_fee AS TEXT), CAST(monthly_fee AS TEXT),
+		       annual_fee, monthly_fee,
 		       starts_on, expires_on, created_by, created_at, updated_at
 		FROM subscription_record
 		ORDER BY expires_on, service_name
@@ -107,12 +109,12 @@ func (r *Repository) List(ctx context.Context) ([]storedRecord, error) {
 // Get 按主键返回一条订阅记录。
 // 输入：ctx 是调用上下文，recordID 是订阅主键。
 // 输出：返回数据库原始记录；不存在时返回 ErrNotFound。
-// 副作用：读取 SQLite。
+// 副作用：读取 MySQL。
 func (r *Repository) Get(ctx context.Context, recordID int64) (storedRecord, error) {
 	// 1. 查询单条订阅并复用统一扫描逻辑。
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, service_name, COALESCE(note, ''), category,
-		       CAST(annual_fee AS TEXT), CAST(monthly_fee AS TEXT),
+		       annual_fee, monthly_fee,
 		       starts_on, expires_on, created_by, created_at, updated_at
 		FROM subscription_record
 		WHERE id = ?
@@ -130,7 +132,7 @@ func (r *Repository) Get(ctx context.Context, recordID int64) (storedRecord, err
 // Create 新增订阅记录并返回最终数据库记录。
 // 输入：ctx 是调用上下文，request 是已清洗字段，createdBy 是创建用户名。
 // 输出：返回新记录；服务名冲突时返回 ErrConflict。
-// 副作用：写入并读取 SQLite。
+// 副作用：写入并读取 MySQL。
 func (r *Repository) Create(ctx context.Context, request WriteRequest, createdBy string) (storedRecord, error) {
 	// 1. 把空开始日期转换为 SQL NULL 并写入记录。
 	var startsOn any
@@ -143,7 +145,7 @@ func (r *Repository) Create(ctx context.Context, request WriteRequest, createdBy
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, request.ServiceName, request.Note, request.Category, request.AnnualFee, request.MonthlyFee, startsOn, request.ExpiresOn, nullIfEmpty(createdBy))
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique constraint") {
+		if appdatabase.IsDuplicateKey(err) {
 			return storedRecord{}, ErrConflict
 		}
 		return storedRecord{}, fmt.Errorf("新增订阅记录: %w", err)
@@ -160,7 +162,7 @@ func (r *Repository) Create(ctx context.Context, request WriteRequest, createdBy
 // Update 全量更新订阅可编辑字段。
 // 输入：ctx 是调用上下文，recordID 是主键，request 是已清洗字段。
 // 输出：返回更新后记录；不存在或冲突时返回业务错误。
-// 副作用：写入并读取 SQLite。
+// 副作用：写入并读取 MySQL。
 func (r *Repository) Update(ctx context.Context, recordID int64, request WriteRequest) (storedRecord, error) {
 	// 1. 全量覆盖可编辑字段并刷新更新时间。
 	var startsOn any
@@ -174,7 +176,7 @@ func (r *Repository) Update(ctx context.Context, recordID int64, request WriteRe
 		WHERE id = ?
 	`, request.ServiceName, request.Note, request.Category, request.AnnualFee, request.MonthlyFee, startsOn, request.ExpiresOn, recordID)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique constraint") {
+		if appdatabase.IsDuplicateKey(err) {
 			return storedRecord{}, ErrConflict
 		}
 		return storedRecord{}, fmt.Errorf("更新订阅记录: %w", err)
@@ -192,7 +194,7 @@ func (r *Repository) Update(ctx context.Context, recordID int64, request WriteRe
 // Delete 按主键删除订阅记录。
 // 输入：ctx 是调用上下文，recordID 是订阅主键。
 // 输出：返回是否删除；不存在时返回 ErrNotFound。
-// 副作用：写入 SQLite。
+// 副作用：写入 MySQL。
 func (r *Repository) Delete(ctx context.Context, recordID int64) (bool, error) {
 	// 1. 执行主键删除并检查影响行数。
 	result, err := r.db.ExecContext(ctx, `DELETE FROM subscription_record WHERE id = ?`, recordID)

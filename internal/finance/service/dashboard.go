@@ -22,7 +22,7 @@ type DashboardOptions struct {
 	OKXConfigured       bool
 }
 
-// DashboardService 汇总 SQLite 数据进度和当前 Go 运行时状态。
+// DashboardService 汇总 MySQL 数据进度和当前 Go 运行时状态。
 type DashboardService struct {
 	db      *sql.DB
 	options DashboardOptions
@@ -115,7 +115,7 @@ var progressQueries = []progressQuery{
 }
 
 // NewDashboardService 创建 finance 摘要服务。
-// 输入：db 是 SQLite 连接，options 是不含密钥的运行时状态。
+// 输入：db 是 MySQL 连接，options 是不含密钥的运行时状态。
 // 输出：返回可并发复用的摘要服务。
 // 副作用：无，不访问数据库和外部接口。
 func NewDashboardService(db *sql.DB, options DashboardOptions) *DashboardService {
@@ -124,9 +124,9 @@ func NewDashboardService(db *sql.DB, options DashboardOptions) *DashboardService
 }
 
 // Overview 汇总控制台指标、模块和两项核心数据进度。
-// 输入：ctx 控制 SQLite 查询生命周期。
+// 输入：ctx 控制 MySQL 查询生命周期。
 // 输出：返回控制台完整响应；查询失败时返回带业务上下文的错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (s *DashboardService) Overview(ctx context.Context) (Overview, error) {
 	// 1. 查询全部数据进度并截取控制台关心的两项。
 	progress, err := s.loadProgress(ctx)
@@ -176,10 +176,10 @@ func (s *DashboardService) BacktestSummary() PageSummary {
 	}
 }
 
-// DataSummary 读取核心 SQLite 表的最新业务日期。
-// 输入：ctx 控制 SQLite 查询生命周期。
+// DataSummary 读取核心 MySQL 表的最新业务日期。
+// 输入：ctx 控制 MySQL 查询生命周期。
 // 输出：返回五张核心表的进度和当前数据源；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (s *DashboardService) DataSummary(ctx context.Context) (DataPage, error) {
 	// 1. 使用固定白名单 SQL 读取全部核心表进度。
 	tables, err := s.loadProgress(ctx)
@@ -187,14 +187,14 @@ func (s *DashboardService) DataSummary(ctx context.Context) (DataPage, error) {
 		return DataPage{}, fmt.Errorf("读取行情数据进度: %w", err)
 	}
 
-	// 2. 返回 SQLite 与 Tushare 的最终运行时说明。
+	// 2. 返回 MySQL 与 Tushare 的最终运行时说明。
 	return DataPage{
 		Title:       "数据",
-		Description: "SQLite 作为本地数据底座，内嵌任务负责补齐行情和交易日历。",
+		Description: "MySQL 作为统一网络数据底座，内嵌任务和本地 CLI 共用同一数据源。",
 		Tables:      tables,
 		Sources: []Item{
 			{Name: "Tushare", Description: "股票、ETF、交易日历"},
-			{Name: "SQLite", Description: "本地持久化，避免每次实时请求"},
+			{Name: "MySQL", Description: "统一网络持久化，支持本地重任务直写"},
 		},
 	}, nil
 }
@@ -222,7 +222,7 @@ func (s *DashboardService) JobsSummary() JobsPage {
 			{Name: "check_service_monitors", Schedule: "30 8 * * *", Description: "检查服务连通性", Command: "scheduler.Run(check_service_monitors)", Status: jobStatus},
 			{Name: "check_subscription_expiry_notify", Schedule: "30 9 * * *", Description: "检查订阅到期并提醒", Command: "scheduler.Run(check_subscription_expiry_notify)", Status: jobStatus},
 			{Name: "openilink_reply_reminder", Schedule: "0 10 * * *", Description: "检查 OpeniLink 待回复消息", Command: "scheduler.Run(openilink_reply_reminder)", Status: jobStatus},
-			{Name: "backup_sqlite", Schedule: "30 3 * * *", Description: "安全快照备份 SQLite", Command: "scheduler.Run(backup_sqlite)", Status: jobStatus},
+			{Name: "backup_mysql", Schedule: "30 3 * * *", Description: "压缩逻辑备份 MySQL", Command: "scheduler.Run(backup_mysql)", Status: jobStatus},
 		},
 		Runner:     "internal/scheduler.Registry.Run",
 		FailNotify: failNotify + "微信",
@@ -280,7 +280,7 @@ func (s *DashboardService) NotificationsSummary() NotificationsPage {
 // loadProgress 查询五张白名单表的最新日期。
 // 输入：ctx 控制数据库操作。
 // 输出：按页面固定顺序返回表进度；任一查询失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 MySQL。
 func (s *DashboardService) loadProgress(ctx context.Context) ([]Item, error) {
 	// 1. 逐条执行源码内固定的查询，避免动态表名进入 SQL。
 	items := make([]Item, 0, len(progressQueries))

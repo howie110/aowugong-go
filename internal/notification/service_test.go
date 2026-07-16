@@ -3,11 +3,9 @@ package notification
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
-	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 type fakeSender struct {
@@ -45,19 +43,12 @@ func (s *fakeSender) SendImage(_ context.Context, _, _ string) (map[string]any, 
 
 // TestServiceFormatsTextAndWritesNotificationLog 验证统一标题格式和发送日志。
 // 输入：三级标题、正文和成功的模拟 OpeniLink 发送器。
-// 输出：发送统一文本，并在 SQLite 写入 success 日志。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 输出：发送统一文本，并在 MySQL 写入 success 日志。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestServiceFormatsTextAndWritesNotificationLog(t *testing.T) {
 	// 1. 创建数据库、模拟发送器和通知服务。
 	ctx := context.Background()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "notify.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	defer db.Close()
-	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 	sender := &fakeSender{}
 	service := NewService(NewRepository(db), sender)
 
@@ -81,19 +72,12 @@ func TestServiceFormatsTextAndWritesNotificationLog(t *testing.T) {
 
 // TestServiceLogsSendFailureAndReturnsError 验证外部发送失败会入库并向调用方返回。
 // 输入：返回网络错误的模拟发送器。
-// 输出：返回错误并在 SQLite 写入 failed 日志和错误信息。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 输出：返回错误并在 MySQL 写入 failed 日志和错误信息。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestServiceLogsSendFailureAndReturnsError(t *testing.T) {
 	// 1. 创建数据库和预设失败发送器。
 	ctx := context.Background()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "failed.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	defer db.Close()
-	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
+	db := testdatabase.Open(t)
 	service := NewService(NewRepository(db), &fakeSender{error: errors.New("hub unavailable")})
 
 	// 2. 发送并确认错误传播及失败日志。

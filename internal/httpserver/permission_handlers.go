@@ -50,7 +50,7 @@ func (h permissionHandlers) summary(w http.ResponseWriter, request *http.Request
 // users 返回用户及其角色列表。
 // 输入：request 已通过认证和权限校验。
 // 输出：写入 UserRoles 数组。
-// 副作用：读取 SQLite 并写入 HTTP 响应。
+// 副作用：读取 MySQL 并写入 HTTP 响应。
 func (h permissionHandlers) users(w http.ResponseWriter, request *http.Request) {
 	// 1. 调用服务读取权限管理用户列表。
 	users, err := h.service.ListUsers(request.Context())
@@ -64,7 +64,7 @@ func (h permissionHandlers) users(w http.ResponseWriter, request *http.Request) 
 // roles 返回可分配的启用角色。
 // 输入：request 已通过认证和权限校验。
 // 输出：写入 Role 数组。
-// 副作用：同步并读取 SQLite，写入 HTTP 响应。
+// 副作用：同步并读取 MySQL，写入 HTTP 响应。
 func (h permissionHandlers) roles(w http.ResponseWriter, request *http.Request) {
 	// 1. 同步代码基线后读取可分配角色。
 	roles, err := h.service.ListRoles(request.Context())
@@ -78,7 +78,7 @@ func (h permissionHandlers) roles(w http.ResponseWriter, request *http.Request) 
 // assignRole 幂等地给目标用户添加角色。
 // 输入：路径包含 userID，请求体包含 role_code。
 // 输出：成功写入更新后的 UserRoles。
-// 副作用：写入并读取 SQLite，写入 HTTP 响应。
+// 副作用：写入并读取 MySQL，写入 HTTP 响应。
 func (h permissionHandlers) assignRole(w http.ResponseWriter, request *http.Request) {
 	// 1. 校验路径主键和 JSON 请求体。
 	userID, err := strconv.ParseInt(chi.URLParam(request, "userID"), 10, 64)

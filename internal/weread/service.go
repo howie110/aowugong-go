@@ -50,6 +50,7 @@ func (s *Service) Dashboard(ctx context.Context) (map[string]any, error) {
 
 	// 2. 合并微信读书专属数据并保留控制台页面字段。
 	weread := map[string]any{
+		"metrics":        summary["metrics"],
 		"summary":        summary["summary"],
 		"recent_books":   progress["recent_books"],
 		"progress_books": progress["progress_books"],

@@ -24,26 +24,69 @@ func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 		t.Errorf("HTTP.Address = %q, want 0.0.0.0:2346", cfg.HTTP.Address)
 	}
 
-	// 3. 断言令牌有效期和默认数据路径。
+	// 3. 断言令牌有效期和默认 MySQL 连接参数。
 	if cfg.Auth.TokenLifetime != 72*time.Hour {
 		t.Errorf("TokenLifetime = %s, want %s", cfg.Auth.TokenLifetime, 72*time.Hour)
 	}
-	if cfg.Database.Path != filepath.Clean("storage/data/aowugong.db") {
-		t.Errorf("Database.Path = %q, want %q", cfg.Database.Path, filepath.Clean("storage/data/aowugong.db"))
+	if cfg.Database.Host != "127.0.0.1" || cfg.Database.Port != 3306 {
+		t.Errorf("Database address = %s:%d, want 127.0.0.1:3306", cfg.Database.Host, cfg.Database.Port)
+	}
+	if cfg.Database.Name != "aowugong" || cfg.Database.User != "aowugong" {
+		t.Errorf("Database identity = %s/%s, want aowugong/aowugong", cfg.Database.Name, cfg.Database.User)
+	}
+	if cfg.Database.MaxOpenConns != 8 || cfg.Database.MaxIdleConns != 2 {
+		t.Errorf("Database pool = %d/%d, want 8/2", cfg.Database.MaxOpenConns, cfg.Database.MaxIdleConns)
 	}
 }
 
-// TestEnvironmentExampleUsesDefaultDatabasePath 验证环境示例使用精确默认数据库路径。
-func TestEnvironmentExampleUsesDefaultDatabasePath(t *testing.T) {
+// TestEnvironmentExampleUsesMySQLSettings 验证环境示例只提供 MySQL 运行配置。
+func TestEnvironmentExampleUsesMySQLSettings(t *testing.T) {
 	// 1. 读取仓库中的环境变量示例。
 	content, err := os.ReadFile(filepath.Join("..", "..", "configs", ".env.example"))
 	if err != nil {
 		t.Fatalf("os.ReadFile() error = %v", err)
 	}
 
-	// 2. 断言示例中的数据库路径与运行时默认值一致。
-	if !strings.Contains(string(content), "AOWUGONG_DATABASE_PATH=storage/data/aowugong.db") {
-		t.Errorf(".env.example database path is not storage/data/aowugong.db")
+	// 2. 断言示例包含 MySQL 字段且不再暴露 SQLite 运行路径。
+	for _, key := range []string{"AOWUGONG_MYSQL_HOST=", "AOWUGONG_MYSQL_PORT=", "AOWUGONG_MYSQL_DATABASE=", "AOWUGONG_MYSQL_USER=", "AOWUGONG_MYSQL_PASSWORD="} {
+		if !strings.Contains(string(content), key) {
+			t.Errorf(".env.example missing %s", key)
+		}
+	}
+	if strings.Contains(string(content), "AOWUGONG_DATABASE_PATH=") {
+		t.Error(".env.example still contains SQLite database path")
+	}
+}
+
+// TestLoadUsesMySQLOverrides 验证 MySQL 地址、身份和连接池均可由环境变量覆盖。
+func TestLoadUsesMySQLOverrides(t *testing.T) {
+	// 1. 提供本地 SSH 隧道和受限任务账号配置。
+	cfg, err := Load(newLookup(map[string]string{
+		"AOWUGONG_MYSQL_HOST":            "127.0.0.1",
+		"AOWUGONG_MYSQL_PORT":            "13306",
+		"AOWUGONG_MYSQL_DATABASE":        "aowugong",
+		"AOWUGONG_MYSQL_USER":            "aowugong_worker",
+		"AOWUGONG_MYSQL_PASSWORD":        "test-password",
+		"AOWUGONG_MYSQL_MAX_OPEN_CONNS":  "12",
+		"AOWUGONG_MYSQL_MAX_IDLE_CONNS":  "3",
+		"AOWUGONG_MYSQL_SKIP_MIGRATIONS": "true",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// 2. 断言全部网络数据库参数已加载。
+	if cfg.Database.Host != "127.0.0.1" || cfg.Database.Port != 13306 {
+		t.Errorf("Database address = %s:%d, want 127.0.0.1:13306", cfg.Database.Host, cfg.Database.Port)
+	}
+	if cfg.Database.User != "aowugong_worker" || cfg.Database.Password != "test-password" {
+		t.Errorf("Database credentials were not loaded")
+	}
+	if cfg.Database.MaxOpenConns != 12 || cfg.Database.MaxIdleConns != 3 {
+		t.Errorf("Database pool = %d/%d, want 12/3", cfg.Database.MaxOpenConns, cfg.Database.MaxIdleConns)
+	}
+	if !cfg.Database.SkipMigrations {
+		t.Error("Database.SkipMigrations = false, want true")
 	}
 }
 
@@ -83,6 +126,7 @@ func TestLoadAcceptsProductionSecrets(t *testing.T) {
 		"AOWUGONG_ENV":            "production",
 		"AOWUGONG_JWT_SECRET":     "jwt-secret",
 		"AOWUGONG_ENCRYPTION_KEY": "encryption-key",
+		"AOWUGONG_MYSQL_PASSWORD": "mysql-password",
 	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -97,21 +141,32 @@ func TestLoadAcceptsProductionSecrets(t *testing.T) {
 	}
 }
 
-// TestLoadNormalizesPaths 验证数据库与静态目录路径会被清理。
+// TestLoadRequiresProductionDatabasePassword 验证生产环境拒绝缺少 MySQL 密码。
+func TestLoadRequiresProductionDatabasePassword(t *testing.T) {
+	// 1. 提供应用密钥但故意省略数据库密码。
+	_, err := Load(newLookup(map[string]string{
+		"AOWUGONG_ENV":            "production",
+		"AOWUGONG_JWT_SECRET":     "jwt-secret",
+		"AOWUGONG_ENCRYPTION_KEY": "encryption-key",
+	}))
+
+	// 2. 断言配置加载失败且错误指向 MySQL。
+	if err == nil || !strings.Contains(err.Error(), "MySQL") {
+		t.Fatalf("Load() error = %v, want MySQL validation error", err)
+	}
+}
+
+// TestLoadNormalizesPaths 验证静态目录路径会被清理。
 func TestLoadNormalizesPaths(t *testing.T) {
-	// 1. 提供包含相对路径片段的配置。
+	// 1. 提供包含相对路径片段的静态目录配置。
 	cfg, err := Load(newLookup(map[string]string{
-		"AOWUGONG_DATABASE_PATH": "var/../runtime/aowugong.db",
-		"AOWUGONG_STATIC_DIR":    "public/../web/dist",
+		"AOWUGONG_STATIC_DIR": "public/../web/dist",
 	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	// 2. 断言两个路径均已规范化。
-	if cfg.Database.Path != filepath.Clean("var/../runtime/aowugong.db") {
-		t.Errorf("Database.Path = %q, want %q", cfg.Database.Path, filepath.Clean("var/../runtime/aowugong.db"))
-	}
+	// 2. 断言静态目录已规范化。
 	if cfg.HTTP.StaticDir != filepath.Clean("public/../web/dist") {
 		t.Errorf("StaticDir = %q, want %q", cfg.HTTP.StaticDir, filepath.Clean("public/../web/dist"))
 	}

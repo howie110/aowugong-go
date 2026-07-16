@@ -12,7 +12,14 @@ import (
 const (
 	defaultEnvironment        = "development"
 	defaultHTTPAddress        = "0.0.0.0:2346"
-	defaultDatabasePath       = "storage/data/aowugong.db"
+	defaultMySQLHost          = "127.0.0.1"
+	defaultMySQLPort          = 3306
+	defaultMySQLDatabase      = "aowugong"
+	defaultMySQLUser          = "aowugong"
+	defaultMySQLMaxOpenConns  = 8
+	defaultMySQLMaxIdleConns  = 2
+	defaultMySQLConnLifetime  = 5 * time.Minute
+	defaultMySQLDumpCommand   = "mysqldump"
 	defaultStaticDir          = "web/dist"
 	defaultTokenLifetime      = 72 * time.Hour
 	defaultWorkNavigationPath = "storage/private/work/navigation.json"
@@ -43,9 +50,18 @@ type HTTP struct {
 	StaticDir string
 }
 
-// Database 描述 SQLite 数据库配置。
+// Database 描述 MySQL 网络连接和连接池配置。
 type Database struct {
-	Path string
+	Host            string
+	Port            int
+	Name            string
+	User            string
+	Password        string
+	DumpCommand     string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	SkipMigrations  bool
 }
 
 // Auth 描述令牌与加密配置。
@@ -55,7 +71,7 @@ type Auth struct {
 	TokenLifetime time.Duration
 }
 
-// Storage 描述运行时文件位置和 SQLite 备份保留策略。
+// Storage 描述运行时文件位置和 MySQL 备份保留策略。
 type Storage struct {
 	WorkNavigationPath string
 	BackupDir          string
@@ -136,7 +152,11 @@ func Load(lookup LookupEnv) (Config, error) {
 			Address:   defaultHTTPAddress,
 			StaticDir: defaultStaticDir,
 		},
-		Database: Database{Path: defaultDatabasePath},
+		Database: Database{
+			Host: defaultMySQLHost, Port: defaultMySQLPort, Name: defaultMySQLDatabase,
+			User: defaultMySQLUser, DumpCommand: defaultMySQLDumpCommand, MaxOpenConns: defaultMySQLMaxOpenConns,
+			MaxIdleConns: defaultMySQLMaxIdleConns, ConnMaxLifetime: defaultMySQLConnLifetime,
+		},
 		Auth: Auth{
 			TokenLifetime: defaultTokenLifetime,
 		},
@@ -175,9 +195,6 @@ func Load(lookup LookupEnv) (Config, error) {
 	if value, ok := lookup("AOWUGONG_HTTP_ADDRESS"); ok && strings.TrimSpace(value) != "" {
 		cfg.HTTP.Address = strings.TrimSpace(value)
 	}
-	if value, ok := lookup("AOWUGONG_DATABASE_PATH"); ok && strings.TrimSpace(value) != "" {
-		cfg.Database.Path = strings.TrimSpace(value)
-	}
 	if value, ok := lookup("AOWUGONG_STATIC_DIR"); ok && strings.TrimSpace(value) != "" {
 		cfg.HTTP.StaticDir = strings.TrimSpace(value)
 	}
@@ -191,6 +208,11 @@ func Load(lookup LookupEnv) (Config, error) {
 		cfg.Auth.EncryptionKey = strings.TrimSpace(value)
 	}
 	loadString(lookup, "AOWUGONG_WORK_NAVIGATION_PATH", &cfg.Storage.WorkNavigationPath)
+	loadString(lookup, "AOWUGONG_MYSQL_HOST", &cfg.Database.Host)
+	loadString(lookup, "AOWUGONG_MYSQL_DATABASE", &cfg.Database.Name)
+	loadString(lookup, "AOWUGONG_MYSQL_USER", &cfg.Database.User)
+	loadString(lookup, "AOWUGONG_MYSQL_PASSWORD", &cfg.Database.Password)
+	loadString(lookup, "AOWUGONG_MYSQL_DUMP_COMMAND", &cfg.Database.DumpCommand)
 	loadString(lookup, "AOWUGONG_BACKUP_DIR", &cfg.Storage.BackupDir)
 	loadString(lookup, "AOWUGONG_POSITION_UPLOAD_DIR", &cfg.Storage.PositionUploadDir)
 	loadString(lookup, "AOWUGONG_POSITION_TEMP_DIR", &cfg.Storage.PositionTempDir)
@@ -220,6 +242,15 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err := loadInt(lookup, "AOWUGONG_BACKUP_RETENTION", &cfg.Storage.BackupRetention, 1, 365); err != nil {
 		return Config{}, err
 	}
+	if err := loadInt(lookup, "AOWUGONG_MYSQL_PORT", &cfg.Database.Port, 1, 65535); err != nil {
+		return Config{}, err
+	}
+	if err := loadInt(lookup, "AOWUGONG_MYSQL_MAX_OPEN_CONNS", &cfg.Database.MaxOpenConns, 1, 100); err != nil {
+		return Config{}, err
+	}
+	if err := loadInt(lookup, "AOWUGONG_MYSQL_MAX_IDLE_CONNS", &cfg.Database.MaxIdleConns, 0, 100); err != nil {
+		return Config{}, err
+	}
 	if err := loadInt(lookup, "POSITION_UPLOAD_MAX_MB", &cfg.Clients.PositionOCR.UploadMaxMB, 1, 100); err != nil {
 		return Config{}, err
 	}
@@ -229,9 +260,11 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err := loadBool(lookup, "AOWUGONG_SCHEDULER_ENABLED", &cfg.Scheduler.Enabled); err != nil {
 		return Config{}, err
 	}
+	if err := loadBool(lookup, "AOWUGONG_MYSQL_SKIP_MIGRATIONS", &cfg.Database.SkipMigrations); err != nil {
+		return Config{}, err
+	}
 
-	// 3. 清理路径并验证生产环境的必填密钥。
-	cfg.Database.Path = filepath.Clean(cfg.Database.Path)
+	// 3. 清理路径并验证数据库连接池和生产环境密钥。
 	cfg.HTTP.StaticDir = filepath.Clean(cfg.HTTP.StaticDir)
 	cfg.Storage.WorkNavigationPath = filepath.Clean(cfg.Storage.WorkNavigationPath)
 	cfg.Storage.BackupDir = filepath.Clean(cfg.Storage.BackupDir)
@@ -240,8 +273,17 @@ func Load(lookup LookupEnv) (Config, error) {
 	if cfg.MigrationsDir != "" {
 		cfg.MigrationsDir = filepath.Clean(cfg.MigrationsDir)
 	}
+	cfg.Database.Host = strings.TrimSpace(cfg.Database.Host)
+	cfg.Database.Name = strings.TrimSpace(cfg.Database.Name)
+	cfg.Database.User = strings.TrimSpace(cfg.Database.User)
+	if cfg.Database.MaxIdleConns > cfg.Database.MaxOpenConns {
+		return Config{}, fmt.Errorf("MySQL 空闲连接数不能大于最大连接数")
+	}
 	if cfg.Environment == "production" && (cfg.Auth.JWTSecret == "" || cfg.Auth.EncryptionKey == "") {
 		return Config{}, fmt.Errorf("生产环境必须配置 JWT 与加密密钥")
+	}
+	if cfg.Environment == "production" && cfg.Database.Password == "" {
+		return Config{}, fmt.Errorf("生产环境必须配置 MySQL 密码")
 	}
 
 	return cfg, nil

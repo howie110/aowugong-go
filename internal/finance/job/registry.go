@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/howiedata/aowugong-go/internal/config"
 	"github.com/howiedata/aowugong-go/internal/database"
 	"github.com/howiedata/aowugong-go/internal/finance/articleanalysis"
 	financedata "github.com/howiedata/aowugong-go/internal/finance/data"
@@ -43,12 +44,13 @@ type NotificationSender interface {
 	Text(ctx context.Context, titleParts []string, body, to string) error
 }
 
-// BackupFunc 定义可测试的 SQLite 安全快照函数。
-type BackupFunc func(ctx context.Context, db *sql.DB, directory string, retention int, now time.Time) (string, error)
+// BackupFunc 定义可测试的 MySQL 逻辑备份函数。
+type BackupFunc func(ctx context.Context, cfg config.Database, directory string, retention int, now time.Time) (string, error)
 
 // Dependencies 汇总七项任务所需的显式业务依赖与备份配置。
 type Dependencies struct {
 	DB              *sql.DB
+	Database        config.Database
 	Data            DataUpdater
 	Articles        ArticleSyncer
 	Monitoring      Monitor
@@ -75,13 +77,13 @@ func RegisterAll(registry *scheduler.Registry, dependencies Dependencies) error 
 		return fmt.Errorf("任务注册依赖不完整")
 	}
 	if dependencies.BackupDir == "" || dependencies.BackupRetention < 1 {
-		return fmt.Errorf("SQLite 备份目录和保留数量无效")
+		return fmt.Errorf("MySQL 备份目录和保留数量无效")
 	}
 	if dependencies.Now == nil {
 		dependencies.Now = time.Now
 	}
 	if dependencies.Backup == nil {
-		dependencies.Backup = database.BackupSQLite
+		dependencies.Backup = database.NewMySQLBackuper().Backup
 	}
 	taskSet := &tasks{dependencies: dependencies}
 
@@ -93,7 +95,7 @@ func RegisterAll(registry *scheduler.Registry, dependencies Dependencies) error 
 		{Name: "check_service_monitors", Description: "检查服务连通性", Schedule: "30 8 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkServiceMonitors},
 		{Name: "check_subscription_expiry_notify", Description: "检查订阅到期并提醒", Schedule: "30 9 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkSubscriptionExpiryNotify},
 		{Name: "openilink_reply_reminder", Description: "提醒回复 OpeniLink Bot", Schedule: "0 10 * * *", Timeout: 5 * time.Minute, Run: taskSet.openILinkReplyReminder},
-		{Name: "backup_sqlite", Description: "创建 SQLite 安全快照", Schedule: "30 3 * * *", Timeout: 30 * time.Minute, Run: taskSet.backupSQLite},
+		{Name: "backup_mysql", Description: "创建 MySQL 压缩逻辑备份", Schedule: "30 3 * * *", Timeout: 2 * time.Hour, Run: taskSet.backupMySQL},
 	}
 	for _, definition := range definitions {
 		if err := registry.Register(definition); err != nil {
@@ -118,7 +120,7 @@ func (t *tasks) testCrontab(ctx context.Context) (string, error) {
 // updateTushareDailyData 补齐缺失开市日的股票日线。
 // 输入：ctx 是任务超时上下文。
 // 输出：返回缺失日期、同步日期和行数摘要；失败时返回错误。
-// 副作用：调用 Tushare HTTP 并写入 SQLite tushare_daily。
+// 副作用：调用 Tushare HTTP 并写入 MySQL tushare_daily。
 func (t *tasks) updateTushareDailyData(ctx context.Context) (string, error) {
 	// 1. 调用唯一日线同步服务并格式化任务摘要。
 	result, err := t.dependencies.Data.UpdateDaily(ctx)
@@ -132,7 +134,7 @@ func (t *tasks) updateTushareDailyData(ctx context.Context) (string, error) {
 // syncInvestmentArticles 同步 RSS 并分析当前批次待处理文章。
 // 输入：ctx 是任务超时上下文。
 // 输出：返回抓取、写入和分析摘要；来源或模型失败时返回错误。
-// 副作用：调用 WeChatRSS、RSS、DeepSeek 并写入 SQLite。
+// 副作用：调用 WeChatRSS、RSS、DeepSeek 并写入 MySQL。
 func (t *tasks) syncInvestmentArticles(ctx context.Context) (string, error) {
 	// 1. 通过文章服务执行最多两千篇抓取和十个五十篇分析批次。
 	result, err := t.dependencies.Articles.SyncScheduled(ctx)
@@ -150,7 +152,7 @@ func (t *tasks) syncInvestmentArticles(ctx context.Context) (string, error) {
 // checkServiceMonitors 探测当前全部服务并持久化结果。
 // 输入：ctx 是任务超时上下文。
 // 输出：全部正常时返回计数摘要，存在 down 时返回错误。
-// 副作用：调用监控目标并写入 SQLite service_monitor_result。
+// 副作用：调用监控目标并写入 MySQL service_monitor_result。
 func (t *tasks) checkServiceMonitors(ctx context.Context) (string, error) {
 	// 1. 调用统一监控服务并按 down 数决定任务状态。
 	result, err := t.dependencies.Monitoring.CheckAll(ctx)
@@ -167,7 +169,7 @@ func (t *tasks) checkServiceMonitors(ctx context.Context) (string, error) {
 // checkSubscriptionExpiryNotify 检查正好十天后到期的订阅并发送微信提醒。
 // 输入：ctx 是任务超时上下文。
 // 输出：返回检查或提醒数量；查询和发送失败时返回错误。
-// 副作用：读取 SQLite，命中记录时调用统一通知服务发送微信并写日志。
+// 副作用：读取 MySQL，命中记录时调用统一通知服务发送微信并写日志。
 func (t *tasks) checkSubscriptionExpiryNotify(ctx context.Context) (string, error) {
 	// 1. 复用订阅服务的业务日期和精确到期筛选。
 	records, err := t.dependencies.Subscriptions.ListExpiring(ctx, subscriptionReminderDays)
@@ -189,7 +191,7 @@ func (t *tasks) checkSubscriptionExpiryNotify(ctx context.Context) (string, erro
 // openILinkReplyReminder 发送每日 OpeniLink 回复保活提醒。
 // 输入：ctx 是任务超时上下文。
 // 输出：发送成功返回摘要，失败时返回错误。
-// 副作用：调用统一通知服务发送微信并写 SQLite 日志。
+// 副作用：调用统一通知服务发送微信并写 MySQL 日志。
 func (t *tasks) openILinkReplyReminder(ctx context.Context) (string, error) {
 	// 1. 发送固定短提醒以维持微信消息窗口。
 	body := "OpeniLink 每日保活提醒：请回复机器人任意一句，保持微信通知通道可用。"
@@ -199,18 +201,18 @@ func (t *tasks) openILinkReplyReminder(ctx context.Context) (string, error) {
 	return "OpeniLink 回复提醒已发送", nil
 }
 
-// backupSQLite 创建应用数据库安全快照并执行保留策略。
+// backupMySQL 创建应用数据库压缩逻辑备份并执行保留策略。
 // 输入：ctx 是任务超时上下文。
 // 输出：返回新快照路径；创建、验证或清理失败时返回错误。
-// 副作用：读取 SQLite 一致视图，创建快照并删除超额旧快照。
-func (t *tasks) backupSQLite(ctx context.Context) (string, error) {
+// 副作用：运行 mysqldump 读取 MySQL 一致视图，创建文件并删除超额旧备份。
+func (t *tasks) backupMySQL(ctx context.Context) (string, error) {
 	// 1. 调用数据库包唯一备份入口并返回产物路径。
-	path, err := t.dependencies.Backup(ctx, t.dependencies.DB, t.dependencies.BackupDir,
+	path, err := t.dependencies.Backup(ctx, t.dependencies.Database, t.dependencies.BackupDir,
 		t.dependencies.BackupRetention, t.dependencies.Now())
 	if err != nil {
-		return "", fmt.Errorf("备份 SQLite: %w", err)
+		return "", fmt.Errorf("备份 MySQL: %w", err)
 	}
-	return "SQLite 快照=" + path, nil
+	return "MySQL 备份=" + path, nil
 }
 
 // buildSubscriptionBody 组装订阅到期微信提醒正文。

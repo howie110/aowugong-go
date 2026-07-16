@@ -2,13 +2,11 @@ package data
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/client"
-	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 type fakeDailySource struct {
@@ -28,22 +26,15 @@ func (s *fakeDailySource) Daily(_ context.Context, startDate, _ string) ([]clien
 	}}, nil
 }
 
-// TestServiceUpdatesOnlyMissingOpenDates 验证日线同步只拉取缺失开市日并写入 SQLite。
+// TestServiceUpdatesOnlyMissingOpenDates 验证日线同步只拉取缺失开市日并写入 MySQL。
 // 输入：一个已有开市日、一个缺失开市日、一个休市日和模拟 Tushare。
 // 输出：只请求并写入缺失开市日，返回日期与行数摘要。
-// 副作用：在测试临时目录创建并写入 SQLite 文件。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
 func TestServiceUpdatesOnlyMissingOpenDates(t *testing.T) {
 	// 1. 创建数据库、交易日历和一个已有交易日。
 	ctx := context.Background()
-	db, err := database.OpenSQLite(ctx, config.Database{Path: filepath.Join(t.TempDir(), "sync.db")})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	defer db.Close()
-	if err := database.Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
-		t.Fatalf("Migrate() error = %v", err)
-	}
-	_, err = db.ExecContext(ctx, `INSERT INTO tushare_trade_cal(exchange, cal_date, is_open) VALUES
+	db := testdatabase.Open(t)
+	_, err := db.ExecContext(ctx, `INSERT INTO tushare_trade_cal(exchange, cal_date, is_open) VALUES
 		('SSE','2026-07-13',1),('SSE','2026-07-14',1),('SSE','2026-07-15',0)`)
 	if err != nil {
 		t.Fatalf("insert calendar: %v", err)
