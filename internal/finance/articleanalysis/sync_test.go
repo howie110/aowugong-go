@@ -10,21 +10,10 @@ import (
 	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
-type fixedRSSGateway struct {
-	pollCount int
-}
+type fixedRSSGateway struct{}
 
 type manyRSSGateway struct {
 	count int
-}
-
-// Poll 模拟批量文章任务的上游刷新。
-// 输入：ctx 和 feedURL 模拟正式 RSS 客户端。
-// 输出：始终成功。
-// 副作用：无。
-func (manyRSSGateway) Poll(context.Context, string) error {
-	// 1. 返回刷新成功。
-	return nil
 }
 
 // Fetch 返回跨越单批分析上限的文章集合。
@@ -42,16 +31,6 @@ func (g manyRSSGateway) Fetch(ctx context.Context, sourceID int64, feedURL strin
 		})
 	}
 	return items, nil
-}
-
-// Poll 记录文章同步测试中的上游刷新调用。
-// 输入：ctx 和 feedURL 模拟正式 RSS 客户端。
-// 输出：始终成功。
-// 副作用：增加 pollCount。
-func (f *fixedRSSGateway) Poll(ctx context.Context, feedURL string) error {
-	// 1. 记录调用次数供断言。
-	f.pollCount++
-	return nil
 }
 
 // Fetch 返回文章同步测试使用的一篇固定文章。
@@ -107,11 +86,20 @@ func TestServiceSyncsRSSAndAnalyzesThroughUnifiedEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	if result.InsertedCount != 1 || result.AnalyzedCount != 1 || rss.pollCount != 1 {
-		t.Fatalf("result = %#v, pollCount = %d", result, rss.pollCount)
+	if result.InsertedCount != 1 || result.UpdatedCount != 0 || result.AnalyzedCount != 1 {
+		t.Fatalf("first result = %#v", result)
 	}
 
-	// 3. 读取页面列表核对清洗后的结果。
+	// 3. 再次读取同一份 WeChatRSS 数据时跳过已有文章，不重复更新大字段。
+	repeated, err := service.Sync(ctx, 30, false, 0)
+	if err != nil {
+		t.Fatalf("second Sync() error = %v", err)
+	}
+	if repeated.InsertedCount != 0 || repeated.UpdatedCount != 0 {
+		t.Fatalf("second result = %#v", repeated)
+	}
+
+	// 4. 读取页面列表核对清洗后的结果。
 	articles, err := service.Articles(ctx, 60, 50)
 	if err != nil || len(articles) != 1 {
 		t.Fatalf("Articles() = %#v, %v", articles, err)

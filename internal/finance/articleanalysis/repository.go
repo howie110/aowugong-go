@@ -165,20 +165,22 @@ func (r *Repository) sourceRecords(ctx context.Context) ([]sourceRecord, error) 
 	return results, nil
 }
 
-// UpsertArticle 按稳定文章键新增或更新 RSS 文章。
+// UpsertArticle 按稳定文章键新增 RSS 文章，已有文章直接返回。
 // 输入：ctx 控制事务，sourceID 是来源，entry 是规范化文章。
-// 输出：返回 inserted 或 updated 及文章主键；失败时返回错误。
-// 副作用：写入 investment_article。
+// 输出：返回 inserted 或 unchanged 及文章主键；失败时返回错误。
+// 副作用：仅在文章尚未入库时写入 investment_article。
 func (r *Repository) UpsertArticle(ctx context.Context, sourceID int64, entry FeedEntry) (string, int64, error) {
-	// 1. 查询现有文章和来源名称，确定动作及作者回退值。
+	// 1. 查询稳定文章键，已有记录直接返回，避免重复更新正文大字段。
 	var existingID int64
 	err := r.db.QueryRowContext(ctx, "SELECT id FROM investment_article WHERE article_key = ?", entry.ArticleKey).Scan(&existingID)
-	action := "updated"
-	if err == sql.ErrNoRows {
-		action = "inserted"
-	} else if err != nil {
+	if err == nil {
+		return "unchanged", existingID, nil
+	}
+	if err != sql.ErrNoRows {
 		return "", 0, fmt.Errorf("查询现有投资文章: %w", err)
 	}
+
+	// 2. 读取来源名称并准备新增文章字段。
 	var sourceName string
 	if err := r.db.QueryRowContext(ctx, "SELECT source_name FROM investment_article_source WHERE id = ?", sourceID).Scan(&sourceName); err != nil {
 		return "", 0, fmt.Errorf("查询投资文章来源: %w", err)
@@ -192,7 +194,7 @@ func (r *Repository) UpsertArticle(ctx context.Context, sourceID int64, entry Fe
 		return "", 0, fmt.Errorf("序列化 RSS 原始文章: %w", err)
 	}
 
-	// 2. upsert 当前可变字段，并通过 LAST_INSERT_ID 保留稳定主键。
+	// 3. 写入新文章，并在极小概率并发冲突时通过唯一键保留稳定主键。
 	externalID := nullableArticleText(truncateRunes(entry.ExternalID, 255))
 	title := fallbackTitle(truncateRunes(entry.Title, 480))
 	link := truncateRunes(entry.Link, 1000)
@@ -227,7 +229,7 @@ func (r *Repository) UpsertArticle(ctx context.Context, sourceID int64, entry Fe
 	if err != nil {
 		return "", 0, fmt.Errorf("读取投资文章主键: %w", err)
 	}
-	return action, articleID, nil
+	return "inserted", articleID, nil
 }
 
 // UpdateSourceStatus 更新信息源最近抓取结果。

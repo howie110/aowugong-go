@@ -20,9 +20,8 @@ const (
 	scheduledAnalysisMaxBatches = 10
 )
 
-// RSSGateway 定义投资文章服务需要的 RSS 抓取和 WeChatRSS 刷新能力。
+// RSSGateway 定义投资文章服务需要的 RSS 读取能力。
 type RSSGateway interface {
-	Poll(ctx context.Context, feedURL string) error
 	Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.RSSItem, error)
 }
 
@@ -42,7 +41,7 @@ type ServiceOptions struct {
 // Sync 抓取全部启用来源，并按选项继续分析待处理文章。
 // 输入：ctx 控制处理，fetchLimit 是每来源上限，analyze 控制是否分析，analysisLimit 是分析上限。
 // 输出：返回来源、抓取、写入和分析统计；基础数据库失败时返回错误。
-// 副作用：调用 WeChatRSS/RSS/DeepSeek，并写入 MySQL。
+// 副作用：读取 WeChatRSS/RSS，按需调用 DeepSeek，并写入 MySQL。
 func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analysisLimit int) (SyncResult, error) {
 	// 1. 读取启用来源并初始化稳定空数组结果。
 	sources, err := s.repository.sourceRecords(ctx)
@@ -57,21 +56,13 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 		fetchLimit = scheduledFetchLimit
 	}
 
-	// 2. 逐来源刷新、抓取并 upsert，单来源错误写入统计。
+	// 2. 逐来源读取现有 RSS 数据并写入新文章，单来源错误写入统计。
 	for _, source := range sources {
 		if s.options.RSS == nil {
 			message := "RSS 客户端未配置"
 			_ = s.repository.UpdateSourceStatus(ctx, source.ID, "error", message)
 			result.FailedSources = append(result.FailedSources, map[string]string{"source": source.SourceName, "error": message})
 			continue
-		}
-		if source.SourceType == "wechat_rss_aggregate" {
-			if err := s.options.RSS.Poll(ctx, source.FeedURL); err != nil {
-				message := err.Error()
-				_ = s.repository.UpdateSourceStatus(ctx, source.ID, "error", message)
-				result.FailedSources = append(result.FailedSources, map[string]string{"source": source.SourceName, "error": message})
-				continue
-			}
 		}
 		items, err := s.options.RSS.Fetch(ctx, source.ID, source.FeedURL, fetchLimit)
 		if err != nil {
@@ -80,19 +71,22 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 			result.FailedSources = append(result.FailedSources, map[string]string{"source": source.SourceName, "error": message})
 			continue
 		}
-		inserted, updated := 0, 0
+		inserted, updated, unchanged := 0, 0, 0
 		for _, item := range items {
 			action, _, err := s.repository.UpsertArticle(ctx, source.ID, feedEntryFromClient(item))
 			if err != nil {
 				return SyncResult{}, fmt.Errorf("保存来源 %s 文章: %w", source.SourceName, err)
 			}
-			if action == "inserted" {
+			switch action {
+			case "inserted":
 				inserted++
-			} else {
+			case "updated":
 				updated++
+			default:
+				unchanged++
 			}
 		}
-		message := fmt.Sprintf("fetched=%d, inserted=%d, updated=%d", len(items), inserted, updated)
+		message := fmt.Sprintf("fetched=%d, inserted=%d, updated=%d, unchanged=%d", len(items), inserted, updated, unchanged)
 		if err := s.repository.UpdateSourceStatus(ctx, source.ID, "success", message); err != nil {
 			return SyncResult{}, err
 		}

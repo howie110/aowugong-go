@@ -2,11 +2,38 @@ package articleanalysis
 
 import (
 	"context"
+	"regexp"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
+
+// TestRepositorySkipsExistingArticle 验证已入库文章不会再次写入大字段。
+// 输入：数据库已存在同一 article_key 的文章。
+// 输出：返回 unchanged 和原文章主键。
+// 副作用：仅执行一条模拟查询，不执行 INSERT 或 UPDATE。
+func TestRepositorySkipsExistingArticle(t *testing.T) {
+	// 1. 创建只期望读取稳定文章键的模拟数据库。
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM investment_article WHERE article_key = ?")).
+		WithArgs("existing-key").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(42))
+
+	// 2. 重复写入时必须直接返回，不再查询来源或更新文章正文。
+	action, articleID, err := NewRepository(db).UpsertArticle(context.Background(), 1, FeedEntry{ArticleKey: "existing-key"})
+	if err != nil || action != "unchanged" || articleID != 42 {
+		t.Fatalf("UpsertArticle() = %q, %d, %v", action, articleID, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("database expectations = %v", err)
+	}
+}
 
 // TestRepositoryAndReportPreserveArticleContracts 验证文章存储、详情和 60/3 天报告契约。
 // 输入：一篇当前文章和一条结构化分析结果。
