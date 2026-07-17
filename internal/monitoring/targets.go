@@ -55,7 +55,7 @@ func BuildTargets(cfg config.Clients) []Target {
 	}
 	if openILinkURL != "" {
 		targets = append(targets, Target{
-			Code: "openilink-hub", Name: "openilink/openilink-hub", URL: endpointURL(openILinkURL, "/bot/v1/message/send"),
+			Code: "openilink-hub", Name: "openilink/openilink-hub", URL: openILinkURL,
 			ProbeURL:    endpointURL(openILinkProbeURL, "/bot/v1/message/send"),
 			Description: textPointer("静默验证微信通知链路"),
 		})

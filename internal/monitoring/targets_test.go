@@ -30,7 +30,7 @@ func TestBuildTargetsIncludesDefaultsAndDedupesExtras(t *testing.T) {
 	if targets[2].URL != "http://8.138.123.59:5000/api/admin/status" || targets[2].ProbeURL != "http://127.0.0.1:5000/api/admin/status" {
 		t.Errorf("wechat target = %#v", targets[2])
 	}
-	if targets[3].Code != "openilink-hub" || targets[3].URL != "http://8.138.123.59:9800/bot/v1/message/send" || targets[3].ProbeURL != "http://127.0.0.1:9800/bot/v1/message/send" {
+	if targets[3].Code != "openilink-hub" || targets[3].URL != "http://8.138.123.59:9800/" || targets[3].ProbeURL != "http://127.0.0.1:9800/bot/v1/message/send" {
 		t.Errorf("openilink target = %#v", targets[3])
 	}
 }
