@@ -177,7 +177,6 @@ export function DashboardPage({ initialPage }: DashboardPageProps) {
         <PageHeader
           pageData={pageData}
           pageKey={activePage}
-          isLoading={isPageLoading}
           isStockAnalysisMasked={isStockAnalysisMasked}
           onToggleStockAnalysisMask={() => setIsStockAnalysisMasked((value) => !value)}
         />

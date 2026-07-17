@@ -1,4 +1,4 @@
-import { ArrowDownRight, RefreshCw, Sparkles } from "lucide-react";
+import { ArrowDownRight, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -86,15 +86,11 @@ export function ArticleFetchPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap justify-end gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={() => void loadData()} disabled={isLoading || isWorking}>
-          <RefreshCw className="h-4 w-4" />
-          刷新
-        </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => void handleSync()} disabled={isWorking}>
+        <Button type="button" variant="outline" size="sm" className="w-28" onClick={() => void handleSync()} disabled={isWorking}>
           <ArrowDownRight className="h-4 w-4" />
           抓取并分析
         </Button>
-        <Button type="button" size="sm" onClick={() => void handleAnalyze()} disabled={isWorking}>
+        <Button type="button" size="sm" className="w-28" onClick={() => void handleAnalyze()} disabled={isWorking}>
           <Sparkles className="h-4 w-4" />
           分析未分析
         </Button>

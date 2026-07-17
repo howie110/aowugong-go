@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
-    "test": "node --test tests/remembered-credentials.test.cjs tests/authorized-fetch.test.cjs tests/article-sync-notification.test.cjs tests/article-analysis-display.test.cjs",
+    "test": "node --test tests/remembered-credentials.test.cjs tests/authorized-fetch.test.cjs tests/article-sync-notification.test.cjs tests/article-analysis-display.test.cjs tests/page-controls-layout.test.cjs",
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 5173"
   },

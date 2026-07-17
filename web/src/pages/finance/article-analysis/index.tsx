@@ -1,7 +1,5 @@
-import { RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getProfile, type UserProfile } from "@/lib/auth";
 import {
@@ -114,13 +112,6 @@ export function ArticleAnalysisPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" size="sm" onClick={() => void loadData()} disabled={isLoading}>
-          <RefreshCw className="h-4 w-4" />
-          刷新
-        </Button>
-      </div>
-
       <div className="grid gap-3 [&>*]:min-w-0 sm:gap-4 xl:grid-cols-[1fr_0.42fr_0.5fr]">
         <MarketPanel report={report} />
         <MonitoredAccountsCard accounts={monitoredAccounts} articleCount={articles.length} />

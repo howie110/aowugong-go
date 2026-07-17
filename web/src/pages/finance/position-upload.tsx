@@ -206,16 +206,12 @@ function SnapshotTable({ snapshots }: { snapshots: AssetSnapshot[] }) {
         {snapshots.map((item) => (
           <div key={item.id} className="rounded-md border px-3 py-3">
             <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium">{item.account_alias || `**${item.account_suffix}`}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{item.snapshot_date}</div>
-              </div>
+              <div className="text-sm font-medium">{item.snapshot_date}</div>
               <Badge variant="outline" className="shrink-0">
                 {item.source_app}
               </Badge>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <ImportMeta label="券商" value={item.broker_name} />
               <ImportMeta label="OCR" value={item.ocr_provider || "-"} />
               <ImportMeta label="导入时间" value={formatDateTime(item.created_at || item.updated_at)} />
               <ImportMeta label="状态" value={item.warnings?.length ? `${item.warnings.length} 个提示` : "已导入"} />
@@ -228,8 +224,6 @@ function SnapshotTable({ snapshots }: { snapshots: AssetSnapshot[] }) {
           <TableHeader>
             <TableRow>
               <TableHead>日期</TableHead>
-              <TableHead>账户</TableHead>
-              <TableHead>券商</TableHead>
               <TableHead>来源</TableHead>
               <TableHead>OCR</TableHead>
               <TableHead>导入时间</TableHead>
@@ -240,8 +234,6 @@ function SnapshotTable({ snapshots }: { snapshots: AssetSnapshot[] }) {
             {snapshots.map((item) => (
               <TableRow key={item.id}>
                 <TableCell className="whitespace-nowrap">{item.snapshot_date}</TableCell>
-                <TableCell className="whitespace-nowrap">{item.account_alias || `**${item.account_suffix}`}</TableCell>
-                <TableCell className="whitespace-nowrap">{item.broker_name}</TableCell>
                 <TableCell className="whitespace-nowrap">{item.source_app}</TableCell>
                 <TableCell className="whitespace-nowrap">{item.ocr_provider || "-"}</TableCell>
                 <TableCell className="whitespace-nowrap text-muted-foreground">{formatDateTime(item.created_at || item.updated_at)}</TableCell>
