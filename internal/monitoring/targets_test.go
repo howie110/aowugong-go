@@ -8,22 +8,29 @@ import (
 
 // TestBuildTargetsIncludesDefaultsAndDedupesExtras 验证默认目标、业务目标和额外目标按 code 去重。
 func TestBuildTargetsIncludesDefaultsAndDedupesExtras(t *testing.T) {
-	// 1. 配置 WeChatRSS、OpeniLink 和一个与博客 code 冲突的额外目标。
+	// 1. 为两个内部服务分别配置本机探测地址和公网展示地址。
 	cfg := config.Clients{
-		WeChatRSSMonitorURL: "http://127.0.0.1:5000/api/admin/status",
-		OpenILink:           config.OpenILink{MonitorURL: "http://127.0.0.1:9800/"},
+		ArticleRSSURL:       "http://127.0.0.1:5000/api/rss/all",
+		WeChatRSSMonitorURL: "http://8.138.123.59:5000/api/admin/status",
+		OpenILink: config.OpenILink{
+			HubURL:     "http://127.0.0.1:9800",
+			MonitorURL: "http://8.138.123.59:9800/",
+		},
 		ServiceMonitorTargets: `[
 			{"code":"demo","name":"Demo","url":"https://example.com/health"},
 			{"code":"aowugong-blog","name":"duplicate","url":"https://invalid.example"}
 		]`,
 	}
 
-	// 2. 结果应包含五个唯一目标且 OpeniLink 指向发送接口。
+	// 2. 结果应包含五个唯一目标，页面地址使用公网，探测地址使用本机链路。
 	targets := BuildTargets(cfg)
 	if len(targets) != 5 {
 		t.Fatalf("target count = %d, want 5: %#v", len(targets), targets)
 	}
-	if targets[3].Code != "openilink-hub" || targets[3].URL != "http://127.0.0.1:9800/bot/v1/message/send" {
+	if targets[2].URL != "http://8.138.123.59:5000/api/admin/status" || targets[2].ProbeURL != "http://127.0.0.1:5000/api/admin/status" {
+		t.Errorf("wechat target = %#v", targets[2])
+	}
+	if targets[3].Code != "openilink-hub" || targets[3].URL != "http://8.138.123.59:9800/bot/v1/message/send" || targets[3].ProbeURL != "http://127.0.0.1:9800/bot/v1/message/send" {
 		t.Errorf("openilink target = %#v", targets[3])
 	}
 }

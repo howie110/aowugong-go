@@ -6,6 +6,7 @@ type Target struct {
 	Code        string  `json:"code"`
 	Name        string  `json:"name"`
 	URL         string  `json:"url"`
+	ProbeURL    string  `json:"-"`
 	Description *string `json:"description"`
 }
 

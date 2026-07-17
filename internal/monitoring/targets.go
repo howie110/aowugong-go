@@ -23,18 +23,25 @@ var nonCodeCharacters = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 func BuildTargets(cfg config.Clients) []Target {
 	// 1. 加入两个固定公开站点。
 	targets := []Target{
-		{Code: "aowugong-blog", Name: "howie110/astro-theme-retypeset", URL: defaultBlogURL, Description: textPointer("个人博客站点")},
-		{Code: "movie-carousel", Name: "howie110/Movie-Images", URL: defaultMovieURL, Description: textPointer("电影画面轮播页面")},
+		{Code: "aowugong-blog", Name: "howie110/astro-theme-retypeset", URL: defaultBlogURL, ProbeURL: defaultBlogURL, Description: textPointer("个人博客站点")},
+		{Code: "movie-carousel", Name: "howie110/Movie-Images", URL: defaultMovieURL, ProbeURL: defaultMovieURL, Description: textPointer("电影画面轮播页面")},
 	}
 
-	// 2. 按配置加入 WeChatRSS 登录状态和 OpeniLink 发送能力目标。
+	// 2. 为内部服务分别保留公网展示地址和本机探测地址。
 	wechatURL := strings.TrimSpace(cfg.WeChatRSSMonitorURL)
-	if wechatURL == "" && strings.TrimSpace(cfg.ArticleRSSURL) != "" {
-		wechatURL = endpointURL(cfg.ArticleRSSURL, "/api/admin/status")
+	wechatProbeURL := ""
+	if strings.TrimSpace(cfg.ArticleRSSURL) != "" {
+		wechatProbeURL = endpointURL(cfg.ArticleRSSURL, "/api/admin/status")
+	}
+	if wechatURL == "" {
+		wechatURL = wechatProbeURL
+	}
+	if wechatProbeURL == "" {
+		wechatProbeURL = wechatURL
 	}
 	if wechatURL != "" {
 		targets = append(targets, Target{
-			Code: "wechat-rss", Name: "tmwgsicp/wechat-download-api", URL: wechatURL,
+			Code: "wechat-rss", Name: "tmwgsicp/wechat-download-api", URL: wechatURL, ProbeURL: wechatProbeURL,
 			Description: textPointer("微信登录状态与 RSS 聚合服务"),
 		})
 	}
@@ -42,9 +49,14 @@ func BuildTargets(cfg config.Clients) []Target {
 	if openILinkURL == "" {
 		openILinkURL = strings.TrimSpace(cfg.OpenILink.HubURL)
 	}
+	openILinkProbeURL := strings.TrimSpace(cfg.OpenILink.HubURL)
+	if openILinkProbeURL == "" {
+		openILinkProbeURL = openILinkURL
+	}
 	if openILinkURL != "" {
 		targets = append(targets, Target{
 			Code: "openilink-hub", Name: "openilink/openilink-hub", URL: endpointURL(openILinkURL, "/bot/v1/message/send"),
+			ProbeURL:    endpointURL(openILinkProbeURL, "/bot/v1/message/send"),
 			Description: textPointer("静默验证微信通知链路"),
 		})
 	}
@@ -92,7 +104,7 @@ func parseExtraTargets(raw string) []Target {
 			code = slugify(name)
 		}
 		description := truncateRunes(strings.TrimSpace(value.Description), 200)
-		targets = append(targets, Target{Code: code, Name: name, URL: address, Description: textPointer(description)})
+		targets = append(targets, Target{Code: code, Name: name, URL: address, ProbeURL: address, Description: textPointer(description)})
 	}
 	return targets
 }

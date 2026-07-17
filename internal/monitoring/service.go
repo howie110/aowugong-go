@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/client"
@@ -160,9 +161,13 @@ func (s *Service) EnsureWeChatRSSLoginOK(ctx context.Context) error {
 // 输出：返回 up/down 结果，不把业务异常向上抛出。
 // 副作用：调用外部 HTTP/API 或只读访问 OpeniLink DB。
 func (s *Service) checkTarget(ctx context.Context, target Target) Result {
-	// 1. 为每个目标设置独立十秒超时并记录统一检查时间。
+	// 1. 为每个目标设置独立十秒超时，并优先选择不对外展示的内部探测地址。
 	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	probeURL := strings.TrimSpace(target.ProbeURL)
+	if probeURL == "" {
+		probeURL = target.URL
+	}
 	checkedAt := s.now().In(s.location).Format("2006-01-02 15:04:05")
 	base := Result{
 		TargetCode: target.Code, TargetName: target.Name, TargetURL: target.URL,
@@ -171,7 +176,7 @@ func (s *Service) checkTarget(ctx context.Context, target Target) Result {
 
 	// 2. WeChatRSS 使用登录业务字段判断健康。
 	if target.Code == "wechat-rss" {
-		payload, httpStatus, latency, err := s.client.FetchJSON(checkCtx, target.URL)
+		payload, httpStatus, latency, err := s.client.FetchJSON(checkCtx, probeURL)
 		base.HTTPStatus = httpStatus
 		base.LatencyMS = &latency
 		if err != nil {
@@ -189,11 +194,11 @@ func (s *Service) checkTarget(ctx context.Context, target Target) Result {
 
 	// 3. OpeniLink 优先读本机 SQLite，缺少文件时才做空内容 HTTP 探测。
 	if target.Code == "openilink-hub" {
-		return s.checkOpenILink(checkCtx, target, base)
+		return s.checkOpenILink(checkCtx, probeURL, base)
 	}
 
 	// 4. 普通服务按网络错误和 HTTP 5xx 判断健康。
-	probe := s.client.ProbeURL(checkCtx, target.URL)
+	probe := s.client.ProbeURL(checkCtx, probeURL)
 	base.HTTPStatus = probe.HTTPStatus
 	base.LatencyMS = intValuePointer(probe.LatencyMS)
 	if probe.Healthy {
@@ -205,10 +210,10 @@ func (s *Service) checkTarget(ctx context.Context, target Target) Result {
 }
 
 // checkOpenILink 静默验证 OpeniLink 是否具备发送能力。
-// 输入：ctx 是调用上下文，target 是 OpeniLink 目标，base 是标准结果基础字段。
+// 输入：ctx 是调用上下文，probeURL 是内部探测地址，base 是标准结果基础字段。
 // 输出：返回 up/down 结果。
 // 副作用：只读访问 OpeniLink SQLite，必要时调用空内容外部 HTTP API。
-func (s *Service) checkOpenILink(ctx context.Context, target Target, base Result) Result {
+func (s *Service) checkOpenILink(ctx context.Context, probeURL string, base Result) Result {
 	// 1. 必要配置缺失时直接返回可读异常。
 	if s.config.OpenILink.AppToken == "" {
 		base.ErrorMessage = textPointer("未配置 OPENILINK_APP_TOKEN，无法验证微信通知链路")
@@ -241,7 +246,7 @@ func (s *Service) checkOpenILink(ctx context.Context, target Target, base Result
 	}
 
 	// 3. 文件不可用时发空内容探测，预期请求在投递前被拒绝。
-	probe := s.client.ProbeOpenILink(ctx, target.URL, s.config.OpenILink.AppToken)
+	probe := s.client.ProbeOpenILink(ctx, probeURL, s.config.OpenILink.AppToken)
 	base.HTTPStatus = probe.HTTPStatus
 	base.LatencyMS = intValuePointer(probe.LatencyMS)
 	if probe.Healthy {
