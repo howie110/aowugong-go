@@ -8,4 +8,3 @@ const Separator = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivE
 Separator.displayName = "Separator";
 
 export { Separator };
-
