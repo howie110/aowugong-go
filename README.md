@@ -97,6 +97,8 @@ CLI `aowugong job <name>` 无条件跳过迁移，只使用已经部署好的表
 .\scripts\run-local.ps1 -GoCommand C:\howiedata\tools\go1.26.5\bin\go.exe
 ```
 
+本地页面固定访问 `http://127.0.0.1:2345`；Vite 开发服务器的 `/api` 也代理到该端口。
+
 本地补跑线上任务：
 
 ```powershell

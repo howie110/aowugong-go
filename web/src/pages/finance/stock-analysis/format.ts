@@ -32,10 +32,10 @@ export function formatPercent(value: string | number | null | undefined) {
 export function changeTone(value: string | number | null | undefined) {
   const numberValue = toNumber(value);
   if (numberValue > 0) {
-    return "text-emerald-700";
+    return "text-red-700";
   }
   if (numberValue < 0) {
-    return "text-red-700";
+    return "text-emerald-700";
   }
   return "text-foreground";
 }

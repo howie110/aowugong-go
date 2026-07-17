@@ -20,8 +20,8 @@ func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 	if cfg.Environment != "development" {
 		t.Errorf("Environment = %q, want development", cfg.Environment)
 	}
-	if cfg.HTTP.Address != "0.0.0.0:2346" {
-		t.Errorf("HTTP.Address = %q, want 0.0.0.0:2346", cfg.HTTP.Address)
+	if cfg.HTTP.Address != "0.0.0.0:2345" {
+		t.Errorf("HTTP.Address = %q, want 0.0.0.0:2345", cfg.HTTP.Address)
 	}
 
 	// 3. 断言令牌有效期和默认 MySQL 连接参数。

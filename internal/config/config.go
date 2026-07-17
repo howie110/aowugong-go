@@ -11,7 +11,7 @@ import (
 
 const (
 	defaultEnvironment        = "development"
-	defaultHTTPAddress        = "0.0.0.0:2346"
+	defaultHTTPAddress        = "0.0.0.0:2345"
 	defaultMySQLHost          = "127.0.0.1"
 	defaultMySQLPort          = 3306
 	defaultMySQLDatabase      = "aowugong"

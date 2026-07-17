@@ -67,5 +67,5 @@ export type TrendSeries = {
   key: keyof TimelinePoint;
   label: string;
   color: string;
-  axis: "money" | "percent";
+  axis: "money" | "change" | "percent";
 };
