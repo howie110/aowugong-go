@@ -36,7 +36,7 @@ func NewService(repository *Repository, monitorClient *client.MonitoringClient, 
 // CheckAll 探测全部当前目标并持久化结果。
 // 输入：ctx 是调用上下文。
 // 输出：返回正常、异常和总目标数量。
-// 副作用：调用外部 HTTP/API、只读检查 OpeniLink DB，并写入应用 MySQL。
+// 副作用：调用外部 HTTP/API，并写入应用 MySQL。
 func (s *Service) CheckAll(ctx context.Context) (CheckResult, error) {
 	// 1. 顺序探测小型目标清单，避免同时给外部服务制造突发请求。
 	targets := BuildTargets(s.config)
@@ -212,7 +212,7 @@ func (s *Service) checkTarget(ctx context.Context, target Target) Result {
 // checkOpenILink 静默验证 OpeniLink 是否具备发送能力。
 // 输入：ctx 是调用上下文，probeURL 是内部探测地址，base 是标准结果基础字段。
 // 输出：返回 up/down 结果。
-// 副作用：只读访问 OpeniLink SQLite，必要时调用空内容外部 HTTP API。
+// 副作用：调用空内容外部 HTTP API，不发送有效消息。
 func (s *Service) checkOpenILink(ctx context.Context, probeURL string, base Result) Result {
 	// 1. 必要配置缺失时直接返回可读异常。
 	if s.config.OpenILink.AppToken == "" {
@@ -224,28 +224,7 @@ func (s *Service) checkOpenILink(ctx context.Context, probeURL string, base Resu
 		return base
 	}
 
-	// 2. 优先读取本地数据库，记录检查耗时。
-	startedAt := time.Now()
-	available, healthy, message, err := client.InspectOpenILinkDB(s.config.OpenILink.DBPath, s.config.OpenILink.AppToken, s.now())
-	latency := int(time.Since(startedAt).Milliseconds())
-	if available {
-		base.LatencyMS = &latency
-		if err != nil {
-			message := "OpeniLink 本地数据库发送能力检查失败：" + err.Error()
-			base.ErrorMessage = &message
-			return base
-		}
-		if healthy {
-			status := 200
-			base.Status = "up"
-			base.HTTPStatus = &status
-			return base
-		}
-		base.ErrorMessage = textPointer(message)
-		return base
-	}
-
-	// 3. 文件不可用时发空内容探测，预期请求在投递前被拒绝。
+	// 2. 发空内容探测，预期请求在投递前因缺少正文被拒绝。
 	probe := s.client.ProbeOpenILink(ctx, probeURL, s.config.OpenILink.AppToken)
 	base.HTTPStatus = probe.HTTPStatus
 	base.LatencyMS = intValuePointer(probe.LatencyMS)

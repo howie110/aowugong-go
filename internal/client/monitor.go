@@ -3,17 +3,12 @@ package client
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
-
-	_ "modernc.org/sqlite"
 )
 
 const monitorResponseLimit = 4 << 20
@@ -143,66 +138,6 @@ func (c *MonitoringClient) ProbeOpenILink(ctx context.Context, address, appToken
 		return ProbeResult{HTTPStatus: &status, LatencyMS: latency, Message: truncateText(fmt.Sprintf("OpeniLink 静默发送探测失败：HTTP %d %s", status, message), 1000)}
 	}
 	return ProbeResult{HTTPStatus: &status, LatencyMS: latency, Message: "OpeniLink 静默发送探测意外成功；为避免发送测试消息，判定为异常"}
-}
-
-// InspectOpenILinkDB 只读检查本机 OpeniLink 数据库的发送上下文。
-// 输入：path 是数据库路径，appToken 是应用令牌，now 是检查时刻。
-// 输出：available 表示文件存在，healthy 表示发送条件满足，message 是异常说明。
-// 副作用：只读访问 OpeniLink SQLite，不修改任何数据。
-func InspectOpenILinkDB(path, appToken string, now time.Time) (available, healthy bool, message string, err error) {
-	// 1. 未配置或文件不存在时通知调用方回退到 HTTP 静默探测。
-	if strings.TrimSpace(path) == "" {
-		return false, false, "", nil
-	}
-	absolutePath, err := filepath.Abs(path)
-	if err != nil {
-		return true, false, "", fmt.Errorf("解析 OpeniLink 数据库路径: %w", err)
-	}
-	if _, err := os.Stat(absolutePath); os.IsNotExist(err) {
-		return false, false, "", nil
-	} else if err != nil {
-		return true, false, "", fmt.Errorf("检查 OpeniLink 数据库: %w", err)
-	}
-
-	// 2. 以只读模式查询当前 App 对应 Bot 和最近有效 context_token。
-	dsn := "file:" + filepath.ToSlash(absolutePath) + "?mode=ro"
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return true, false, "", fmt.Errorf("打开 OpeniLink 数据库: %w", err)
-	}
-	defer db.Close()
-	var botStatus sql.NullString
-	var latestContext sql.NullInt64
-	err = db.QueryRow(`
-		SELECT bot.status,
-		       MAX(CASE WHEN message.context_token != '' THEN message.created_at END)
-		FROM app_installations installation
-		JOIN bots bot ON bot.id = installation.bot_id
-		LEFT JOIN messages message ON message.bot_id = installation.bot_id
-		WHERE installation.app_token = ?
-		GROUP BY installation.bot_id, bot.status
-	`, appToken).Scan(&botStatus, &latestContext)
-	if err == sql.ErrNoRows {
-		return true, false, "OpeniLink 本地数据库中找不到当前 App Token", nil
-	}
-	if err != nil {
-		return true, false, "", fmt.Errorf("查询 OpeniLink 发送能力: %w", err)
-	}
-
-	// 3. 校验 Bot 连接状态和 24 小时消息窗口。
-	if botStatus.String == "session_expired" {
-		return true, false, "OpeniLink Bot 会话已过期，需要给机器人发消息或重新扫码", nil
-	}
-	if botStatus.String != "connected" {
-		return true, false, "OpeniLink Bot 未连接：" + botStatus.String, nil
-	}
-	if !latestContext.Valid {
-		return true, false, "OpeniLink 暂不能发送：没有最近的用户来信", nil
-	}
-	if latestContext.Int64 <= now.Unix()-24*60*60 {
-		return true, false, "OpeniLink 暂不能发送：最近一条用户来信已超过 24 小时", nil
-	}
-	return true, true, "", nil
 }
 
 // truncateText 按字符数截断外部错误文本。
