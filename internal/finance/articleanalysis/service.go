@@ -18,6 +18,8 @@ const (
 	scheduledFetchLimit         = 2000
 	scheduledAnalysisBatchLimit = 50
 	scheduledAnalysisMaxBatches = 10
+	pendingSignalGroupName      = "待归类"
+	pendingSignalGroupType      = "pending"
 )
 
 // RSSGateway 定义投资文章服务需要的 RSS 读取能力。
@@ -463,8 +465,8 @@ func buildSignalStats(rows []analysisRow, groups []SignalGroup) []SignalStat {
 	ordered := make([]*signalAccumulator, 0, len(recommendations)+len(risks))
 	merge := func(signals []aggregatedSignal, recommendation bool) {
 		for _, signal := range signals {
-			groupKey := "alias:" + normalizeSignalAlias(signal.Name)
-			groupName, groupType := signal.Name, signal.Type
+			groupKey := "pending"
+			groupName, groupType := pendingSignalGroupName, pendingSignalGroupType
 			if group, exists := groupIndex[normalizeSignalAlias(signal.Name)]; exists {
 				groupKey = fmt.Sprintf("group:%d:%s", group.ID, normalizeSignalAlias(group.Name))
 				groupName = group.Name
@@ -505,6 +507,9 @@ func buildSignalStats(rows []analysisRow, groups []SignalGroup) []SignalStat {
 
 	// 3. 稳定排序保证完全相同的总数和日期保留聚合插入顺序。
 	sort.SliceStable(ordered, func(left, right int) bool {
+		if ordered[left].Name == pendingSignalGroupName || ordered[right].Name == pendingSignalGroupName {
+			return ordered[right].Name == pendingSignalGroupName && ordered[left].Name != pendingSignalGroupName
+		}
 		if ordered[left].Count == ordered[right].Count {
 			return ordered[left].LatestAt > ordered[right].LatestAt
 		}

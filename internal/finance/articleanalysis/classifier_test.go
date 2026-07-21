@@ -67,19 +67,19 @@ func (g *sequenceSignalClassificationGateway) SimpleChat(ctx context.Context, pr
 func TestClassifySignalBatchRetriesMalformedJSON(t *testing.T) {
 	// 1. 准备一次截断响应和一次可持久化响应。
 	gateway := &sequenceSignalClassificationGateway{responses: []string{
-		`{"groups":[`,
-		`{"groups":[{"canonical_name":"证券行业","type":"sector","aliases":[{"name":"券商","confidence":0.98}]}]}`,
+		`{"decisions":[`,
+		`{"decisions":[{"name":"券商","action":"create","canonical_name":"证券行业","type":"sector","confidence":0.98}]}`,
 	}}
 	service := NewService(nil, ServiceOptions{Analyzer: gateway})
 	batch := []signalCandidate{{Name: "券商", Type: "sector"}}
 
 	// 2. 当前批次应在第二次响应后成功，而不是让整个任务直接失败。
-	groups, err := service.classifySignalBatch(context.Background(), nil, batch)
+	result, err := service.classifySignalBatch(context.Background(), nil, batch)
 	if err != nil {
 		t.Fatalf("classifySignalBatch() error = %v", err)
 	}
-	if gateway.calls != 2 || len(groups) != 1 || len(groups[0].Aliases) != 1 || groups[0].Aliases[0].Name != "券商" {
-		t.Fatalf("calls = %d, groups = %#v", gateway.calls, groups)
+	if gateway.calls != 2 || len(result.Groups) != 1 || len(result.Groups[0].Aliases) != 1 || result.Groups[0].Aliases[0].Name != "券商" {
+		t.Fatalf("calls = %d, result = %#v", gateway.calls, result)
 	}
 }
 
@@ -109,10 +109,10 @@ func TestCollectUnknownSignalCandidatesSkipsMappedAliases(t *testing.T) {
 func TestParseSignalClassificationJSONRequiresEveryCandidate(t *testing.T) {
 	// 1. 模拟模型遗漏“中信证券”的不完整响应。
 	candidates := []signalCandidate{{Name: "券商", Type: "sector"}, {Name: "中信证券", Type: "stock"}}
-	content := "```json\n{\"groups\":[{\"canonical_name\":\"证券行业\",\"type\":\"sector\",\"aliases\":[{\"name\":\"券商\",\"confidence\":0.98}]}]}\n```"
+	content := "```json\n{\"decisions\":[{\"name\":\"券商\",\"action\":\"create\",\"canonical_name\":\"证券行业\",\"type\":\"sector\",\"confidence\":0.98}]}\n```"
 
 	// 2. 不完整响应不得写入数据库形成半套映射。
-	_, err := parseSignalClassificationJSON(content, candidates)
+	_, err := parseSignalClassificationJSON(content, candidates, nil)
 	if err == nil || !strings.Contains(err.Error(), "中信证券") {
 		t.Fatalf("error = %v, want missing 中信证券", err)
 	}
@@ -129,28 +129,84 @@ func TestParseSignalClassificationJSONRejectsInvalidCanonicalName(t *testing.T) 
 
 	// 2. 非法规范名必须在进入仓储前被拒绝。
 	for _, name := range invalidNames {
-		content := `{"groups":[{"canonical_name":"` + name + `","type":"sector","aliases":[{"name":"券商","confidence":0.98}]}]}`
-		_, err := parseSignalClassificationJSON(content, candidate)
+		content := `{"decisions":[{"name":"券商","action":"create","canonical_name":"` + name + `","type":"sector","confidence":0.98}]}`
+		_, err := parseSignalClassificationJSON(content, candidate, nil)
 		if err == nil || !strings.Contains(err.Error(), "概念组名称") {
 			t.Fatalf("name %q error = %v, want canonical name validation", name, err)
 		}
 	}
 }
 
-// TestStabilizeSignalClassificationsLeavesLowConfidenceAliasUnmapped 验证低置信度分类保持待重试状态。
-// 输入：模型把“券商”和低置信度“中信证券”同时归为证券行业。
-// 输出：只持久化高置信度券商，中信证券不写入任何概念组。
+// TestParseSignalClassificationJSONUsesReuseCreateAndPendingActions 验证增量分类只接受复用、新建和待归类三态。
+// 输入：分别复用现有证券行业、新建贵金属和暂缓处理含糊名称。
+// 输出：两个高置信度映射进入待保存分组，含糊名称进入待归类列表。
 // 副作用：无。
-func TestStabilizeSignalClassificationsLeavesLowConfidenceAliasUnmapped(t *testing.T) {
-	// 1. 构造包含高低两种置信度的模型分类。
-	proposals := []signalGroupProposal{{
-		CanonicalName: "证券行业", Type: "sector",
-		Aliases: []signalAliasProposal{{Name: "券商", Confidence: 0.98}, {Name: "中信证券", Confidence: 0.60}},
-	}}
-	// 2. 低置信度名称必须保持未映射，允许下次使用更新词典重新分类。
-	result := stabilizeSignalClassifications(proposals)
-	if len(result) != 1 || result[0].CanonicalName != "证券行业" || len(result[0].Aliases) != 1 || result[0].Aliases[0].Name != "券商" {
-		t.Fatalf("groups = %#v, want only high-confidence 券商", result)
+func TestParseSignalClassificationJSONUsesReuseCreateAndPendingActions(t *testing.T) {
+	// 1. 构造三种决策及唯一可复用概念组。
+	groups := []SignalGroup{
+		{ID: 7, Name: "证券行业", Type: "sector", Aliases: []string{"券商"}},
+		{ID: 8, Name: pendingSignalGroupName, Type: pendingSignalGroupType, Aliases: []string{"里子"}},
+	}
+	candidates := []signalCandidate{{Name: "中信证券", Type: "stock"}, {Name: "黄金", Type: "commodity"}, {Name: "里子", Type: "other"}}
+	content := `{"decisions":[` +
+		`{"name":"中信证券","action":"reuse","existing_group_id":7,"confidence":0.96},` +
+		`{"name":"黄金","action":"create","canonical_name":"贵金属","type":"commodity","confidence":0.94},` +
+		`{"name":"里子","action":"pending","confidence":0.40}]}`
+
+	// 2. 核对复用组名称由后端决定，新建组被保留，待归类不进入写库建议。
+	result, err := parseSignalClassificationJSON(content, candidates, groups)
+	if err != nil {
+		t.Fatalf("parseSignalClassificationJSON() error = %v", err)
+	}
+	if len(result.Groups) != 2 || result.Groups[0].CanonicalName != "证券行业" || result.Groups[1].CanonicalName != "贵金属" {
+		t.Fatalf("groups = %#v", result.Groups)
+	}
+	if len(result.Pending) != 1 || result.Pending[0].Name != "里子" {
+		t.Fatalf("pending = %#v", result.Pending)
+	}
+}
+
+// TestParseSignalClassificationJSONRejectsFakeReuseAndDuplicateCreate 验证模型不能伪造复用或用新建动作复制已有组。
+// 输入：不存在的组 ID，以及与现有规范名相同的新建决策。
+// 输出：两种响应都在写库前返回错误。
+// 副作用：无。
+func TestParseSignalClassificationJSONRejectsFakeReuseAndDuplicateCreate(t *testing.T) {
+	// 1. 准备一个现有证券行业和一个待分类名称。
+	groups := []SignalGroup{{ID: 7, Name: "证券行业", Type: "sector", Aliases: []string{"券商"}}}
+	candidates := []signalCandidate{{Name: "中信证券", Type: "stock"}}
+	contents := []string{
+		`{"decisions":[{"name":"中信证券","action":"reuse","existing_group_id":99,"confidence":0.96}]}`,
+		`{"decisions":[{"name":"中信证券","action":"create","canonical_name":"证券行业","type":"sector","confidence":0.96}]}`,
+		`{"decisions":[{"name":"中信证券","action":"reuse","existing_group_id":8,"confidence":0.96}]}`,
+		`{"decisions":[{"name":"中信证券","action":"create","canonical_name":"待归类","type":"sector","confidence":0.96}]}`,
+		`{"decisions":[{"name":"中信证券","action":"create","canonical_name":"科技行业","type":"pending","confidence":0.96}]}`,
+		`{"decisions":[{"name":"中信证券","action":"create","canonical_name":"科技行业","type":"mystery","confidence":0.96}]}`,
+	}
+
+	// 2. 非法复用和重复新建都不能生成持久化建议。
+	for _, content := range contents {
+		if _, err := parseSignalClassificationJSON(content, candidates, groups); err == nil {
+			t.Fatalf("content %s unexpectedly accepted", content)
+		}
+	}
+}
+
+// TestSignalGroupsForPersistenceAddsSinglePendingGroup 验证未确定标的写入统一待归类组。
+// 输入：一个正式概念组和两个待归类名称。
+// 输出：保留正式组并追加一个包含两个别名的待归类组，置信度为零。
+// 副作用：无。
+func TestSignalGroupsForPersistenceAddsSinglePendingGroup(t *testing.T) {
+	// 1. 构造正式分类和含重复空白的待归类名称。
+	groups := []signalGroupProposal{{CanonicalName: "证券行业", Type: "sector", Aliases: []signalAliasProposal{{Name: "券商", Confidence: 0.98}}}}
+	pending := []string{"里子", " 期指 ", "里子"}
+
+	// 2. 待归类名称必须去重并进入唯一特殊组。
+	result := signalGroupsForPersistence(groups, pending)
+	if len(result) != 2 || result[1].CanonicalName != pendingSignalGroupName || result[1].Type != pendingSignalGroupType {
+		t.Fatalf("groups = %#v", result)
+	}
+	if len(result[1].Aliases) != 2 || result[1].Aliases[0].Name != "里子" || result[1].Aliases[1].Name != "期指" {
+		t.Fatalf("pending aliases = %#v", result[1].Aliases)
 	}
 }
 
@@ -165,7 +221,7 @@ func TestBuildSignalClassificationPromptRequiresCanonicalIndustryRollup(t *testi
 
 	// 2. 核对决定最终统计口径的三项规则都进入模型提示词。
 	prompt := buildSignalClassificationPrompt(groups, candidates)
-	for _, fragment := range []string{"优先复用已有概念组", "具体公司上卷到最直接的行业或主题", "禁止使用斜杠拼接多个名称", "证券行业", "中信证券"} {
+	for _, fragment := range []string{"reuse、create、pending", "只有确实没有对应组时才使用 create", "existing_group_id", "待归类不是可复用的业务概念组", "具体公司上卷到最直接的行业或主题", "禁止使用斜杠拼接多个名称", "证券行业", "中信证券"} {
 		if !strings.Contains(prompt, fragment) {
 			t.Errorf("prompt is missing %q", fragment)
 		}
@@ -189,7 +245,7 @@ func TestServiceClassifySignalAliasesPersistsUnknownNames(t *testing.T) {
 			AddRow(`[{"name":"券商","type":"sector"},{"name":"中信证券","type":"stock"}]`, `[]`, "neutral", "range", "2026-07-20 10:00:00"))
 	mock.ExpectQuery("SELECT g.id, g.canonical_name, g.group_type, a.alias_name").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "canonical_name", "group_type", "alias_name"}))
-	gateway := &fixedSignalClassificationGateway{response: `{"groups":[{"canonical_name":"证券行业","type":"sector","aliases":[{"name":"券商","confidence":0.98},{"name":"中信证券","confidence":0.96}]}]}`}
+	gateway := &fixedSignalClassificationGateway{response: `{"decisions":[{"name":"券商","action":"create","canonical_name":"证券行业","type":"sector","confidence":0.98},{"name":"中信证券","action":"create","canonical_name":"证券行业","type":"sector","confidence":0.96}]}`}
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO investment_signal_group").
 		WithArgs("证券行业", "sector", "deepseek", "test-model").

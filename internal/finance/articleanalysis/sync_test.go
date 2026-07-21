@@ -114,7 +114,7 @@ func (fixedAnalysisGateway) Configured() bool {
 func (fixedAnalysisGateway) SimpleChat(ctx context.Context, prompt string, maxTokens int) (string, error) {
 	// 1. 分类提示词返回规范概念组，普通提示词返回文章分析结果。
 	if strings.Contains(prompt, "本轮待分类名称") {
-		return `{"groups":[{"canonical_name":"白酒行业","type":"sector","aliases":[{"name":"贵州茅台","confidence":0.96}]}]}`, nil
+		return `{"decisions":[{"name":"贵州茅台","action":"create","canonical_name":"白酒行业","type":"sector","confidence":0.96}]}`, nil
 	}
 	return "```json\n{\"summary\":\"分析摘要\",\"recommendations\":[{\"name\":\"贵州茅台\",\"type\":\"stock\",\"reason\":\"估值有望修复\"}],\"risks\":[],\"market\":{\"mood\":\"cautious\",\"mood_reason\":\"等待确认\",\"prediction\":\"range\",\"prediction_reason\":\"震荡\"}}\n```", nil
 }

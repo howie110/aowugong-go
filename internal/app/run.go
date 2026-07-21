@@ -137,7 +137,7 @@ func buildJobRuntime(ctx context.Context, cfg config.Config) (*jobRuntime, error
 		}
 	}()
 
-	// 2. 构造任务服务并注册与自动调度完全相同的七项任务。
+	// 2. 构造任务服务并注册自动调度、页面手动和 CLI 共用的全部任务。
 	services := newTaskServices(cfg, db)
 	registry, err := newJobRegistry(cfg, db, services)
 	if err != nil {
@@ -220,7 +220,7 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 		return nil, fmt.Errorf("初始化投资文章来源: %w", err)
 	}
 
-	// 6. 建立七项任务的唯一注册表和 Asia/Shanghai Cron 调度器。
+	// 6. 建立定时与手动任务的唯一注册表和 Asia/Shanghai Cron 调度器。
 	jobRegistry, err := newJobRegistry(cfg, db, tasks)
 	if err != nil {
 		return nil, err
@@ -268,7 +268,7 @@ func newTaskServices(cfg config.Config, db *sql.DB) taskServices {
 	return services
 }
 
-// newJobRegistry 建立全部执行来源共用的七项任务注册表。
+// newJobRegistry 建立全部执行来源共用的任务注册表。
 // 输入：cfg 提供数据库备份参数，db 写执行记录，services 提供业务入口。
 // 输出：返回已注册完整定义的 Registry；依赖无效时返回错误。
 // 副作用：只修改新建注册表的内存定义，不执行任务。

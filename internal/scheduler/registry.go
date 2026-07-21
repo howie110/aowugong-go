@@ -58,13 +58,15 @@ type Notifier interface {
 	Text(ctx context.Context, titleParts []string, body, to string) error
 }
 
-// Definition 描述注册任务的名称、Cron 表达式、超时和业务入口。
+// Definition 描述注册任务的名称、Cron、手动属性、业务互斥键、超时和入口。
 type Definition struct {
-	Name        string
-	Description string
-	Schedule    string
-	Timeout     time.Duration
-	Run         JobFunc
+	Name           string
+	Description    string
+	Schedule       string
+	ManualOnly     bool
+	ConcurrencyKey string
+	Timeout        time.Duration
+	Run            JobFunc
 }
 
 // Result 描述一次任务执行的最终状态和耗时。
@@ -133,15 +135,25 @@ func WithoutMySQLAdvisoryLock() RegistryOption {
 }
 
 // Register 注册一个可由所有来源复用的任务定义。
-// 输入：definition 包含唯一名称、Cron、超时和业务函数。
+// 输入：definition 包含唯一名称、可选 Cron、手动属性、可选共享互斥键、超时和业务函数。
 // 输出：注册成功返回 nil，定义无效或重名时返回错误。
 // 副作用：修改进程内任务注册表。
 func (r *Registry) Register(definition Definition) error {
 	// 1. 规范化并校验任务定义的必需字段。
 	definition.Name = strings.TrimSpace(definition.Name)
 	definition.Schedule = strings.TrimSpace(definition.Schedule)
-	if definition.Name == "" || definition.Schedule == "" || definition.Run == nil {
-		return fmt.Errorf("任务名称、Cron 表达式和执行函数不能为空")
+	definition.ConcurrencyKey = strings.TrimSpace(definition.ConcurrencyKey)
+	if definition.Name == "" || definition.Run == nil {
+		return fmt.Errorf("任务名称和执行函数不能为空")
+	}
+	if definition.ManualOnly && definition.Schedule != "" {
+		return fmt.Errorf("仅手动任务 %s 不能配置 Cron 表达式", definition.Name)
+	}
+	if !definition.ManualOnly && definition.Schedule == "" {
+		return fmt.Errorf("定时任务 %s 的 Cron 表达式不能为空", definition.Name)
+	}
+	if definition.ConcurrencyKey == "" {
+		definition.ConcurrencyKey = definition.Name
 	}
 	if definition.Timeout <= 0 {
 		return fmt.Errorf("任务 %s 超时必须大于零", definition.Name)
@@ -185,11 +197,19 @@ func (r *Registry) Run(ctx context.Context, name string, source Source) (Result,
 	if err != nil {
 		return Result{}, err
 	}
+	if source != SourceScheduler && source != SourceManual && source != SourceCLI {
+		r.release(definition.ConcurrencyKey)
+		return Result{}, fmt.Errorf("任务 %s 来源无效: %q", definition.Name, source)
+	}
+	if definition.ManualOnly && source == SourceScheduler {
+		r.release(definition.ConcurrencyKey)
+		return Result{}, fmt.Errorf("任务 %s 仅允许手动或 CLI 执行", definition.Name)
+	}
 	unlockDatabase := func() error { return nil }
 	if r.mysqlAdvisoryLock {
-		unlockDatabase, err = acquireMySQLLock(ctx, r.db, definition.Name)
+		unlockDatabase, err = acquireMySQLLock(ctx, r.db, definition.ConcurrencyKey)
 		if err != nil {
-			r.release(definition.Name)
+			r.release(definition.ConcurrencyKey)
 			return Result{}, err
 		}
 	}
@@ -197,7 +217,7 @@ func (r *Registry) Run(ctx context.Context, name string, source Source) (Result,
 		if err := unlockDatabase(); err != nil {
 			r.logger.Error("释放任务数据库锁失败", "job", definition.Name, "error", err)
 		}
-		r.release(definition.Name)
+		r.release(definition.ConcurrencyKey)
 	}
 	releaseOnReturn := true
 	defer func() {
@@ -205,10 +225,6 @@ func (r *Registry) Run(ctx context.Context, name string, source Source) (Result,
 			release()
 		}
 	}()
-	if source != SourceScheduler && source != SourceManual && source != SourceCLI {
-		return Result{}, fmt.Errorf("任务 %s 来源无效: %q", definition.Name, source)
-	}
-
 	// 2. 写入 running 记录并建立任务超时上下文。
 	startedAt := time.Now()
 	executionID, err := r.startExecution(ctx, definition.Name, source, startedAt)
@@ -270,21 +286,21 @@ func (r *Registry) acquire(name string) (Definition, error) {
 	if !exists {
 		return Definition{}, fmt.Errorf("未注册任务 %s", name)
 	}
-	if r.running[name] {
+	if r.running[definition.ConcurrencyKey] {
 		return Definition{}, fmt.Errorf("任务 %s: %w", name, ErrAlreadyRunning)
 	}
-	r.running[name] = true
+	r.running[definition.ConcurrencyKey] = true
 	return definition, nil
 }
 
-// release 清除同名任务正在执行标记。
-// 输入：name 是任务名。
+// release 清除业务互斥键的正在执行标记。
+// 输入：key 是任务名或多个任务共享的互斥键。
 // 输出：无。
-// 副作用：修改进程内执行状态并允许下次运行。
-func (r *Registry) release(name string) {
+// 副作用：修改进程内执行状态并允许同键任务下次运行。
+func (r *Registry) release(key string) {
 	// 1. 在锁内删除状态，避免并发读写映射。
 	r.mutex.Lock()
-	delete(r.running, name)
+	delete(r.running, key)
 	r.mutex.Unlock()
 }
 

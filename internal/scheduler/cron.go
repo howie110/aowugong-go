@@ -50,6 +50,9 @@ func (s *CronScheduler) Start() error {
 	loaded := cron.New(cron.WithLocation(s.location))
 	runContext, cancel := context.WithCancel(context.Background())
 	for _, definition := range s.registry.Definitions() {
+		if definition.ManualOnly {
+			continue
+		}
 		name := definition.Name
 		if _, err := loaded.AddFunc(definition.Schedule, func() {
 			_, _ = s.registry.Run(runContext, name, SourceScheduler)

@@ -23,7 +23,8 @@ func registerJobRoutes(router chi.Router, authService *auth.Service, rbacService
 			for _, definition := range definitions {
 				items = append(items, map[string]any{
 					"name": definition.Name, "description": definition.Description,
-					"schedule": definition.Schedule, "timeout_seconds": int(definition.Timeout.Seconds()),
+					"schedule": definition.Schedule, "manual_only": definition.ManualOnly,
+					"timeout_seconds": int(definition.Timeout.Seconds()),
 				})
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"items": items})

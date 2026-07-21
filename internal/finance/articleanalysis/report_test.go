@@ -28,7 +28,11 @@ func TestBuildDistributionPreservesFirstSeenOrderForEqualCounts(t *testing.T) {
 // 输出：推荐次数更多的信号稳定排在前面。
 // 副作用：无。
 func TestBuildSignalStatsUsesRecommendationCountAsStableTieBreak(t *testing.T) {
-	// 1. 构造总数均为三次且最近日期相同的推荐、风险组合。
+	// 1. 构造明确映射及总数均为三次、最近日期相同的推荐风险组合。
+	groups := []SignalGroup{
+		{ID: 1, Name: "信号A", Type: "other", Aliases: []string{"信号A"}},
+		{ID: 2, Name: "信号B", Type: "other", Aliases: []string{"信号B"}},
+	}
 	rows := []analysisRow{
 		{Recommendations: []Signal{{Name: "信号B"}}, Risks: []Signal{{Name: "信号A"}}, OccurredAt: "2026-07-15"},
 		{Recommendations: []Signal{{Name: "信号B"}}, Risks: []Signal{{Name: "信号A"}}, OccurredAt: "2026-07-15"},
@@ -37,7 +41,7 @@ func TestBuildSignalStatsUsesRecommendationCountAsStableTieBreak(t *testing.T) {
 
 	// 2. 重复构建以覆盖 Go map 的随机遍历顺序。
 	for attempt := 0; attempt < 64; attempt++ {
-		result := buildSignalStats(rows, nil)
+		result := buildSignalStats(rows, groups)
 		if len(result) != 2 || result[0].Name != "信号B" {
 			t.Fatalf("attempt %d signals = %#v, want 信号B first", attempt, result)
 		}
@@ -49,7 +53,8 @@ func TestBuildSignalStatsUsesRecommendationCountAsStableTieBreak(t *testing.T) {
 // 输出：最终类型采用聚合次数更多且先进入名称榜的 concept。
 // 副作用：无。
 func TestBuildSignalStatsAggregatesNameAndTypeBeforeFinalMerge(t *testing.T) {
-	// 1. 按仓储的时间倒序构造同名不同类型信号。
+	// 1. 按仓储的时间倒序构造同名不同类型信号，并给出最终概念映射。
+	groups := []SignalGroup{{ID: 1, Name: "高位科技股", Type: "concept", Aliases: []string{"高位科技股"}}}
 	rows := []analysisRow{
 		{Risks: []Signal{{Name: "高位科技股", Type: "sector"}}, OccurredAt: "2026-07-15"},
 		{Risks: []Signal{{Name: "高位科技股", Type: "concept"}}, OccurredAt: "2026-07-14"},
@@ -57,7 +62,7 @@ func TestBuildSignalStatsAggregatesNameAndTypeBeforeFinalMerge(t *testing.T) {
 	}
 
 	// 2. 较高频类型应在最终按名称合并时成为展示类型。
-	result := buildSignalStats(rows, nil)
+	result := buildSignalStats(rows, groups)
 	if len(result) != 1 || result[0].Type != "concept" || result[0].RiskCount != 3 {
 		t.Fatalf("signals = %#v, want concept with three risks", result)
 	}
@@ -114,6 +119,29 @@ func TestBuildSignalStatsPreservesRawAliasSpellings(t *testing.T) {
 	}
 	if strings.Join(result[0].Members, ",") != "AI硬件,ai硬件" {
 		t.Fatalf("members = %#v, want both raw spellings", result[0].Members)
+	}
+}
+
+// TestBuildSignalStatsCombinesUnmappedAliasesAtBottom 验证未归类标的不再各自占据信号榜行。
+// 输入：一个已映射证券行业和两个尚未映射的原始名称。
+// 输出：排行榜只包含证券行业与末尾的待归类行，并完整保留待归类成员。
+// 副作用：无。
+func TestBuildSignalStatsCombinesUnmappedAliasesAtBottom(t *testing.T) {
+	// 1. 构造高频未知名称和低频已映射证券信号，确保排序规则会受到检验。
+	groups := []SignalGroup{{ID: 1, Name: "证券行业", Type: "sector", Aliases: []string{"券商"}}}
+	rows := []analysisRow{
+		{Recommendations: []Signal{{Name: "传统行业"}, {Name: "里子"}}, OccurredAt: "2026-07-20"},
+		{Recommendations: []Signal{{Name: "传统行业"}, {Name: "里子"}}, OccurredAt: "2026-07-19"},
+		{Risks: []Signal{{Name: "券商"}}, OccurredAt: "2026-07-18"},
+	}
+
+	// 2. 两个未知名称合并成一行且固定排在已确认概念组之后。
+	result := buildSignalStats(rows, groups)
+	if len(result) != 2 || result[0].Name != "证券行业" || result[1].Name != pendingSignalGroupName {
+		t.Fatalf("signals = %#v", result)
+	}
+	if result[1].Count != 4 || strings.Join(result[1].Members, ",") != "传统行业,里子" {
+		t.Fatalf("pending = %#v", result[1])
 	}
 }
 

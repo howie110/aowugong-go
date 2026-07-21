@@ -1,4 +1,4 @@
-// Package job 注册 finance 与普通业务的七项生产任务。
+// Package job 注册 finance 与普通业务的定时及手动生产任务。
 package job
 
 import (
@@ -27,6 +27,7 @@ type DataUpdater interface {
 // ArticleSyncer 定义文章同步任务使用的业务入口。
 type ArticleSyncer interface {
 	SyncScheduled(ctx context.Context, classifySignals bool) (articleanalysis.SyncResult, error)
+	RebuildSignalGroups(ctx context.Context, days int, apply bool) (articleanalysis.SignalGroupRebuildResult, error)
 }
 
 // Monitor 定义服务监控任务使用的业务入口。
@@ -47,7 +48,7 @@ type NotificationSender interface {
 // BackupFunc 定义可测试的 MySQL 逻辑备份函数。
 type BackupFunc func(ctx context.Context, cfg config.Database, directory string, retention int, now time.Time) (string, error)
 
-// Dependencies 汇总七项任务所需的显式业务依赖与备份配置。
+// Dependencies 汇总全部任务所需的显式业务依赖与备份配置。
 type Dependencies struct {
 	DB              *sql.DB
 	Database        config.Database
@@ -66,7 +67,7 @@ type tasks struct {
 	dependencies Dependencies
 }
 
-// RegisterAll 把七项固定生产任务注册到唯一任务注册表。
+// RegisterAll 把固定定时任务和手动任务注册到唯一任务注册表。
 // 输入：registry 是统一执行入口，dependencies 是业务服务和备份配置。
 // 输出：全部注册成功返回 nil，依赖或定义无效时返回错误。
 // 副作用：修改进程内任务注册表，不立即执行任务。
@@ -91,7 +92,8 @@ func RegisterAll(registry *scheduler.Registry, dependencies Dependencies) error 
 	definitions := []scheduler.Definition{
 		{Name: "test_crontab", Description: "每日任务链路测试", Schedule: "0 9 * * *", Timeout: time.Minute, Run: taskSet.testCrontab},
 		{Name: "update_tushare_daily_data", Description: "更新 Tushare 日线数据", Schedule: "0 20 * * *", Timeout: 2 * time.Hour, Run: taskSet.updateTushareDailyData},
-		{Name: "sync_investment_articles", Description: "同步并分析投资文章", Schedule: "0 8,20 * * *", Timeout: 3 * time.Hour, Run: taskSet.syncInvestmentArticles},
+		{Name: "sync_investment_articles", Description: "同步并分析投资文章", Schedule: "0 8,20 * * *", ConcurrencyKey: "investment_signal_groups", Timeout: 3 * time.Hour, Run: taskSet.syncInvestmentArticles},
+		{Name: "rebuild_investment_signal_groups", Description: "全局重建投资信号概念组", ManualOnly: true, ConcurrencyKey: "investment_signal_groups", Timeout: 30 * time.Minute, Run: taskSet.rebuildInvestmentSignalGroups},
 		{Name: "check_service_monitors", Description: "检查服务连通性", Schedule: "30 8 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkServiceMonitors},
 		{Name: "check_subscription_expiry_notify", Description: "检查订阅到期并提醒", Schedule: "30 9 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkSubscriptionExpiryNotify},
 		{Name: "openilink_reply_reminder", Description: "提醒回复 OpeniLink Bot", Schedule: "0 10 * * *", Timeout: 5 * time.Minute, Run: taskSet.openILinkReplyReminder},
@@ -146,6 +148,23 @@ func (t *tasks) syncInvestmentArticles(ctx context.Context) (string, error) {
 	// 2. 保留已完成摘要并把业务错误交给统一包装器通知。
 	if err != nil {
 		return message, fmt.Errorf("同步投资文章: %w", err)
+	}
+	return message, nil
+}
+
+// rebuildInvestmentSignalGroups 全局收敛六十天投资信号并替换概念词典。
+// 输入：ctx 是任务超时上下文。
+// 输出：返回新概念组、别名和待归类数量；模型或事务失败时返回错误。
+// 副作用：调用 DeepSeek，并在单个事务内重建 MySQL 信号概念词典。
+func (t *tasks) rebuildInvestmentSignalGroups(ctx context.Context) (string, error) {
+	// 1. 调用文章服务唯一全局重组入口并明确应用已校验结果。
+	result, err := t.dependencies.Articles.RebuildSignalGroups(ctx, articleanalysis.DefaultTargetDays, true)
+	message := fmt.Sprintf("概念组=%d，别名=%d，待归类=%d", result.GroupCount, result.AliasCount, result.PendingAliasCount)
+	if err != nil {
+		return message, fmt.Errorf("重建投资信号概念组: %w", err)
+	}
+	if !result.Applied {
+		return message, fmt.Errorf("投资信号概念组重建未应用")
 	}
 	return message, nil
 }

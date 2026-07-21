@@ -32,6 +32,35 @@ func TestSourceContextRoundTrip(t *testing.T) {
 	}
 }
 
+// TestManualOnlyDefinitionRejectsSchedulerSource 验证仅手动任务不会被定时来源执行。
+// 输入：一个无 Cron 表达式的 manual-only 定义和 scheduler 来源。
+// 输出：注册成功，但定时执行返回明确错误且业务函数未被调用。
+// 副作用：写入隔离测试数据库的任务执行记录前即被拒绝。
+func TestManualOnlyDefinitionRejectsSchedulerSource(t *testing.T) {
+	// 1. 注册无 Cron 的仅手动任务，并记录业务函数是否执行。
+	db := testdatabase.Open(t)
+	registry := NewRegistry(db, nil, nil)
+	called := false
+	err := registry.Register(Definition{
+		Name: "manual_only", Description: "仅手动", ManualOnly: true,
+		Timeout: time.Minute, Run: func(context.Context) (string, error) {
+			called = true
+			return "ok", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	// 2. 定时来源必须在写执行记录和调用业务前被拒绝。
+	if _, err := registry.Run(context.Background(), "manual_only", SourceScheduler); err == nil || !strings.Contains(err.Error(), "仅允许手动或 CLI") {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if called {
+		t.Fatal("manual-only job was called by scheduler")
+	}
+}
+
 // Text 记录任务失败通知正文。
 // 输入：上下文、标题、正文和接收人。
 // 输出：始终返回 nil。
@@ -80,6 +109,59 @@ func TestRegistryPreventsConcurrentRunsOfSameJob(t *testing.T) {
 	close(release)
 	if err := <-firstResult; err != nil {
 		t.Fatalf("first Run() error = %v", err)
+	}
+}
+
+// TestRegistryPreventsConcurrentRunsSharingConcurrencyKey 验证不同任务可共享业务互斥键。
+// 输入：两个名称不同但 concurrency key 相同的任务，首个任务保持阻塞。
+// 输出：第二个任务立即返回 ErrAlreadyRunning，且不会执行其业务函数。
+// 副作用：创建并写入隔离 MySQL 测试 schema。
+func TestRegistryPreventsConcurrentRunsSharingConcurrencyKey(t *testing.T) {
+	// 1. 注册共享信号词典互斥键的阻塞任务和观察任务。
+	registry := newTestRegistry(t, &fakeNotifier{})
+	started := make(chan struct{})
+	release := make(chan struct{})
+	secondCalled := false
+	if err := registry.Register(Definition{
+		Name: "sync_articles", ConcurrencyKey: "investment_signal_groups", Schedule: "0 8 * * *", Timeout: time.Second,
+		Run: func(ctx context.Context) (string, error) {
+			close(started)
+			select {
+			case <-release:
+				return "done", nil
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		},
+	}); err != nil {
+		t.Fatalf("Register(sync_articles) error = %v", err)
+	}
+	if err := registry.Register(Definition{
+		Name: "rebuild_groups", ConcurrencyKey: "investment_signal_groups", ManualOnly: true, Timeout: time.Second,
+		Run: func(context.Context) (string, error) {
+			secondCalled = true
+			return "done", nil
+		},
+	}); err != nil {
+		t.Fatalf("Register(rebuild_groups) error = %v", err)
+	}
+	firstResult := make(chan error, 1)
+	go func() {
+		_, err := registry.Run(context.Background(), "sync_articles", SourceScheduler)
+		firstResult <- err
+	}()
+	<-started
+
+	// 2. 共享键必须拦截第二个任务，释放后第一个任务正常结束。
+	if _, err := registry.Run(context.Background(), "rebuild_groups", SourceManual); !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("Run(rebuild_groups) error = %v, want ErrAlreadyRunning", err)
+	}
+	if secondCalled {
+		t.Fatal("second job ran despite shared concurrency key")
+	}
+	close(release)
+	if err := <-firstResult; err != nil {
+		t.Fatalf("Run(sync_articles) error = %v", err)
 	}
 }
 

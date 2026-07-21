@@ -36,6 +36,30 @@ func TestCronSchedulerRegistersDefinitionsAndStops(t *testing.T) {
 	}
 }
 
+// TestCronSchedulerSkipsManualOnlyDefinitions 验证 Cron 装载时忽略无频率的仅手动任务。
+// 输入：一个 manual-only 空频率定义。
+// 输出：Cron 可以正常启动和停止，不解析空表达式。
+// 副作用：短暂启动并停止测试 Cron。
+func TestCronSchedulerSkipsManualOnlyDefinitions(t *testing.T) {
+	// 1. 注册只供页面或 CLI 调用的任务。
+	registry := NewRegistry(nil, nil, nil, WithoutMySQLAdvisoryLock())
+	if err := registry.Register(Definition{
+		Name: "manual_only", ManualOnly: true, Timeout: time.Minute,
+		Run: func(context.Context) (string, error) { return "ok", nil },
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	// 2. 空频率不应阻止 Cron 生命周期。
+	scheduler := NewCronScheduler(registry, time.Local)
+	if err := scheduler.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := scheduler.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+}
+
 // TestCronSchedulerStopCancelsRunningJob 验证停止调度器会取消已经派发的任务上下文。
 // 输入：一个每秒触发并等待上下文取消的任务。
 // 输出：Stop 取消任务并在关闭时限内返回成功。

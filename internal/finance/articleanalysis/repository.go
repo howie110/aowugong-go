@@ -148,6 +148,60 @@ func (r *Repository) SaveSignalGroups(ctx context.Context, groups []signalGroupP
 	return inserted, nil
 }
 
+// ReplaceSignalGroups 在单个事务中整体替换投资信号概念词典。
+// 输入：ctx 控制事务，groups 是已全局校验的新词典，modelName 记录模型版本。
+// 输出：返回写入别名数量；清理、写入或提交失败时回滚并返回错误。
+// 副作用：删除并重建 MySQL investment_signal_group 和 investment_signal_alias。
+func (r *Repository) ReplaceSignalGroups(ctx context.Context, groups []signalGroupProposal, modelName string) (int, error) {
+	// 1. 拒绝空词典并开启覆盖事务，防止线上映射被意外清空。
+	if len(groups) == 0 {
+		return 0, fmt.Errorf("拒绝使用空投资信号词典覆盖现有数据")
+	}
+	transaction, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("开始重建投资信号词典: %w", err)
+	}
+	defer transaction.Rollback()
+	if _, err := transaction.ExecContext(ctx, `DELETE FROM investment_signal_alias`); err != nil {
+		return 0, fmt.Errorf("清理旧投资信号别名: %w", err)
+	}
+	if _, err := transaction.ExecContext(ctx, `DELETE FROM investment_signal_group`); err != nil {
+		return 0, fmt.Errorf("清理旧投资信号概念组: %w", err)
+	}
+
+	// 2. 严格插入每个新组及其唯一别名，任何冲突都让整个事务失败。
+	inserted := 0
+	for _, group := range groups {
+		result, err := transaction.ExecContext(ctx, `
+			INSERT INTO investment_signal_group(canonical_name, group_type, source, model_name)
+			VALUES(?,?,?,?)
+		`, group.CanonicalName, group.Type, "deepseek_rebuild", modelName)
+		if err != nil {
+			return 0, fmt.Errorf("重建投资信号概念组 %s: %w", group.CanonicalName, err)
+		}
+		groupID, err := result.LastInsertId()
+		if err != nil {
+			return 0, fmt.Errorf("读取重建投资信号概念组 %s 主键: %w", group.CanonicalName, err)
+		}
+		for _, alias := range group.Aliases {
+			if _, err := transaction.ExecContext(ctx, `
+				INSERT INTO investment_signal_alias(
+					group_id, alias_name, normalized_name, confidence, source, model_name
+				) VALUES(?,?,?,?,?,?)
+			`, groupID, alias.Name, normalizeSignalAlias(alias.Name), alias.Confidence, "deepseek_rebuild", modelName); err != nil {
+				return 0, fmt.Errorf("重建投资信号别名 %s: %w", alias.Name, err)
+			}
+			inserted++
+		}
+	}
+
+	// 3. 全量词典写入成功后一次提交。
+	if err := transaction.Commit(); err != nil {
+		return 0, fmt.Errorf("提交投资信号词典重建: %w", err)
+	}
+	return inserted, nil
+}
+
 // SyncDefaultSource 初始化当前唯一的公众号聚合 RSS 来源。
 // 输入：ctx 控制数据库操作，feedURL 是聚合 RSS 地址。
 // 输出：成功返回 nil，失败返回错误。

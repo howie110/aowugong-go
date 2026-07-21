@@ -79,9 +79,9 @@ AOWUGONG_SCHEDULER_ENABLED=false
 FINANCE_ENABLE_REAL_TRADE=false
 ```
 
-投资文章信号通过 `investment_signal_group` 和 `investment_signal_alias` 保存规范概念及原始名称映射。初始词典将券商、券商板块、证券板块和中信证券归入“证券行业”。自动调度和 CLI 同步任务只把未知名称批量交给 DeepSeek 分类；页面手动抓取仅抓取和分析文章，避免等待历史归类。信号榜查询直接读取持久化映射，并完整展示当前 60 天实际计入统计的原始名称。
+投资文章信号通过 `investment_signal_group` 和 `investment_signal_alias` 保存规范概念及原始名称的一对一映射。未知名称由 DeepSeek 明确选择复用现有组、新建稳定概念组或进入“待归类”；只有新名称会触发增量判断。`rebuild_investment_signal_groups` 可手动全局收敛完整词典，后端要求全部来源唯一覆盖且正式组不超过 40 个。信号榜直接读取持久化映射，并完整展示当前 60 天实际计入统计的原始名称。
 
-CLI `aowugong job <name>` 无条件跳过迁移，只使用已经部署好的表结构。任务使用 MySQL `GET_LOCK` 跨进程互斥，因此本地补跑和服务器自动调度不会同时执行同名任务。
+CLI `aowugong job <name>` 无条件跳过迁移，只使用已经部署好的表结构。任务使用 MySQL `GET_LOCK` 跨进程互斥；文章同步和概念词典重建共用业务互斥键，因此本地补跑、服务器调度和手动重建不会交错覆盖映射。
 
 ## 本地运行
 
@@ -106,6 +106,7 @@ CLI `aowugong job <name>` 无条件跳过迁移，只使用已经部署好的表
 ```powershell
 .\scripts\run-local.ps1 -JobName update_tushare_daily_data -GoCommand C:\howiedata\tools\go1.26.5\bin\go.exe
 .\scripts\run-local.ps1 -JobName sync_investment_articles -GoCommand C:\howiedata\tools\go1.26.5\bin\go.exe
+.\scripts\run-local.ps1 -JobName rebuild_investment_signal_groups -GoCommand C:\howiedata\tools\go1.26.5\bin\go.exe
 ```
 
 `run-local.ps1` 会拒绝公网 MySQL 地址，并强制关闭迁移、自动调度和真实交易。任务业务计算在本地电脑完成，结果直接写入服务器 MySQL；SSH 隧道关闭后连接立即失效。
@@ -129,6 +130,7 @@ npm run dev
 | 09:30 | `check_subscription_expiry_notify` | 提醒即将到期订阅 |
 | 10:00 | `openilink_reply_reminder` | OpeniLink 回复提醒 |
 | 03:30 | `backup_mysql` | MySQL 一致性压缩逻辑备份 |
+| 手动 | `rebuild_investment_signal_groups` | 全局重建投资信号概念词典，不由 Cron 自动触发 |
 
 Registry 统一负责同任务互斥、超时、panic 恢复、开始结束日志、耗时、`job_execution` 记录和失败微信通知。失败通知固定包含“任务、时间、状态、信息”四段。
 
