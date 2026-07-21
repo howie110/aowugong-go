@@ -13,6 +13,11 @@ type fixedSignalClassificationGateway struct {
 	prompt   string
 }
 
+type sequenceSignalClassificationGateway struct {
+	responses []string
+	calls     int
+}
+
 // Configured 表示信号分类测试模型已配置。
 // 输入：无。
 // 输出：固定返回 true。
@@ -30,6 +35,52 @@ func (g *fixedSignalClassificationGateway) SimpleChat(ctx context.Context, promp
 	// 1. 保存提示词供断言并返回固定响应。
 	g.prompt = prompt
 	return g.response, nil
+}
+
+// Configured 表示顺序响应测试模型已配置。
+// 输入：无。
+// 输出：固定返回 true。
+// 副作用：无。
+func (sequenceSignalClassificationGateway) Configured() bool {
+	// 1. 允许服务进入模型重试流程。
+	return true
+}
+
+// SimpleChat 按调用顺序返回测试响应。
+// 输入：ctx、prompt 和 maxTokens 模拟正式模型调用。
+// 输出：依次返回预设文本，超过数量后继续返回最后一项。
+// 副作用：累加模型调用次数。
+func (g *sequenceSignalClassificationGateway) SimpleChat(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	// 1. 记录调用次数并选择当前响应。
+	index := g.calls
+	g.calls++
+	if index >= len(g.responses) {
+		index = len(g.responses) - 1
+	}
+	return g.responses[index], nil
+}
+
+// TestClassifySignalBatchRetriesMalformedJSON 验证模型返回截断 JSON 时自动重试当前批次。
+// 输入：第一次为不完整 JSON，第二次为完整证券行业分类。
+// 输出：成功返回分类结果且模型恰好调用两次。
+// 副作用：调用顺序响应测试模型并累加次数。
+func TestClassifySignalBatchRetriesMalformedJSON(t *testing.T) {
+	// 1. 准备一次截断响应和一次可持久化响应。
+	gateway := &sequenceSignalClassificationGateway{responses: []string{
+		`{"groups":[`,
+		`{"groups":[{"canonical_name":"证券行业","type":"sector","aliases":[{"name":"券商","confidence":0.98}]}]}`,
+	}}
+	service := NewService(nil, ServiceOptions{Analyzer: gateway})
+	batch := []signalCandidate{{Name: "券商", Type: "sector"}}
+
+	// 2. 当前批次应在第二次响应后成功，而不是让整个任务直接失败。
+	groups, err := service.classifySignalBatch(context.Background(), nil, batch)
+	if err != nil {
+		t.Fatalf("classifySignalBatch() error = %v", err)
+	}
+	if gateway.calls != 2 || len(groups) != 1 || len(groups[0].Aliases) != 1 || groups[0].Aliases[0].Name != "券商" {
+		t.Fatalf("calls = %d, groups = %#v", gateway.calls, groups)
+	}
 }
 
 // TestCollectUnknownSignalCandidatesSkipsMappedAliases 验证分类仅处理尚未映射的原始名称。

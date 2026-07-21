@@ -10,7 +10,9 @@ import (
 
 const signalClassificationConfidenceThreshold = 0.80
 
-const signalClassificationBatchSize = 40
+const signalClassificationBatchSize = 20
+
+const signalClassificationMaxAttempts = 2
 
 type signalCandidate struct {
 	Name string `json:"name"`
@@ -65,15 +67,10 @@ func (s *Service) classifySignalAliases(ctx context.Context, days int) (int, err
 			end = len(candidates)
 		}
 		batch := candidates[start:end]
-		content, err := s.options.Analyzer.SimpleChat(ctx, buildSignalClassificationPrompt(groups, batch), 4000)
+		proposals, err := s.classifySignalBatch(ctx, groups, batch)
 		if err != nil {
-			return inserted, fmt.Errorf("调用 DeepSeek 归类第 %d 批投资信号: %w", start/signalClassificationBatchSize+1, err)
+			return inserted, fmt.Errorf("处理第 %d 批投资信号分类: %w", start/signalClassificationBatchSize+1, err)
 		}
-		proposals, err := parseSignalClassificationJSON(content, batch)
-		if err != nil {
-			return inserted, fmt.Errorf("校验第 %d 批投资信号分类: %w", start/signalClassificationBatchSize+1, err)
-		}
-		proposals = stabilizeSignalClassifications(proposals)
 		count, err := s.repository.SaveSignalGroups(ctx, proposals, s.options.Model)
 		if err != nil {
 			return inserted, err
@@ -87,6 +84,35 @@ func (s *Service) classifySignalAliases(ctx context.Context, days int) (int, err
 		}
 	}
 	return inserted, nil
+}
+
+// classifySignalBatch 调用 DeepSeek 分类单批未知名称，并重试畸形响应。
+// 输入：ctx 控制模型调用，groups 是现有词典，batch 是本批未知名称。
+// 输出：返回只含高置信度别名的分类；连续失败时返回最后一次错误。
+// 副作用：最多调用两次 DeepSeek 外部接口。
+func (s *Service) classifySignalBatch(ctx context.Context, groups []SignalGroup, batch []signalCandidate) ([]signalGroupProposal, error) {
+	// 1. 固定本批提示词，避免重试时改变统计语义。
+	prompt := buildSignalClassificationPrompt(groups, batch)
+	var lastErr error
+
+	// 2. 模型调用或 JSON 校验失败时重试一次，成功后立即返回稳定结果。
+	for attempt := 1; attempt <= signalClassificationMaxAttempts; attempt++ {
+		content, err := s.options.Analyzer.SimpleChat(ctx, prompt, 4000)
+		if err == nil {
+			proposals, parseErr := parseSignalClassificationJSON(content, batch)
+			if parseErr == nil {
+				return stabilizeSignalClassifications(proposals), nil
+			}
+			err = parseErr
+		}
+		lastErr = err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("投资信号分类取消: %w", ctxErr)
+		}
+	}
+
+	// 3. 保留最后一次业务上下文，便于任务失败通知定位具体原因。
+	return nil, fmt.Errorf("DeepSeek 连续 %d 次返回无效分类: %w", signalClassificationMaxAttempts, lastErr)
 }
 
 // buildSignalClassificationPrompt 构造未知信号名称的严格分组提示词。
