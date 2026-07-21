@@ -2,6 +2,8 @@ import { useMemo, useState, type PointerEvent } from "react";
 import { LineChart } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Toggle } from "@/components/ui/toggle";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCompactMoney, formatPercent, maskSensitive, toNumber } from "./format";
 import type { TimelinePoint, TrendSeries } from "./types";
 
@@ -116,26 +118,26 @@ function CombinedTrendSvg({ data, isSensitiveMasked }: { data: TimelinePoint[]; 
           const actionLabel = `${isVisible ? "隐藏" : "显示"}${item.label}曲线`;
           return (
             <li key={item.label} className="flex items-center gap-1.5">
-              <button
-                type="button"
-                aria-label={actionLabel}
-                aria-pressed={isVisible}
-                title={actionLabel}
-                disabled={!isAvailable}
-                onClick={() => toggleSeries(item.key)}
-                className={[
-                  "flex h-7 w-7 shrink-0 items-center justify-center rounded border transition-colors",
-                  isAvailable
-                    ? "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    : "cursor-not-allowed opacity-30",
-                ].join(" ")}
-              >
-                <span
-                  aria-hidden="true"
-                  className="h-2.5 w-2.5 shrink-0 rounded-full border"
-                  style={{ backgroundColor: isVisible ? item.color : "transparent", borderColor: item.color }}
-                />
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Toggle
+                    variant="outline"
+                    size="sm"
+                    pressed={isVisible}
+                    aria-label={actionLabel}
+                    disabled={!isAvailable}
+                    onPressedChange={() => toggleSeries(item.key)}
+                    className="h-7 w-7 shrink-0 p-0 disabled:cursor-not-allowed"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="h-2.5 w-2.5 shrink-0 rounded-full border"
+                      style={{ backgroundColor: isVisible ? item.color : "transparent", borderColor: item.color }}
+                    />
+                  </Toggle>
+                </TooltipTrigger>
+                <TooltipContent side="right">{actionLabel}</TooltipContent>
+              </Tooltip>
               <span className={["whitespace-nowrap text-xs", isVisible ? "text-muted-foreground" : "text-muted-foreground/50"].join(" ")}>
                 {item.label}
               </span>

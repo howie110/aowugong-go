@@ -2,8 +2,14 @@ import { useEffect, useState } from "react";
 import { ArrowUpRight, BookOpen, CalendarDays, Clock, FileText, Flame } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type {
   WeReadHeatmap,
@@ -128,9 +134,9 @@ function MetricGrid({
 }) {
   if (message) {
     return (
-      <Card>
-        <CardContent className="p-6 text-sm text-muted-foreground">{message}</CardContent>
-      </Card>
+      <Alert variant="destructive">
+        <AlertDescription>{message}</AlertDescription>
+      </Alert>
     );
   }
 
@@ -146,7 +152,7 @@ function MetricGrid({
                 <Icon className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-sm text-muted-foreground">加载中...</div>
+                <Skeleton className="h-8 w-24" />
               </CardContent>
             </Card>
           );
@@ -200,9 +206,9 @@ function HeatmapCard({
         <HeatmapLegend />
       </CardHeader>
       <CardContent>
-        {message ? <EmptyText text={message} /> : null}
-        {isLoading && !heatmap ? <EmptyText text="正在加载年度阅读热力图..." /> : null}
-        {!isLoading && !message && !heatmap ? <EmptyText text="暂无阅读热力图。" /> : null}
+        {message ? <Alert variant="destructive"><AlertDescription>{message}</AlertDescription></Alert> : null}
+        {isLoading && !heatmap ? <Skeleton className="h-24 w-full" /> : null}
+        {!isLoading && !message && !heatmap ? <CompactEmpty title="暂无阅读热力图" description="产生阅读记录后会显示近一年的分布。" /> : null}
         {heatmap ? <HeatmapGrid days={heatmap.days} /> : null}
       </CardContent>
     </Card>
@@ -260,11 +266,15 @@ function ReadingProgressCard({
       </CardHeader>
       <CardContent>
         {message ? (
-          <EmptyText text={message} />
+          <Alert variant="destructive"><AlertDescription>{message}</AlertDescription></Alert>
         ) : isLoading ? (
-          <EmptyText text="正在加载最近阅读与进度..." />
+          <div className="space-y-2">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
         ) : books.length === 0 ? (
-          <EmptyText text="暂无最近阅读记录。" />
+          <CompactEmpty title="暂无最近阅读记录" description="最近阅读的书籍会显示在这里。" />
         ) : (
           <Table>
             <TableHeader>
@@ -286,9 +296,7 @@ function ReadingProgressCard({
                   </TableCell>
                   <TableCell>
                     <div className="w-28">
-                      <div className="h-2 overflow-hidden rounded-sm bg-muted">
-                        <div className="h-full bg-foreground" style={{ width: `${clampPercent(book.progress)}%` }} />
-                      </div>
+                      <Progress value={clampPercent(book.progress)} />
                       <div className="mt-1 text-xs text-muted-foreground">{clampPercent(book.progress)}%</div>
                     </div>
                   </TableCell>
@@ -316,19 +324,30 @@ function OpenBookLink({ url }: { url?: string }) {
     return null;
   }
   return (
-    <a
-      href={url}
-      className="inline-flex h-7 w-7 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      title="打开微信读书"
-      aria-label="打开微信读书"
-    >
-      <ArrowUpRight className="h-3.5 w-3.5" />
-    </a>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button asChild variant="outline" size="icon" className="h-7 w-7">
+          <a href={url} aria-label="打开微信读书">
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </a>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>打开微信读书</TooltipContent>
+    </Tooltip>
   );
 }
 
-function EmptyText({ text }: { text: string }) {
-  return <div className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">{text}</div>;
+/** CompactEmpty 展示微信读书模块的紧凑空状态，无副作用。 */
+function CompactEmpty({ title, description }: { title: string; description: string }) {
+  // 1. 使用统一 Empty 结构展示标题和补充说明。
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  );
 }
 
 function clampPercent(value: number) {

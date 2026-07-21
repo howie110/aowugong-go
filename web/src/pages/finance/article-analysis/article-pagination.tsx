@@ -1,6 +1,4 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
-
-import { Button } from "@/components/ui/button";
+import { Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 
 export function ArticlePagination({
   currentPage,
@@ -23,30 +21,16 @@ export function ArticlePagination({
       <div className="text-xs text-muted-foreground">
         {start}-{end} / {totalCount} · 第 {currentPage}/{totalPages} 页
       </div>
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => onPageChange(Math.max(1, currentPage - 1))}
-          disabled={currentPage <= 1}
-          aria-label="上一页"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
-          disabled={currentPage >= totalPages}
-          aria-label="下一页"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-      </div>
+      <Pagination className="w-auto">
+        <PaginationContent>
+          <PaginationItem>
+            <PaginationPrevious type="button" onClick={() => onPageChange(Math.max(1, currentPage - 1))} disabled={currentPage <= 1} />
+          </PaginationItem>
+          <PaginationItem>
+            <PaginationNext type="button" onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))} disabled={currentPage >= totalPages} />
+          </PaginationItem>
+        </PaginationContent>
+      </Pagination>
     </div>
   );
 }

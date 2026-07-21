@@ -2,9 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Compass, Search, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { fetchWorkNavigation, type WorkNavigationData, type WorkNavigationGroup, type WorkNavigationLink } from "@/lib/work";
 
 const ALL_GROUPS = "all";
@@ -54,66 +58,62 @@ export function WorkPage() {
   const visibleTotal = visibleGroups.reduce((total, group) => total + group.links.length, 0);
 
   if (isLoading) {
-    return <StatusCard message="正在加载工作导航..." />;
+    return <WorkNavigationSkeleton />;
   }
 
   if (message) {
-    return <StatusCard message={message} />;
+    return (
+      <Alert variant="destructive">
+        <AlertTitle>工作导航加载失败</AlertTitle>
+        <AlertDescription>{message}</AlertDescription>
+      </Alert>
+    );
   }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="relative max-w-xl flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
+        <InputGroup className="max-w-xl flex-1">
+          <InputGroupAddon><Search /></InputGroupAddon>
+          <InputGroupInput
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
             placeholder="搜索网站、分组或域名"
-            className="pl-9 pr-9"
           />
           {searchTerm ? (
-            <button
-              type="button"
-              className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              onClick={() => setSearchTerm("")}
-              title="清空搜索"
-              aria-label="清空搜索"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
+            <InputGroupButton type="button" onClick={() => setSearchTerm("")} aria-label="清空搜索">
+              <X />
+            </InputGroupButton>
           ) : null}
-        </div>
+        </InputGroup>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline">{groups.length} 个分组</Badge>
           <Badge variant="secondary">{visibleTotal} / {navigationData?.total ?? 0} 个入口</Badge>
         </div>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        <Button
-          type="button"
-          size="sm"
-          variant={activeGroup === ALL_GROUPS ? "default" : "outline"}
-          onClick={() => setActiveGroup(ALL_GROUPS)}
-          className="shrink-0"
-        >
+      <ToggleGroup
+        type="single"
+        value={activeGroup}
+        onValueChange={(value) => value && setActiveGroup(value)}
+        variant="outline"
+        size="sm"
+        className="justify-start overflow-x-auto pb-1"
+      >
+        <ToggleGroupItem value={ALL_GROUPS} className="shrink-0 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
           全部
-        </Button>
+        </ToggleGroupItem>
         {groups.map((group) => (
-          <Button
+          <ToggleGroupItem
             key={group.title}
-            type="button"
-            size="sm"
-            variant={activeGroup === group.title ? "default" : "outline"}
-            onClick={() => setActiveGroup(group.title)}
-            className="shrink-0"
+            value={group.title}
+            className="shrink-0 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
           >
             {group.title}
             <span className="text-xs opacity-70">{group.links.length}</span>
-          </Button>
+          </ToggleGroupItem>
         ))}
-      </div>
+      </ToggleGroup>
 
       {!navigationData?.is_configured ? (
         <StatusCard message="还没有配置工作导航数据，请在 storage/private/work/navigation.json 中放入链接。" />
@@ -155,27 +155,52 @@ function NavigationSection({ group }: { group: WorkNavigationGroup }) {
 
 function NavigationCard({ link }: { link: WorkNavigationLink }) {
   return (
-    <a href={link.url} target="_blank" rel="noreferrer" className="group block" title={link.title}>
-      <Card className="h-full transition-colors hover:border-foreground/30 hover:bg-muted/30">
-        <CardContent className="flex h-[3.25rem] flex-col items-center justify-center gap-0.5 p-1">
-          <div
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold leading-none text-white"
-            style={{ backgroundColor: stringToColor(link.title) }}
-          >
-            {getInitial(link.title)}
-          </div>
-          <div className="w-full truncate text-center text-xs font-semibold leading-4">{link.title}</div>
-        </CardContent>
-      </Card>
-    </a>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <a href={link.url} target="_blank" rel="noreferrer" className="group block">
+          <Card className="h-full transition-colors hover:border-foreground/30 hover:bg-muted/30">
+            <CardContent className="flex h-[3.25rem] flex-col items-center justify-center gap-0.5 p-1">
+              <div
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold leading-none text-white"
+                style={{ backgroundColor: stringToColor(link.title) }}
+              >
+                {getInitial(link.title)}
+              </div>
+              <div className="w-full truncate text-center text-xs font-semibold leading-4">{link.title}</div>
+            </CardContent>
+          </Card>
+        </a>
+      </TooltipTrigger>
+      <TooltipContent>{link.title}</TooltipContent>
+    </Tooltip>
   );
 }
 
 function StatusCard({ message }: { message: string }) {
   return (
-    <Card>
-      <CardContent className="p-6 text-sm text-muted-foreground">{message}</CardContent>
-    </Card>
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia><Compass /></EmptyMedia>
+        <EmptyTitle>暂无工作导航</EmptyTitle>
+        <EmptyDescription>{message}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  );
+}
+
+/** WorkNavigationSkeleton 展示工作导航加载占位，无副作用。 */
+function WorkNavigationSkeleton() {
+  // 1. 固定搜索区和分组区尺寸，避免数据返回时页面跳动。
+  return (
+    <div className="space-y-4">
+      <Skeleton className="h-9 max-w-xl" />
+      <div className="flex gap-2">
+        <Skeleton className="h-8 w-16" />
+        <Skeleton className="h-8 w-24" />
+        <Skeleton className="h-8 w-24" />
+      </div>
+      <Skeleton className="h-32 w-full" />
+    </div>
   );
 }
 

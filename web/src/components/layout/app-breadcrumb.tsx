@@ -9,6 +9,8 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type FinancePageKey, getFinancePagePath } from "@/lib/finance";
 import { notify } from "@/lib/notify";
 import { pageGroupLabelMap, pageLabelMap } from "./app-navigation";
@@ -44,25 +46,24 @@ export function AppBreadcrumb({ activePage, onNavigate }: { activePage: FinanceP
               工作台
             </BreadcrumbLink>
           </BreadcrumbItem>
-          <BreadcrumbSeparator className="select-text text-muted-foreground">{" > "}</BreadcrumbSeparator>
+          <BreadcrumbSeparator />
           <BreadcrumbItem className="hidden min-w-0 sm:block">
             <BreadcrumbPage className="truncate text-muted-foreground">{activeGroupLabel}</BreadcrumbPage>
           </BreadcrumbItem>
-          <BreadcrumbSeparator className="hidden select-text text-muted-foreground sm:block">{" > "}</BreadcrumbSeparator>
+          <BreadcrumbSeparator className="hidden sm:block" />
           <BreadcrumbItem className="min-w-0">
             <BreadcrumbPage className="truncate">{activeLabel}</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
-      <button
-        type="button"
-        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        onClick={handleCopyLocation}
-        title={`复制位置：${breadcrumbText}`}
-        aria-label={`复制位置：${breadcrumbText}`}
-      >
-        {isCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={handleCopyLocation} aria-label="复制当前位置">
+            {isCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>复制当前位置</TooltipContent>
+      </Tooltip>
     </div>
   );
 }

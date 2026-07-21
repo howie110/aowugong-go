@@ -1,14 +1,20 @@
 import { Activity, LogOut, ShieldCheck } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarHeader,
   SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
   SidebarProvider,
+  SidebarRail,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { UserProfile, clearToken } from "@/lib/auth";
@@ -51,8 +57,8 @@ export function AppShell({ user, activePage, onNavigate, children }: AppShellPro
     window.localStorage.setItem(NAV_GROUP_STORAGE_KEY, JSON.stringify(openGroups));
   }, [openGroups]);
 
-  function toggleGroup(groupId: string) {
-    setOpenGroups((current) => ({ ...current, [groupId]: !current[groupId] }));
+  function setGroupOpen(groupId: string, open: boolean) {
+    setOpenGroups((current) => ({ ...current, [groupId]: open }));
   }
 
   function handleLogout() {
@@ -62,43 +68,60 @@ export function AppShell({ user, activePage, onNavigate, children }: AppShellPro
 
   return (
     <SidebarProvider>
-      <Sidebar>
-        <SidebarHeader className="h-16 justify-center border-b px-4">
-          <button type="button" className="flex min-w-0 items-center gap-3 text-left" onClick={() => onNavigate("overview")}>
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-              <Activity className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold">Aowugong</div>
-              <div className="truncate text-xs text-muted-foreground">个人工作台</div>
-            </div>
-          </button>
+      <Sidebar collapsible="icon">
+        <SidebarHeader className="h-16 justify-center border-b">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="Aowugong 工作台"
+                className="h-11 group-data-[collapsible=icon]:!p-0"
+                onClick={() => onNavigate("overview")}
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
+                  <Activity className="h-5 w-5" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold">Aowugong</span>
+                  <span className="block truncate text-xs font-normal text-muted-foreground">个人工作台</span>
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
         </SidebarHeader>
         <SidebarContent className="px-1 py-2">
           <SidebarNavigation
             groups={visibleNavGroups}
             activePage={activePage}
             openGroups={openGroups}
-            onToggleGroup={toggleGroup}
+            onGroupOpenChange={setGroupOpen}
             onNavigate={onNavigate}
           />
         </SidebarContent>
-        <SidebarFooter className="border-t p-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-sidebar-border">
-              <ShieldCheck className="h-4 w-4" />
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium">{user?.username || "未登录"}</div>
-              <div className="truncate text-xs text-muted-foreground">{user?.email || "local session"}</div>
-            </div>
-          </div>
+        <SidebarFooter className="border-t">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip={user?.username || "未登录"}
+                className="h-11 group-data-[collapsible=icon]:!p-0"
+              >
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback><ShieldCheck className="h-4 w-4" /></AvatarFallback>
+                </Avatar>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium">{user?.username || "未登录"}</span>
+                  <span className="block truncate text-xs font-normal text-muted-foreground">{user?.email || "local session"}</span>
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
         </SidebarFooter>
+        <SidebarRail />
       </Sidebar>
       <SidebarInset>
         <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b bg-background/95 px-4 backdrop-blur md:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <SidebarTrigger className="md:hidden" />
+            <SidebarTrigger />
+            <Separator orientation="vertical" className="h-4" />
             <div className="min-w-0">
               <div className="text-sm font-semibold">Aowugong 工作台</div>
               <AppBreadcrumb activePage={activePage} onNavigate={onNavigate} />

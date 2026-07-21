@@ -129,8 +129,9 @@ const Sidebar = React.forwardRef<
   React.ComponentProps<"div"> & {
     side?: "left" | "right";
     collapsible?: "offcanvas" | "icon" | "none";
+    variant?: "sidebar" | "floating" | "inset";
   }
->(({ side = "left", collapsible = "offcanvas", className, children, ...props }, ref) => {
+>(({ side = "left", collapsible = "offcanvas", variant = "sidebar", className, children, ...props }, ref) => {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
 
   if (collapsible === "none") {
@@ -173,20 +174,28 @@ const Sidebar = React.forwardRef<
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
       data-side={side}
+      data-variant={variant}
     >
-      <div className="relative w-[--sidebar-width] bg-transparent transition-[width] duration-200 ease-linear group-data-[collapsible=offcanvas]:w-0" />
+      <div className="relative w-[--sidebar-width] bg-transparent transition-[width] duration-200 ease-linear group-data-[collapsible=offcanvas]:w-0 group-data-[collapsible=icon]:w-[--sidebar-width-icon]" />
       <div
         className={cn(
           "fixed inset-y-0 z-10 hidden h-svh w-[--sidebar-width] transition-[left,right,width] duration-200 ease-linear md:flex",
           side === "left"
             ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
             : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
-          "border-r",
+          "group-data-[collapsible=icon]:w-[--sidebar-width-icon]",
+          variant === "floating" || variant === "inset" ? "p-2" : side === "left" ? "border-r" : "border-l",
           className,
         )}
         {...props}
       >
-        <div data-sidebar="sidebar" className="flex h-full w-full flex-col bg-sidebar">
+        <div
+          data-sidebar="sidebar"
+          className={cn(
+            "flex h-full w-full flex-col bg-sidebar",
+            variant === "floating" && "rounded-md border border-sidebar-border shadow",
+          )}
+        >
           {children}
         </div>
       </div>
@@ -219,6 +228,28 @@ const SidebarTrigger = React.forwardRef<React.ElementRef<typeof Button>, React.C
   },
 );
 SidebarTrigger.displayName = "SidebarTrigger";
+
+const SidebarRail = React.forwardRef<HTMLButtonElement, React.ComponentProps<"button">>(({ className, ...props }, ref) => {
+  const { toggleSidebar } = useSidebar();
+
+  return (
+    <button
+      ref={ref}
+      data-sidebar="rail"
+      aria-label="切换侧边栏"
+      tabIndex={-1}
+      onClick={toggleSidebar}
+      title="切换侧边栏"
+      className={cn(
+        "absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all after:absolute after:inset-y-0 after:left-1/2 after:w-px hover:after:bg-sidebar-border group-data-[side=left]:-right-4 group-data-[side=right]:left-0 sm:flex",
+        "group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full",
+        className,
+      )}
+      {...props}
+    />
+  );
+});
+SidebarRail.displayName = "SidebarRail";
 
 const SidebarInset = React.forwardRef<HTMLDivElement, React.ComponentProps<"main">>(({ className, ...props }, ref) => (
   <main ref={ref} className={cn("relative flex min-w-0 flex-1 flex-col bg-muted/30", className)} {...props} />
@@ -257,7 +288,11 @@ const SidebarGroupLabel = React.forwardRef<HTMLDivElement, React.ComponentProps<
       <Comp
         ref={ref}
         data-sidebar="group-label"
-        className={cn("flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium text-sidebar-foreground/70", className)}
+        className={cn(
+          "flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium text-sidebar-foreground/70 transition-[margin,opacity] duration-200",
+          "group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0",
+          className,
+        )}
         {...props}
       />
     );
@@ -298,6 +333,7 @@ const SidebarMenuButton = React.forwardRef<
       className={cn(
         "flex h-8 w-full items-center gap-2 overflow-hidden rounded-md px-2 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:pointer-events-none disabled:opacity-50 [&>span:last-child]:truncate [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0",
         "data-[active=true]:bg-sidebar-primary data-[active=true]:font-medium data-[active=true]:text-sidebar-primary-foreground",
+        "group-data-[collapsible=icon]:!h-8 group-data-[collapsible=icon]:!w-8 group-data-[collapsible=icon]:!p-2",
         className,
       )}
       {...props}
@@ -323,7 +359,11 @@ const SidebarMenuSub = React.forwardRef<HTMLUListElement, React.ComponentProps<"
   <ul
     ref={ref}
     data-sidebar="menu-sub"
-    className={cn("ml-3 flex min-w-0 flex-col gap-1 border-l border-sidebar-border pl-2", className)}
+    className={cn(
+      "ml-3 flex min-w-0 flex-col gap-1 border-l border-sidebar-border pl-2",
+      "group-data-[collapsible=icon]:hidden",
+      className,
+    )}
     {...props}
   />
 ));
@@ -372,6 +412,7 @@ export {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
   SidebarProvider,
+  SidebarRail,
   SidebarTrigger,
   useSidebar,
 };

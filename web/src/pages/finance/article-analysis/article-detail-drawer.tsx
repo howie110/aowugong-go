@@ -1,8 +1,11 @@
-import { ExternalLink, X } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Textarea } from "@/components/ui/textarea";
 import {
   type ArticleAnalysis,
   type ArticleDetail,
@@ -35,19 +38,6 @@ export function ArticleDetailDrawer({
   const [isSavingFeedback, setIsSavingFeedback] = useState(false);
 
   useEffect(() => {
-    if (!article) {
-      return;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [article, onClose]);
-
-  useEffect(() => {
     setPromptFeedback(article?.prompt_feedback || "");
   }, [article?.id, article?.prompt_feedback]);
 
@@ -72,28 +62,25 @@ export function ArticleDetailDrawer({
   }
   const analysis = article.analysis;
   return (
-    <div className="fixed inset-0 z-50">
-      <button type="button" aria-label="关闭文章明细" className="absolute inset-0 bg-black/20" onClick={onClose} />
-      <aside className="relative h-full w-full max-w-xl border-r bg-background shadow-xl">
-        <div className="flex h-full flex-col">
-          <div className="flex items-center justify-between gap-3 border-b px-5 py-4">
-            <div>
-              <div className="text-base font-semibold">文章列表明细</div>
-              <div className="mt-1 text-xs text-muted-foreground">点击遮罩或按 Esc 关闭</div>
-            </div>
-            <div className="flex items-center gap-2">
+    <Sheet open={Boolean(article)} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent side="left" className="!w-full !max-w-xl p-0 sm:!max-w-xl">
+        <div className="flex h-full min-h-0 flex-col">
+          <SheetHeader className="border-b px-5 py-4 pr-12 text-left">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <SheetTitle>文章列表明细</SheetTitle>
+                <SheetDescription className="mt-1">查看分析结果并记录提示词修正意见。</SheetDescription>
+              </div>
               <Button asChild variant="outline" size="sm">
                 <a href={article.link} target="_blank" rel="noreferrer">
                   <ExternalLink className="h-4 w-4" />
                   原文
                 </a>
               </Button>
-              <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="关闭文章明细">
-                <X className="h-4 w-4" />
-              </Button>
             </div>
-          </div>
-          <div className="flex-1 space-y-3 overflow-y-auto p-5">
+          </SheetHeader>
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="space-y-3 p-5">
             {analysis ? (
               <>
                 {analysis.summary ? (
@@ -124,10 +111,11 @@ export function ArticleDetailDrawer({
                 />
               </>
             )}
-          </div>
+            </div>
+          </ScrollArea>
         </div>
-      </aside>
-    </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -163,12 +151,12 @@ function PromptFeedbackPanel({
       <div className="p-3">
         {canEdit ? (
           <>
-            <textarea
+            <Textarea
               value={value}
               onChange={(event) => onChange(event.target.value)}
               maxLength={4000}
               placeholder="例如：这篇文章是中长期看多，不应该只按短期情绪抽取；某个标的应合并为风险而不是推荐..."
-              className="min-h-28 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+              className="min-h-28 resize-y leading-6"
             />
             <div className="mt-1 text-right text-xs text-muted-foreground">{value.length}/4000</div>
           </>

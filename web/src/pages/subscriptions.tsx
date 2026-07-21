@@ -1,12 +1,26 @@
-import { CalendarClock, Pencil, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
+import { CalendarClock, Pencil, RefreshCw, Save, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { DatePicker } from "@/components/date-picker";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Field as FormField, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   type SubscriptionRecord,
   type SubscriptionRecordPayload,
@@ -31,6 +45,7 @@ export function SubscriptionsPage() {
   const [records, setRecords] = useState<SubscriptionRecord[]>([]);
   const [form, setForm] = useState<SubscriptionRecordPayload>(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SubscriptionRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const summary = useMemo(() => buildSummary(records), [records]);
@@ -79,19 +94,21 @@ export function SubscriptionsPage() {
     }
   }
 
-  async function handleDelete(record: SubscriptionRecord) {
-    if (!window.confirm(`确定删除「${record.service_name}」吗？`)) {
+  async function handleDelete() {
+    if (!deleteTarget) {
       return;
     }
     try {
-      await deleteSubscription(record.id);
+      await deleteSubscription(deleteTarget.id);
       notify.success("订阅记录已删除");
       await loadRecords();
-      if (editingId === record.id) {
+      if (editingId === deleteTarget.id) {
         resetForm();
       }
     } catch (error) {
       notify.errorFrom(error, "删除订阅记录失败");
+    } finally {
+      setDeleteTarget(null);
     }
   }
 
@@ -133,7 +150,22 @@ export function SubscriptionsPage() {
         onRefresh={loadRecords}
       />
 
-      <SubscriptionTable records={records} isLoading={isLoading} onEdit={handleEdit} onDelete={handleDelete} />
+      <SubscriptionTable records={records} isLoading={isLoading} onEdit={handleEdit} onDelete={setDeleteTarget} />
+
+      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除订阅记录</AlertDialogTitle>
+            <AlertDialogDescription>确定删除「{deleteTarget?.service_name}」吗？此操作不能撤销。</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => void handleDelete()}>
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -169,7 +201,7 @@ function SubscriptionEditorCard({
           <CardDescription>状态和离到期天数由到期日期自动计算。</CardDescription>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={onRefresh} disabled={isLoading || isSaving}>
-          <RefreshCw className={["h-4 w-4", isLoading ? "animate-spin" : ""].join(" ")} />
+          {isLoading ? <Spinner /> : <RefreshCw className="h-4 w-4" />}
           刷新
         </Button>
       </CardHeader>
@@ -188,10 +220,10 @@ function SubscriptionEditorCard({
             <Input type="number" inputMode="decimal" value={form.monthly_fee} onChange={(event) => updateField("monthly_fee", event.target.value)} />
           </Field>
           <Field label="开始日期">
-            <Input type="date" value={form.starts_on || ""} onChange={(event) => updateField("starts_on", event.target.value)} />
+            <DatePicker value={form.starts_on || ""} onChange={(value) => updateField("starts_on", value)} clearable />
           </Field>
           <Field label="到期日期">
-            <Input type="date" value={form.expires_on} onChange={(event) => updateField("expires_on", event.target.value)} />
+            <DatePicker value={form.expires_on} onChange={(value) => updateField("expires_on", value)} />
           </Field>
           <div className="md:col-span-2">
             <Field label="备注">
@@ -207,7 +239,7 @@ function SubscriptionEditorCard({
             </Button>
           ) : null}
           <Button type="button" onClick={onSave} disabled={isSaving}>
-            {isSaving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {isSaving ? <Spinner /> : <Save className="h-4 w-4" />}
             保存
           </Button>
         </div>
@@ -218,10 +250,10 @@ function SubscriptionEditorCard({
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
+    <FormField>
+      <FieldLabel>{label}</FieldLabel>
       {children}
-    </div>
+    </FormField>
   );
 }
 
@@ -286,20 +318,35 @@ function SubscriptionTable({
                 <TableCell className="text-muted-foreground">{record.created_by || "-"}</TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-1">
-                    <Button type="button" variant="ghost" size="icon" onClick={() => onEdit(record)} title="编辑">
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button type="button" variant="ghost" size="icon" onClick={() => onDelete(record)} title="删除">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button type="button" variant="ghost" size="icon" onClick={() => onEdit(record)} aria-label="编辑订阅">
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>编辑</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button type="button" variant="ghost" size="icon" onClick={() => onDelete(record)} aria-label="删除订阅">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>删除</TooltipContent>
+                    </Tooltip>
                   </div>
                 </TableCell>
               </TableRow>
             ))}
             {!records.length ? (
               <TableRow>
-                <TableCell colSpan={10} className="py-8 text-center text-sm text-muted-foreground">
-                  {isLoading ? "正在加载订阅记录..." : "暂无订阅记录"}
+                <TableCell colSpan={10}>
+                  <Empty className="border-0">
+                    <EmptyHeader>
+                      <EmptyTitle>{isLoading ? "正在加载订阅记录" : "暂无订阅记录"}</EmptyTitle>
+                      <EmptyDescription>{isLoading ? <Spinner className="mx-auto" /> : "新增订阅后会显示在这里。"}</EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
                 </TableCell>
               </TableRow>
             ) : null}

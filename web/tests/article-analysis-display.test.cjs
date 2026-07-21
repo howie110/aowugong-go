@@ -9,6 +9,8 @@ const pageUtilsPath = path.resolve(__dirname, "../src/pages/finance/article-anal
 const pageSizePath = path.resolve(__dirname, "../src/pages/finance/article-analysis/use-responsive-table-page-size.ts");
 const signalRankPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/signal-rank-card.tsx");
 const articleAnalysisPagePath = path.resolve(__dirname, "../src/pages/finance/article-analysis/index.tsx");
+const articlesCardPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/articles-card.tsx");
+const articleDrawerPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/article-detail-drawer.tsx");
 
 /** 编译并加载不含运行时外部依赖的文章页面工具。 */
 function loadPageUtils() {
@@ -39,7 +41,7 @@ test("桌面信号榜默认保留十五行位置", () => {
   assert.match(source, /DEFAULT_DENSE_TABLE_PAGE_SIZE\s*=\s*15\s*;/);
 });
 
-test("概念组按全部原始成员筛选文章", () => {
+test("概念组按全部成员筛选并支持精确筛选具体标的", () => {
   const { filterArticlesBySignal } = loadPageUtils();
   const articles = [
     { id: 1, recommendation_names: ["券商"], risk_names: [] },
@@ -56,11 +58,27 @@ test("概念组按全部原始成员筛选文章", () => {
   };
 
   assert.deepEqual(Array.from(filterArticlesBySignal(articles, signal), (article) => article.id), [1, 2]);
+  assert.deepEqual(Array.from(filterArticlesBySignal(articles, signal, "中信证券"), (article) => article.id), [2]);
 });
 
-test("概念组灰字完整连接全部原始成员", () => {
+test("概念组灰字使用斜杠紧凑连接全部原始成员", () => {
   const { formatSignalMembers } = loadPageUtils();
-  assert.equal(formatSignalMembers(["券商", "券商板块", "证券板块", "中信证券"]), "券商 · 券商板块 · 证券板块 · 中信证券");
+  assert.equal(formatSignalMembers(["券商", "券商板块", "证券板块", "中信证券"]), "券商 / 券商板块 / 证券板块 / 中信证券");
+});
+
+test("信号榜使用 Accordion 展开可点击的具体标的", () => {
+  const source = fs.readFileSync(signalRankPath, "utf8");
+  assert.match(source, /components\/ui\/accordion/);
+  assert.match(source, /components\/ui\/badge/);
+  assert.match(source, /<Accordion/);
+  assert.match(source, /<AccordionTrigger/);
+  assert.match(source, /<AccordionContent/);
+  assert.match(source, /<TableCell colSpan=\{4\}/);
+  assert.match(source, /absolute right-0 top-0/);
+  assert.match(source, /item\.members\.map/);
+  assert.match(source, /onSelectMember\(item, member\)/);
+  assert.match(source, /selectedMember === member/);
+  assert.match(source, /<Badge[^>]*asChild/);
 });
 
 test("概念组成员换行后分页只测真实行并允许降低行数", () => {
@@ -76,6 +94,16 @@ test("桌面信号榜为完整成员和计数保留最小宽度", () => {
   assert.match(source, /xl:grid-cols-\[minmax\(20rem,0\.7fr\)_minmax\(0,1\.3fr\)\]/);
 });
 
+test("信号榜缩短标的列并为三位数字预留稳定列宽", () => {
+  const source = fs.readFileSync(signalRankPath, "utf8");
+  assert.match(source, /w-\[42%\]/);
+  assert.match(source, /w-\[25%\]/);
+  assert.match(source, /w-\[15%\]/);
+  assert.match(source, /w-\[18%\]/);
+  assert.match(source, /grid-cols-\[42fr_25fr_15fr_18fr\]/);
+  assert.match(source, /pr-9 text-right/);
+});
+
 test("文章筛选加载完整六十天窗口而不是旧的两百篇", () => {
   const source = fs.readFileSync(articleAnalysisPagePath, "utf8");
   assert.match(source, /fetchArticles\(TARGET_DAYS,\s*5000\)/);
@@ -84,5 +112,53 @@ test("文章筛选加载完整六十天窗口而不是旧的两百篇", () => {
 test("超长概念成员在桌面信号榜内可以纵向滚动", () => {
   const source = fs.readFileSync(signalRankPath, "utf8");
   assert.match(source, /xl:overflow-y-auto/);
+  assert.match(source, /xl:\[scrollbar-gutter:stable\]/);
   assert.doesNotMatch(source, /xl:h-full xl:overflow-hidden/);
+});
+
+test("文章列表移除标的群并用 Breadcrumb 展示筛选位置", () => {
+  const source = fs.readFileSync(articlesCardPath, "utf8");
+  assert.match(source, /components\/ui\/breadcrumb/);
+  assert.match(source, /<Breadcrumb/);
+  assert.match(source, /<BreadcrumbPage>\{selectedMember\}<\/BreadcrumbPage>/);
+  assert.match(source, /onSelectSignalGroup/);
+  assert.doesNotMatch(source, /data-article-signal-groups/);
+  assert.doesNotMatch(source, /ArticleSignalGroupFilters/);
+  assert.doesNotMatch(source, /signalItems/);
+});
+
+test("文章 Breadcrumb 返回父级不修改信号榜的页码和选中态", () => {
+  const source = fs.readFileSync(articleAnalysisPagePath, "utf8");
+  const handlerStart = source.indexOf("function handleArticleBreadcrumbChange");
+  const handlerEnd = source.indexOf("function handleArticleDetailChange");
+  const handlerSource = source.slice(handlerStart, handlerEnd);
+
+  assert.ok(handlerStart >= 0);
+  assert.match(source, /selectedRankSignal/);
+  assert.match(source, /selectedRankMember/);
+  assert.match(source, /selectedArticleSignal/);
+  assert.match(source, /selectedArticleMember/);
+  assert.match(source, /onSelectSignalGroup=\{\(\) => handleArticleBreadcrumbChange\("group"\)\}/);
+  assert.doesNotMatch(handlerSource, /setSignalPage|setSelectedRankSignal|setSelectedRankMember/);
+});
+
+test("信号榜具体标的按钮同步筛选文章", () => {
+  const source = fs.readFileSync(articleAnalysisPagePath, "utf8");
+  const handlerStart = source.indexOf("function handleSelectRankMember");
+  const handlerEnd = source.indexOf("function handleArticleBreadcrumbChange");
+  const handlerSource = source.slice(handlerStart, handlerEnd);
+
+  assert.ok(handlerStart >= 0);
+  assert.match(handlerSource, /setSelectedRankSignal\(signal\)/);
+  assert.match(handlerSource, /setSelectedRankMember\(nextMember\)/);
+  assert.match(handlerSource, /setSelectedArticleSignal\(signal\)/);
+  assert.match(handlerSource, /setSelectedArticleMember\(nextMember\)/);
+  assert.match(source, /onSelectMember=\{handleSelectRankMember\}/);
+});
+
+test("文章明细使用 Sheet 和 Textarea", () => {
+  const source = fs.readFileSync(articleDrawerPath, "utf8");
+  assert.match(source, /<SheetContent[^>]*side="left"/);
+  assert.match(source, /<Textarea/);
+  assert.doesNotMatch(source, /fixed inset-0 z-50/);
 });

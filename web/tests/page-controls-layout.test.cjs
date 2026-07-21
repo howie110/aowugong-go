@@ -139,8 +139,9 @@ test("综合趋势图例按钮可以控制曲线和Y轴显示", () => {
   // 2. 确认隐藏状态会同时过滤曲线，并控制对应轴刻度。
   assert.match(source, /useState<Set<TrendSeries\["key"\]>>\(new Set\(\)\)/);
   assert.match(source, /!hiddenSeries\.has\(item\.key\)/);
-  assert.match(source, /onClick=\{\(\) => toggleSeries\(item\.key\)\}/);
-  assert.match(source, /aria-pressed=\{isVisible\}/);
+  assert.match(source, /<Toggle/);
+  assert.match(source, /onPressedChange=\{\(\) => toggleSeries\(item\.key\)\}/);
+  assert.match(source, /pressed=\{isVisible\}/);
   assert.match(source, /disabled=\{!isAvailable\}/);
   assert.match(source, /visibleAxes\.has\("change"\)/);
   assert.match(source, /visibleAxes\.has\("percent"\)/);

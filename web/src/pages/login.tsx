@@ -1,10 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Activity, Loader2 } from "lucide-react";
+import { Activity } from "lucide-react";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import { login } from "@/lib/auth";
 import {
   clearRememberedCredentials,
@@ -124,20 +127,22 @@ export function LoginPage() {
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  <input
+                  <Checkbox
                     id="remember-password"
-                    type="checkbox"
-                    className="h-4 w-4 shrink-0 cursor-pointer rounded border border-input accent-foreground"
                     checked={rememberPassword}
-                    onChange={(event) => handleRememberPasswordChange(event.target.checked)}
+                    onCheckedChange={(checked) => handleRememberPasswordChange(checked === true)}
                   />
                   <Label className="cursor-pointer font-normal" htmlFor="remember-password">
                     记住密码
                   </Label>
                 </div>
-                {error ? <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+                {error ? (
+                  <Alert variant="destructive">
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                ) : null}
                 <Button className="w-full" type="submit" disabled={isLoading}>
-                  {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  {isLoading ? <Spinner /> : null}
                   登录
                 </Button>
               </form>

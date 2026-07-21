@@ -1,5 +1,7 @@
 import type { RefObject } from "react";
 
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { TargetSignalStat } from "@/lib/article-analysis";
@@ -15,8 +17,10 @@ export function SignalRankCard({
   pageSize,
   tableRef,
   selectedSignal,
+  selectedMember,
   onPageChange,
   onSelect,
+  onSelectMember,
 }: {
   title: string;
   items: TargetSignalStat[];
@@ -26,8 +30,10 @@ export function SignalRankCard({
   pageSize: number;
   tableRef: RefObject<HTMLDivElement>;
   selectedSignal: TargetSignalStat | null;
+  selectedMember: string | null;
   onPageChange: (page: number) => void;
-  onSelect: (signal: TargetSignalStat | null) => void;
+  onSelect: (signal: TargetSignalStat) => void;
+  onSelectMember: (signal: TargetSignalStat, member: string) => void;
 }) {
   const emptyRows = Array.from({ length: Math.max(0, pageSize - items.length) });
 
@@ -37,46 +43,62 @@ export function SignalRankCard({
         <CardTitle>{title}</CardTitle>
         <CardDescription>按概念合并，按总数倒序。</CardDescription>
       </CardHeader>
-      <CardContent className="min-h-0 overflow-visible px-4 pb-0 pt-0 sm:px-5 xl:overflow-y-auto xl:px-6">
+      <CardContent className="min-h-0 overflow-visible px-4 pb-0 pt-0 sm:px-5 xl:overflow-y-auto xl:px-6 xl:[scrollbar-gutter:stable]">
         <div ref={tableRef} className="min-h-0 overflow-visible pb-1 xl:h-full">
           <Table className="table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[50%] px-2">标的</TableHead>
-                <TableHead className="w-[22%] px-2">信号</TableHead>
-                <TableHead className="w-[14%] px-2 text-right">净数</TableHead>
-                <TableHead className="w-[14%] px-2 text-right">总数</TableHead>
+                <TableHead className="w-[42%] px-2">标的</TableHead>
+                <TableHead className="w-[25%] px-2">信号</TableHead>
+                <TableHead className="w-[15%] whitespace-nowrap px-2 text-right">净数</TableHead>
+                <TableHead className="w-[18%] whitespace-nowrap pl-2 pr-9 text-right">总数</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {items.map((item) => (
                 <TableRow
                   key={`${item.name}-${item.type}`}
-                  onClick={() => onSelect(isSameSignal(selectedSignal, item) ? null : item)}
-                  className={["cursor-pointer", isSameSignal(selectedSignal, item) ? "bg-muted/70" : ""].join(" ")}
+                  className={isSameSignal(selectedSignal, item) ? "bg-muted/70" : ""}
                 >
-                  <TableCell className="px-2 py-2 align-top">
-                    <div className="font-medium">{item.name}</div>
+                  <TableCell colSpan={4} className="p-0">
                     {item.members.length ? (
-                      <div
-                        aria-label={formatSignalMembers(item.members)}
-                        className="mt-1 flex flex-wrap gap-x-1 text-xs font-normal leading-5 text-muted-foreground"
-                      >
-                        {item.members.map((name, index) => (
-                          <span key={name} className="whitespace-nowrap">
-                            {index ? `· ${name}` : name}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
+                      <Accordion type="single" collapsible className="w-full">
+                        <AccordionItem value={`${item.type}-${item.name}`} className="relative border-0">
+                          <SignalRankSummary item={item} onSelect={onSelect} />
+                          <div className="absolute right-0 top-0 flex h-10 items-center">
+                            <AccordionTrigger className="h-8 w-8 flex-none justify-center p-0 hover:no-underline">
+                              <span className="sr-only">展开 {item.name} 标的群</span>
+                            </AccordionTrigger>
+                          </div>
+                          <AccordionContent
+                            aria-label={formatSignalMembers(item.members)}
+                            className="border-t px-2 pb-2 pt-2"
+                          >
+                            <div className="flex flex-wrap gap-1">
+                              {item.members.map((member) => (
+                                <Badge
+                                  key={`${item.type}-${item.name}-${member}`}
+                                  asChild
+                                  variant={isSameSignal(selectedSignal, item) && selectedMember === member ? "default" : "outline"}
+                                  className="max-w-full cursor-pointer whitespace-normal break-words"
+                                >
+                                  <button
+                                    type="button"
+                                    aria-pressed={isSameSignal(selectedSignal, item) && selectedMember === member}
+                                    onClick={() => onSelectMember(item, member)}
+                                  >
+                                    {member}
+                                  </button>
+                                </Badge>
+                              ))}
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    ) : (
+                      <SignalRankSummary item={item} onSelect={onSelect} />
+                    )}
                   </TableCell>
-                  <TableCell className="px-2 py-2">
-                    <SignalCountCell recommendationCount={item.recommendation_count} riskCount={item.risk_count} />
-                  </TableCell>
-                  <TableCell className="px-2 py-2 text-right">
-                    <SignalNetCell value={item.recommendation_count - item.risk_count} />
-                  </TableCell>
-                  <TableCell className="px-2 py-2 text-right text-lg font-semibold tabular-nums">{item.count}</TableCell>
                 </TableRow>
               ))}
               {emptyRows.map((_, index) => (
@@ -103,6 +125,30 @@ export function SignalRankCard({
         </div>
       ) : null}
     </Card>
+  );
+}
+
+// SignalRankSummary 渲染信号榜单行的四列摘要，并保留独立的筛选点击区域。
+// 输入：item 是概念组统计，onSelect 接收用户选择的概念组。
+// 输出：返回横跨四列的可点击摘要。
+// 副作用：点击时调用 onSelect 筛选文章。
+function SignalRankSummary({ item, onSelect }: { item: TargetSignalStat; onSelect: (signal: TargetSignalStat) => void }) {
+  // 1. 使用与表头一致的列比例渲染名称、信号、净数和总数。
+  return (
+    <button
+      type="button"
+      className="grid min-h-10 w-full grid-cols-[42fr_25fr_15fr_18fr] items-center text-left transition-colors hover:bg-muted/50"
+      onClick={() => onSelect(item)}
+    >
+      <span className="min-w-0 truncate px-2 font-medium">{item.name}</span>
+      <span className="px-2">
+        <SignalCountCell recommendationCount={item.recommendation_count} riskCount={item.risk_count} />
+      </span>
+      <span className="px-2 text-right">
+        <SignalNetCell value={item.recommendation_count - item.risk_count} />
+      </span>
+      <span className="whitespace-nowrap pl-2 pr-9 text-right text-lg font-semibold tabular-nums">{item.count}</span>
+    </button>
   );
 }
 

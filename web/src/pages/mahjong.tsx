@@ -12,10 +12,14 @@ import {
   Trophy,
 } from "lucide-react";
 
+import { DatePicker } from "@/components/date-picker";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
+import { Spinner } from "@/components/ui/spinner";
 import { buildMahjongHeatmap, getMahjongHeatmapCellColor, type MahjongHeatmap, type MahjongHeatmapDay } from "@/lib/mahjong-heatmap";
 import { type MahjongReport, type MahjongTimelinePoint, fetchMahjongReport, saveMahjongRecord } from "@/lib/mahjong";
 import { notify } from "@/lib/notify";
@@ -89,9 +93,13 @@ export function MahjongPage() {
           <FrequencyCard report={report} />
         </>
       ) : (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">{isLoading ? "正在读取麻将战绩..." : "暂无麻将战绩"}</CardContent>
-        </Card>
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia>{isLoading ? <Spinner /> : <Trophy />}</EmptyMedia>
+            <EmptyTitle>{isLoading ? "正在读取麻将战绩" : "暂无麻将战绩"}</EmptyTitle>
+            <EmptyDescription>{isLoading ? "正在同步最新记录。" : "录入第一条战绩后会显示统计和趋势。"}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       )}
     </div>
   );
@@ -124,7 +132,7 @@ function RecordEditorCard({
           <CardDescription>录入某天的当日输赢；同一天重复保存会覆盖旧记录。</CardDescription>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={onRefresh} disabled={isLoading}>
-          <RefreshCw className={["h-4 w-4", isLoading ? "animate-spin" : ""].join(" ")} />
+          {isLoading ? <Spinner /> : <RefreshCw className="h-4 w-4" />}
           刷新
         </Button>
       </CardHeader>
@@ -132,7 +140,7 @@ function RecordEditorCard({
         <div className="grid gap-3 md:grid-cols-[180px_1fr_auto] md:items-end">
           <div className="space-y-2">
             <Label htmlFor="mahjong-date">日期</Label>
-            <Input id="mahjong-date" type="date" value={playedDate} onChange={(event) => onPlayedDateChange(event.target.value)} />
+            <DatePicker id="mahjong-date" value={playedDate} onChange={onPlayedDateChange} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="mahjong-result">当日输赢</Label>
@@ -147,7 +155,7 @@ function RecordEditorCard({
             />
           </div>
           <Button type="button" disabled={isSaving} onClick={onSave} className="w-full md:w-auto">
-            {isSaving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {isSaving ? <Spinner /> : <Save className="h-4 w-4" />}
             保存
           </Button>
         </div>
@@ -246,7 +254,11 @@ function MahjongTrendSvg({ report }: { report: MahjongReport }) {
   }
 
   if (!report.timeline.length) {
-    return <div className="rounded-md border px-3 py-8 text-center text-sm text-muted-foreground">暂无趋势数据</div>;
+    return (
+      <Empty>
+        <EmptyHeader><EmptyTitle>暂无趋势数据</EmptyTitle></EmptyHeader>
+      </Empty>
+    );
   }
 
   return (
@@ -371,9 +383,7 @@ function FrequencyCard({ report }: { report: MahjongReport }) {
                     <span className="font-medium">{item.label}</span>
                     <span className="tabular-nums text-muted-foreground">{item.game_count}</span>
                   </div>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-foreground" style={{ width: `${width}%` }} />
-                  </div>
+                  <Progress value={width} className="mt-2" />
                   <div className="mt-1 text-right text-[10px] tabular-nums text-muted-foreground">{formatNumber(item.weight_percent)}%</div>
                 </div>
               );
@@ -391,7 +401,11 @@ function FrequencyHeatmap({ heatmap }: { heatmap: MahjongHeatmap }) {
   const activeDay = heatmap.days.find((day) => day.date === activeDate) || latestActiveDay;
 
   if (!heatmap.weeks.length) {
-    return <div className="rounded-md border px-3 py-8 text-center text-sm text-muted-foreground">暂无打牌频率数据</div>;
+    return (
+      <Empty>
+        <EmptyHeader><EmptyTitle>暂无打牌频率数据</EmptyTitle></EmptyHeader>
+      </Empty>
+    );
   }
 
   return (

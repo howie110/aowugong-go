@@ -1,11 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ImageUp, RefreshCw, UploadCloud } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { CheckCircle2, FileImage, ImageUp, RefreshCw, UploadCloud, X } from "lucide-react";
 
+import { DatePicker } from "@/components/date-picker";
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@/components/ui/attachment";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { authorizedFetch } from "@/lib/auth";
 import { notify } from "@/lib/notify";
@@ -48,8 +60,7 @@ export function PositionUploadPage() {
   const [recent, setRecent] = useState<AssetSnapshot[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingRecent, setIsLoadingRecent] = useState(false);
-
-  const selectedNames = useMemo(() => files.map((file) => file.name).join("，"), [files]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadRecent();
@@ -94,7 +105,7 @@ export function PositionUploadPage() {
       }
       const data = (await response.json()) as UploadResponse;
       setResults(data.results);
-      setFiles([]);
+      clearFiles();
       notify.success("识别保存完成", `${data.results.filter((item) => item.status === "saved").length} 张已保存。`);
       await loadRecent();
     } catch (error) {
@@ -102,6 +113,22 @@ export function PositionUploadPage() {
     } finally {
       setIsUploading(false);
     }
+  }
+
+  /** clearFiles 清空待上传截图及浏览器文件输入，无网络副作用。 */
+  function clearFiles() {
+    // 1. 清空页面附件状态。
+    setFiles([]);
+    // 2. 重置原生文件选择值，允许重新选择同名文件。
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
+  /** removeFile 从待上传列表移除指定截图，无网络副作用。 */
+  function removeFile(index: number) {
+    // 1. 按索引过滤目标文件。
+    setFiles((current) => current.filter((_, currentIndex) => currentIndex !== index));
   }
 
   return (
@@ -115,28 +142,46 @@ export function PositionUploadPage() {
           <div className="grid gap-3 md:grid-cols-[180px_1fr_auto] md:items-end">
             <div className="space-y-2">
               <Label htmlFor="snapshot-date">日期</Label>
-              <Input id="snapshot-date" type="date" value={snapshotDate} onChange={(event) => setSnapshotDate(event.target.value)} />
+              <DatePicker id="snapshot-date" value={snapshotDate} onChange={setSnapshotDate} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="position-images">截图</Label>
-              <Input
+              <input
+                ref={fileInputRef}
                 id="position-images"
                 type="file"
+                className="sr-only"
                 accept="image/png,image/jpeg,image/webp"
                 multiple
                 onChange={(event) => setFiles(Array.from(event.target.files || []))}
               />
+              <Button type="button" variant="outline" className="w-full justify-start" onClick={() => fileInputRef.current?.click()}>
+                <ImageUp className="h-4 w-4" />
+                {files.length ? `已选择 ${files.length} 张` : "选择截图"}
+              </Button>
             </div>
             <Button type="button" disabled={isUploading} onClick={handleUpload} className="w-full md:w-auto">
-              {isUploading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+              {isUploading ? <Spinner /> : <UploadCloud className="h-4 w-4" />}
               识别保存
             </Button>
           </div>
-          {selectedNames ? (
-            <div className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-muted-foreground">
-              <ImageUp className="h-4 w-4 shrink-0" />
-              <span className="truncate">{selectedNames}</span>
-            </div>
+          {files.length ? (
+            <AttachmentGroup>
+              {files.map((file, index) => (
+                <Attachment key={`${file.name}-${file.lastModified}`} size="sm">
+                  <AttachmentMedia><FileImage /></AttachmentMedia>
+                  <AttachmentContent>
+                    <AttachmentTitle>{file.name}</AttachmentTitle>
+                    <AttachmentDescription>{formatFileSize(file.size)}</AttachmentDescription>
+                  </AttachmentContent>
+                  <AttachmentActions>
+                    <AttachmentAction type="button" onClick={() => removeFile(index)} aria-label={`移除 ${file.name}`}>
+                      <X />
+                    </AttachmentAction>
+                  </AttachmentActions>
+                </Attachment>
+              ))}
+            </AttachmentGroup>
           ) : null}
         </CardContent>
       </Card>
@@ -150,7 +195,7 @@ export function PositionUploadPage() {
             <CardDescription>{isLoadingRecent ? "刷新中" : `${recent.length} 条`}</CardDescription>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={loadRecent} disabled={isLoadingRecent}>
-            <RefreshCw className={["h-4 w-4", isLoadingRecent ? "animate-spin" : ""].join(" ")} />
+            {isLoadingRecent ? <Spinner /> : <RefreshCw className="h-4 w-4" />}
             刷新
           </Button>
         </CardHeader>
@@ -197,7 +242,14 @@ function UploadResultCard({ results }: { results: UploadResult[] }) {
 
 function SnapshotTable({ snapshots }: { snapshots: AssetSnapshot[] }) {
   if (!snapshots.length) {
-    return <div className="rounded-md border px-3 py-6 text-center text-sm text-muted-foreground">暂无记录</div>;
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>暂无导入记录</EmptyTitle>
+          <EmptyDescription>上传持仓截图后会显示识别结果。</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
 
   return (
@@ -268,4 +320,13 @@ function formatDateTime(value?: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/** formatFileSize 将文件字节数格式化为易读文本，无副作用。 */
+function formatFileSize(bytes: number) {
+  // 1. 小于 1MB 时显示 KB，其余显示 MB。
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(bytes / 1024, 0.1).toFixed(1)} KB`;
+  }
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }

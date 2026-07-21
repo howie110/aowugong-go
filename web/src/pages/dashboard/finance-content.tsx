@@ -1,7 +1,9 @@
 import { Activity, CalendarClock, Database, FileText, LineChart, PlayCircle, Server, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { FinanceItem, FinanceMetric, FinancePageData } from "@/lib/finance";
 
@@ -69,17 +71,21 @@ export function NotificationsContent({ pageData }: { pageData: FinancePageData }
 
 export function LoadingCard() {
   return (
-    <Card>
-      <CardContent className="p-6 text-sm text-muted-foreground">正在加载页面数据...</CardContent>
-    </Card>
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-28" />)}
+      </div>
+      <Skeleton className="h-64" />
+    </div>
   );
 }
 
 export function ErrorCard({ message }: { message: string }) {
   return (
-    <Card>
-      <CardContent className="p-6 text-sm text-muted-foreground">{message}</CardContent>
-    </Card>
+    <Alert variant="destructive">
+      <AlertTitle>页面数据加载失败</AlertTitle>
+      <AlertDescription>{message}</AlertDescription>
+    </Alert>
   );
 }
 

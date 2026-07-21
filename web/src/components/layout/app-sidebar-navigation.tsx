@@ -1,10 +1,13 @@
 import { ChevronRight } from "lucide-react";
 import type { MouseEvent } from "react";
 
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
@@ -17,13 +20,13 @@ export function SidebarNavigation({
   groups,
   activePage,
   openGroups,
-  onToggleGroup,
+  onGroupOpenChange,
   onNavigate,
 }: {
   groups: NavGroup[];
   activePage: FinancePageKey;
   openGroups: Record<string, boolean>;
-  onToggleGroup: (groupId: string) => void;
+  onGroupOpenChange: (groupId: string, open: boolean) => void;
   onNavigate: (pageKey: FinancePageKey) => void;
 }) {
   const { isMobile, setOpenMobile } = useSidebar();
@@ -43,48 +46,46 @@ export function SidebarNavigation({
         const GroupIcon = group.icon;
 
         return (
-          <SidebarGroup key={group.id} className="py-1">
-            <SidebarGroupLabel asChild>
-              <button
-                type="button"
-                className="h-8 w-full justify-between px-2 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                onClick={() => onToggleGroup(group.id)}
-                aria-expanded={isOpen}
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <GroupIcon className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{group.label}</span>
-                </span>
-                <span className="flex shrink-0 items-center text-muted-foreground">
-                  <ChevronRight className={["h-4 w-4 transition-transform duration-200", isOpen ? "rotate-90" : ""].join(" ")} />
-                </span>
-              </button>
-            </SidebarGroupLabel>
-            <div
-              className={[
-                "grid transition-all duration-200 ease-out",
-                isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
-              ].join(" ")}
-            >
-              <SidebarGroupContent className="min-h-0 overflow-hidden">
-                <SidebarMenuSub className="mt-1">
-                  {group.items.map((item) => {
-                    const ItemIcon = item.icon;
-                    return (
-                      <SidebarMenuSubItem key={item.key}>
-                        <SidebarMenuSubButton asChild isActive={activePage === item.key} className="text-xs">
-                          <a href={getFinancePagePath(item.key)} onClick={(event) => handleNavigate(event, item.key)}>
-                            <ItemIcon className="h-4 w-4" />
-                            <span>{item.label}</span>
-                          </a>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    );
-                  })}
-                </SidebarMenuSub>
-              </SidebarGroupContent>
-            </div>
-          </SidebarGroup>
+          <Collapsible
+            key={group.id}
+            asChild
+            open={isOpen}
+            onOpenChange={(open) => onGroupOpenChange(group.id, open)}
+            className="group/collapsible"
+          >
+            <SidebarGroup className="py-1">
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <CollapsibleTrigger asChild>
+                    <SidebarMenuButton tooltip={group.label} className="font-medium">
+                      <GroupIcon />
+                      <span>{group.label}</span>
+                      <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                    </SidebarMenuButton>
+                  </CollapsibleTrigger>
+                </SidebarMenuItem>
+              </SidebarMenu>
+              <CollapsibleContent>
+                <SidebarGroupContent>
+                  <SidebarMenuSub className="mt-1">
+                    {group.items.map((item) => {
+                      const ItemIcon = item.icon;
+                      return (
+                        <SidebarMenuSubItem key={item.key}>
+                          <SidebarMenuSubButton asChild isActive={activePage === item.key} className="text-xs">
+                            <a href={getFinancePagePath(item.key)} onClick={(event) => handleNavigate(event, item.key)}>
+                              <ItemIcon className="h-4 w-4" />
+                              <span>{item.label}</span>
+                            </a>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      );
+                    })}
+                  </SidebarMenuSub>
+                </SidebarGroupContent>
+              </CollapsibleContent>
+            </SidebarGroup>
+          </Collapsible>
         );
       })}
     </>

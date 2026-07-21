@@ -1,6 +1,8 @@
 import { PieChart } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Progress } from "@/components/ui/progress";
 import { formatMoney, formatPercent, maskSensitive, toNumber } from "./format";
 import type { HoldingDistribution, TimelinePoint } from "./types";
 
@@ -29,9 +31,12 @@ export function HoldingDistributionCard({
       </CardHeader>
       <CardContent>
         {!holdings.length ? (
-          <div className="rounded-md border px-3 py-6 text-sm text-muted-foreground">
-            当前历史记录没有标的明细。之后重新上传或新增截图时，会自动记录每个标的的市值和现金并在这里展示分布。
-          </div>
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>暂无持仓明细</EmptyTitle>
+              <EmptyDescription>之后重新上传或新增截图时，会自动记录每个标的的市值和现金。</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           <div className="space-y-3">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -54,9 +59,7 @@ export function HoldingDistributionCard({
                       <div className="text-xs text-muted-foreground">{formatPercent(item.weight_percent)}</div>
                     </div>
                   </div>
-                  <div className="h-2 rounded-full bg-muted">
-                    <div className="h-2 rounded-full bg-foreground" style={{ width: `${width}%` }} />
-                  </div>
+                  <Progress value={width} />
                 </div>
               );
             })}

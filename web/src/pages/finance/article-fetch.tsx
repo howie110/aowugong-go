@@ -3,7 +3,11 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   ArticleSource,
@@ -76,24 +80,22 @@ export function ArticleFetchPage() {
   }
 
   if (isLoading && !summary) {
-    return (
-      <Card>
-        <CardContent className="p-6 text-sm text-muted-foreground">正在加载投资文章抓取...</CardContent>
-      </Card>
-    );
+    return <ArticleFetchSkeleton />;
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap justify-end gap-2">
+      <div className="flex justify-end">
+        <ButtonGroup>
         <Button type="button" variant="outline" size="sm" className="w-28" onClick={() => void handleSync()} disabled={isWorking}>
-          <ArrowDownRight className="h-4 w-4" />
+          {isWorking ? <Spinner /> : <ArrowDownRight className="h-4 w-4" />}
           抓取并分析
         </Button>
         <Button type="button" size="sm" className="w-28" onClick={() => void handleAnalyze()} disabled={isWorking}>
-          <Sparkles className="h-4 w-4" />
+          {isWorking ? <Spinner /> : <Sparkles className="h-4 w-4" />}
           分析未分析
         </Button>
+        </ButtonGroup>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -149,10 +151,36 @@ export function ArticleFetchPage() {
                   </TableCell>
                 </TableRow>
               ))}
+              {!sources.length ? (
+                <TableRow>
+                  <TableCell colSpan={4}>
+                    <Empty className="border-0">
+                      <EmptyHeader>
+                        <EmptyTitle>暂无信息源</EmptyTitle>
+                        <EmptyDescription>配置并启用文章来源后会显示在这里。</EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  </TableCell>
+                </TableRow>
+              ) : null}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+/** ArticleFetchSkeleton 展示文章抓取页面加载占位，无副作用。 */
+function ArticleFetchSkeleton() {
+  // 1. 保留命令区、指标区和来源表的主要尺寸。
+  return (
+    <div className="space-y-4">
+      <Skeleton className="ml-auto h-8 w-56" />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-28" />)}
+      </div>
+      <Skeleton className="h-72" />
     </div>
   );
 }

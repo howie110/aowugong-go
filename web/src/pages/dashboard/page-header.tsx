@@ -1,6 +1,7 @@
 import { Eye, EyeOff } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { Toggle } from "@/components/ui/toggle";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type FinancePageData, type FinancePageKey, getFinancePageMeta } from "@/lib/finance";
 
 export function PageHeader({
@@ -26,17 +27,21 @@ export function PageHeader({
       </div>
       {pageKey === "stockAnalysis" ? (
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onToggleStockAnalysisMask}
-            title={isStockAnalysisMasked ? "显示敏感数据" : "隐藏敏感数据"}
-            aria-label={isStockAnalysisMasked ? "显示敏感数据" : "隐藏敏感数据"}
-          >
-            {isStockAnalysisMasked ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            <span className="hidden sm:inline">{isStockAnalysisMasked ? "已隐藏" : "已显示"}</span>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Toggle
+                variant="outline"
+                size="sm"
+                pressed={!isStockAnalysisMasked}
+                onPressedChange={onToggleStockAnalysisMask}
+                aria-label={isStockAnalysisMasked ? "显示敏感数据" : "隐藏敏感数据"}
+              >
+                {isStockAnalysisMasked ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                <span className="hidden sm:inline">{isStockAnalysisMasked ? "已隐藏" : "已显示"}</span>
+              </Toggle>
+            </TooltipTrigger>
+            <TooltipContent>{isStockAnalysisMasked ? "显示敏感数据" : "隐藏敏感数据"}</TooltipContent>
+          </Tooltip>
         </div>
       ) : null}
     </div>

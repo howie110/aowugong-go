@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 
 import "@/index.css";
 import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { isAuthenticated } from "@/lib/auth";
 import { getFinancePageFromPath } from "@/lib/finance";
 import { DashboardPage } from "@/pages/dashboard";
@@ -22,7 +23,9 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
-    <Toaster />
+    <TooltipProvider>
+      <App />
+      <Toaster />
+    </TooltipProvider>
   </React.StrictMode>,
 );

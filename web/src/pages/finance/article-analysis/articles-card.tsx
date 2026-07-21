@@ -1,13 +1,20 @@
 import type { RefObject } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ArticleItem, TargetSignalStat } from "@/lib/article-analysis";
 import { ArticlePagination } from "./article-pagination";
 import { MarketMoodBadge, MarketPredictionBadge } from "./market-ui";
-import { TARGET_DAYS } from "./page-constants";
 import { formatShortDate, getSignalToneClass } from "./page-utils";
 
 /** 渲染带分页的文章列表卡片。 */
@@ -20,7 +27,9 @@ export function ArticlesCard({
   tableRef,
   selectedArticleId,
   selectedSignal,
+  selectedMember,
   onClearSignal,
+  onSelectSignalGroup,
   onPageChange,
   onSelect,
 }: {
@@ -32,24 +41,22 @@ export function ArticlesCard({
   tableRef: RefObject<HTMLDivElement>;
   selectedArticleId?: number;
   selectedSignal: TargetSignalStat | null;
+  selectedMember: string | null;
   onClearSignal: () => void;
+  onSelectSignalGroup: () => void;
   onPageChange: (page: number) => void;
   onSelect: (article: ArticleItem) => void;
 }) {
   return (
     <Card className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto] overflow-hidden xl:h-full xl:grid-rows-[auto_minmax(0,1fr)_auto]">
-      <CardHeader className="flex flex-col gap-2 p-4 pb-3 sm:p-5 sm:pb-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <CardTitle>文章列表</CardTitle>
-          <CardDescription>
-            {selectedSignal ? `标的 · ${selectedSignal.name}` : `最近 ${TARGET_DAYS} 天，点击查看分析结果。`}
-          </CardDescription>
-        </div>
-        {selectedSignal ? (
-          <Button type="button" variant="outline" size="sm" onClick={onClearSignal}>
-            全部文章
-          </Button>
-        ) : null}
+      <CardHeader className="gap-1 p-4 pb-3 sm:p-5 sm:pb-3">
+        <CardTitle>文章列表</CardTitle>
+        <ArticleFilterBreadcrumb
+          selectedSignal={selectedSignal}
+          selectedMember={selectedMember}
+          onClearSignal={onClearSignal}
+          onSelectSignalGroup={onSelectSignalGroup}
+        />
       </CardHeader>
       <CardContent className="min-h-0 overflow-visible px-4 pb-0 pt-0 sm:px-5 xl:overflow-hidden xl:px-6">
         {articles.length ? (
@@ -109,9 +116,18 @@ export function ArticlesCard({
             </div>
           </>
         ) : (
-          <div ref={tableRef} className="rounded-md border px-3 py-6 text-sm text-muted-foreground">
-            暂无文章。
-          </div>
+          <Empty ref={tableRef}>
+            <EmptyHeader>
+              <EmptyTitle>暂无文章</EmptyTitle>
+              <EmptyDescription>
+                {selectedMember
+                  ? `当前标的“${selectedMember}”没有匹配文章。`
+                  : selectedSignal
+                    ? "当前概念组没有匹配文章。"
+                    : "抓取并分析文章后会显示在这里。"}
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
       </CardContent>
       {totalCount ? (
@@ -140,14 +156,21 @@ function MobileArticleRow({
   onSelect: (article: ArticleItem) => void;
 }) {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       data-mobile-article-row
       className={[
         "block w-full max-w-full px-1 py-3 text-left transition-colors hover:bg-muted/50",
         isSelected ? "bg-muted/70" : "",
       ].join(" ")}
       onClick={() => onSelect(article)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect(article);
+        }
+      }}
     >
       <div className="grid min-w-0 grid-cols-[3.75rem_minmax(0,1fr)] gap-x-2">
         <div className="flex min-w-0 flex-col items-center gap-2">
@@ -167,7 +190,66 @@ function MobileArticleRow({
           </div>
         </div>
       </div>
-    </button>
+    </div>
+  );
+}
+
+// ArticleFilterBreadcrumb 展示文章列表当前的概念组和具体标的位置，并提供逐级返回入口。
+// 输入：selectedSignal 是概念组，selectedMember 是具体标的，回调负责返回上级。
+// 输出：返回符合 shadcn 规范的文章筛选面包屑。
+// 副作用：点击父级时调用对应回调更新文章筛选。
+function ArticleFilterBreadcrumb({
+  selectedSignal,
+  selectedMember,
+  onClearSignal,
+  onSelectSignalGroup,
+}: {
+  selectedSignal: TargetSignalStat | null;
+  selectedMember: string | null;
+  onClearSignal: () => void;
+  onSelectSignalGroup: () => void;
+}) {
+  // 1. 根据当前筛选层级渲染“全部文章、概念组、具体标的”路径。
+  return (
+    <Breadcrumb>
+      <BreadcrumbList>
+        <BreadcrumbItem>
+          {selectedSignal ? (
+            <BreadcrumbLink asChild>
+              <button type="button" onClick={onClearSignal}>
+                全部文章
+              </button>
+            </BreadcrumbLink>
+          ) : (
+            <BreadcrumbPage>全部文章</BreadcrumbPage>
+          )}
+        </BreadcrumbItem>
+        {selectedSignal ? (
+          <>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              {selectedMember ? (
+                <BreadcrumbLink asChild>
+                  <button type="button" onClick={onSelectSignalGroup}>
+                    {selectedSignal.name}
+                  </button>
+                </BreadcrumbLink>
+              ) : (
+                <BreadcrumbPage>{selectedSignal.name}</BreadcrumbPage>
+              )}
+            </BreadcrumbItem>
+          </>
+        ) : null}
+        {selectedMember ? (
+          <>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{selectedMember}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </>
+        ) : null}
+      </BreadcrumbList>
+    </Breadcrumb>
   );
 }
 

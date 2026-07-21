@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { notify } from "@/lib/notify";
 import { PermissionUser, RoleRead, addRoleToUser, fetchPermissionRoles, fetchPermissionUsers } from "@/lib/permissions";
@@ -72,7 +76,7 @@ export function PermissionsPage() {
           <p className="mt-1 text-sm text-muted-foreground">这里只负责把用户加入角色，角色权限由系统预设维护。</p>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={() => void loadData()} disabled={isLoading}>
-          <RefreshCw className="h-4 w-4" />
+          {isLoading ? <Spinner /> : <RefreshCw className="h-4 w-4" />}
           刷新
         </Button>
       </div>
@@ -113,34 +117,54 @@ export function PermissionsPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <select
-                      className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    <Select
                       value={selectedRoleByUser[user.id] || ""}
-                      onChange={(event) =>
+                      onValueChange={(value) =>
                         setSelectedRoleByUser((current) => ({
                           ...current,
-                          [user.id]: event.target.value,
+                          [user.id]: value,
                         }))
                       }
                     >
-                      {roles.map((role) => (
-                        <option key={role.code} value={role.code}>
-                          {role.name}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger aria-label={`为 ${user.username} 选择角色`}>
+                        <SelectValue placeholder="选择角色" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {roles.map((role) => (
+                          <SelectItem key={role.code} value={role.code}>
+                            {role.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </TableCell>
                   <TableCell className="text-right">
                     <Button type="button" size="sm" onClick={() => void handleAddRole(user)} disabled={savingUserId === user.id}>
-                      <UserPlus className="h-4 w-4" />
+                      {savingUserId === user.id ? <Spinner /> : <UserPlus className="h-4 w-4" />}
                       加入
                     </Button>
                   </TableCell>
                 </TableRow>
               ))}
+              {isLoading && !users.length ? (
+                <TableRow>
+                  <TableCell colSpan={4}><Skeleton className="h-12 w-full" /></TableCell>
+                </TableRow>
+              ) : null}
+              {!isLoading && !users.length ? (
+                <TableRow>
+                  <TableCell colSpan={4}>
+                    <Empty className="border-0">
+                      <EmptyHeader>
+                        <EmptyTitle>暂无用户</EmptyTitle>
+                        <EmptyDescription>创建用户后可在这里分配角色。</EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  </TableCell>
+                </TableRow>
+              ) : null}
             </TableBody>
           </Table>
-          {isLoading ? <div className="py-6 text-sm text-muted-foreground">正在加载权限数据...</div> : null}
         </CardContent>
       </Card>
     </div>

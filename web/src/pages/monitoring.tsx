@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   ServiceMonitorResult,
@@ -52,22 +55,18 @@ export function MonitoringPage() {
   }, []);
 
   if (isLoading && !summary) {
-    return (
-      <Card>
-        <CardContent className="p-6 text-sm text-muted-foreground">正在加载监控数据...</CardContent>
-      </Card>
-    );
+    return <MonitoringSkeleton />;
   }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onClick={() => void loadData()} disabled={isLoading || isChecking}>
-          <RefreshCw className="h-4 w-4" />
+          {isLoading ? <Spinner /> : <RefreshCw className="h-4 w-4" />}
           刷新
         </Button>
         <Button type="button" size="sm" onClick={() => void handleCheckNow()} disabled={isChecking}>
-          <Radar className="h-4 w-4" />
+          {isChecking ? <Spinner /> : <Radar className="h-4 w-4" />}
           立即检测
         </Button>
       </div>
@@ -128,10 +127,36 @@ function ServiceMonitorCard({ services }: { services: ServiceMonitorResult[] }) 
                 <TableCell className="text-muted-foreground">{formatDate(service.checked_at)}</TableCell>
               </TableRow>
             ))}
+            {!services.length ? (
+              <TableRow>
+                <TableCell colSpan={6}>
+                  <Empty className="border-0">
+                    <EmptyHeader>
+                      <EmptyTitle>暂无监控服务</EmptyTitle>
+                      <EmptyDescription>监控目标配置完成后会显示检测结果。</EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                </TableCell>
+              </TableRow>
+            ) : null}
           </TableBody>
         </Table>
       </CardContent>
     </Card>
+  );
+}
+
+/** MonitoringSkeleton 展示服务监控页面加载占位，无副作用。 */
+function MonitoringSkeleton() {
+  // 1. 保留指标和监控表尺寸，避免加载完成时布局跳动。
+  return (
+    <div className="space-y-4">
+      <Skeleton className="ml-auto h-8 w-40" />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-28" />)}
+      </div>
+      <Skeleton className="h-72" />
+    </div>
   );
 }
 
