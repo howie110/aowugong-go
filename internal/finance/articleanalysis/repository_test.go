@@ -12,6 +12,107 @@ import (
 	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
+// TestRepositorySignalGroupsReturnsAllAliases 验证概念组读取不会省略任何原始名称。
+// 输入：同一概念组关联三个别名的模拟查询结果。
+// 输出：返回一个“证券行业”组及完整三个别名。
+// 副作用：执行模拟 MySQL 查询。
+func TestRepositorySignalGroupsReturnsAllAliases(t *testing.T) {
+	// 1. 准备按概念组和别名主键排序的数据库行。
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT g.id, g.canonical_name, g.group_type, a.alias_name").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "canonical_name", "group_type", "alias_name"}).
+			AddRow(7, "证券行业", "sector", "券商").
+			AddRow(7, "证券行业", "sector", "券商板块").
+			AddRow(7, "证券行业", "sector", "中信证券"))
+
+	// 2. 读取并核对组名、类型和全部别名顺序。
+	groups, err := NewRepository(db).SignalGroups(context.Background())
+	if err != nil {
+		t.Fatalf("SignalGroups() error = %v", err)
+	}
+	if len(groups) != 1 || groups[0].ID != 7 || groups[0].Name != "证券行业" || groups[0].Type != "sector" {
+		t.Fatalf("groups = %#v", groups)
+	}
+	if strings.Join(groups[0].Aliases, ",") != "券商,券商板块,中信证券" {
+		t.Fatalf("aliases = %#v", groups[0].Aliases)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("database expectations = %v", err)
+	}
+}
+
+// TestRepositorySaveSignalGroupsWritesGroupAndAliasesInOneTransaction 验证分类结果原子写入概念组和别名。
+// 输入：一个“证券行业”组及两个高置信度别名。
+// 输出：返回两条新增别名，事务完整提交。
+// 副作用：执行模拟 MySQL 事务写入。
+func TestRepositorySaveSignalGroupsWritesGroupAndAliasesInOneTransaction(t *testing.T) {
+	// 1. 声明概念组、别名写入和事务提交预期。
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO investment_signal_group").
+		WithArgs("证券行业", "sector", "deepseek", "test-model").
+		WillReturnResult(sqlmock.NewResult(7, 1))
+	mock.ExpectExec("INSERT IGNORE INTO investment_signal_alias").
+		WithArgs(int64(7), "券商", "券商", 0.98, "deepseek", "test-model").
+		WillReturnResult(sqlmock.NewResult(11, 1))
+	mock.ExpectExec("INSERT IGNORE INTO investment_signal_alias").
+		WithArgs(int64(7), "中信证券", "中信证券", 0.95, "deepseek", "test-model").
+		WillReturnResult(sqlmock.NewResult(12, 1))
+	mock.ExpectCommit()
+
+	// 2. 保存分类并核对新增别名数量和全部 SQL 预期。
+	groups := []signalGroupProposal{{
+		CanonicalName: "证券行业", Type: "sector",
+		Aliases: []signalAliasProposal{{Name: "券商", Confidence: 0.98}, {Name: "中信证券", Confidence: 0.95}},
+	}}
+	inserted, err := NewRepository(db).SaveSignalGroups(context.Background(), groups, "test-model")
+	if err != nil {
+		t.Fatalf("SaveSignalGroups() error = %v", err)
+	}
+	if inserted != 2 {
+		t.Fatalf("inserted = %d, want 2", inserted)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("database expectations = %v", err)
+	}
+}
+
+// TestRepositoryArticlesAllowsFullSignalWindowLimit 验证文章筛选可读取完整六十天窗口。
+// 输入：页面请求五千篇文章的上限。
+// 输出：SQL 使用五千而不是旧的两百上限。
+// 副作用：执行模拟 MySQL 查询。
+func TestRepositoryArticlesAllowsFullSignalWindowLimit(t *testing.T) {
+	// 1. 要求文章查询携带日期范围和五千条限制。
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT article.id, source.source_name, article.title").
+		WithArgs(sqlmock.AnyArg(), 5000).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "source_name", "title", "author", "published_at", "created_at",
+			"market_mood", "market_prediction", "recommendations_json", "risks_json",
+		}))
+
+	// 2. 执行查询并核对仓储没有把上限压回两百。
+	articles, err := NewRepository(db).Articles(context.Background(), 60, 5000)
+	if err != nil || len(articles) != 0 {
+		t.Fatalf("Articles() = %#v, %v", articles, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("database expectations = %v", err)
+	}
+}
+
 // TestSyncDefaultSourceOnlyFillsEmptyFeedURL 验证运行环境地址不会覆盖共享来源地址。
 // 输入：当前进程提供一个有效 RSS 地址。
 // 输出：重复来源只在原地址为空时补值。

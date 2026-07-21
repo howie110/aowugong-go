@@ -55,6 +55,99 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// SignalGroups 读取信号榜使用的全部概念组和别名。
+// 输入：ctx 控制数据库查询。
+// 输出：按概念组和别名主键顺序返回完整映射；失败时返回错误。
+// 副作用：只读 MySQL。
+func (r *Repository) SignalGroups(ctx context.Context) ([]SignalGroup, error) {
+	// 1. 联表读取至少包含一个别名的概念组。
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT g.id, g.canonical_name, g.group_type, a.alias_name
+		FROM investment_signal_group g
+		JOIN investment_signal_alias a ON a.group_id = g.id
+		ORDER BY g.id ASC, a.id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("读取投资信号概念组: %w", err)
+	}
+	defer rows.Close()
+
+	// 2. 按主键合并连续别名，同时保留数据库稳定顺序。
+	positions := make(map[int64]int)
+	result := make([]SignalGroup, 0)
+	for rows.Next() {
+		var id int64
+		var name, kind, alias string
+		if err := rows.Scan(&id, &name, &kind, &alias); err != nil {
+			return nil, fmt.Errorf("读取投资信号概念组行: %w", err)
+		}
+		position, exists := positions[id]
+		if !exists {
+			position = len(result)
+			positions[id] = position
+			result = append(result, SignalGroup{ID: id, Name: name, Type: kind, Aliases: []string{}})
+		}
+		result[position].Aliases = append(result[position].Aliases, alias)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历投资信号概念组: %w", err)
+	}
+	return result, nil
+}
+
+// SaveSignalGroups 原子保存 DeepSeek 生成的概念组和原始名称映射。
+// 输入：ctx 控制事务，groups 是已校验分类，modelName 是模型名称。
+// 输出：返回本次新增别名数量；失败时回滚并返回错误。
+// 副作用：写入 MySQL investment_signal_group 和 investment_signal_alias。
+func (r *Repository) SaveSignalGroups(ctx context.Context, groups []signalGroupProposal, modelName string) (int, error) {
+	// 1. 开启事务，确保组和别名不会只写入一半。
+	transaction, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("开始保存投资信号分类: %w", err)
+	}
+	defer transaction.Rollback()
+	inserted := 0
+
+	// 2. 复用同名概念组主键，并以 INSERT IGNORE 防止并发重映射已有别名。
+	for _, group := range groups {
+		result, err := transaction.ExecContext(ctx, `
+			INSERT INTO investment_signal_group(canonical_name, group_type, source, model_name)
+			VALUES(?,?,?,?)
+			ON DUPLICATE KEY UPDATE
+				id = LAST_INSERT_ID(id),
+				updated_at = CURRENT_TIMESTAMP
+		`, group.CanonicalName, group.Type, "deepseek", modelName)
+		if err != nil {
+			return 0, fmt.Errorf("保存投资信号概念组 %s: %w", group.CanonicalName, err)
+		}
+		groupID, err := result.LastInsertId()
+		if err != nil {
+			return 0, fmt.Errorf("读取投资信号概念组 %s 主键: %w", group.CanonicalName, err)
+		}
+		for _, alias := range group.Aliases {
+			aliasResult, err := transaction.ExecContext(ctx, `
+				INSERT IGNORE INTO investment_signal_alias(
+					group_id, alias_name, normalized_name, confidence, source, model_name
+				) VALUES(?,?,?,?,?,?)
+			`, groupID, alias.Name, normalizeSignalAlias(alias.Name), alias.Confidence, "deepseek", modelName)
+			if err != nil {
+				return 0, fmt.Errorf("保存投资信号别名 %s: %w", alias.Name, err)
+			}
+			affected, err := aliasResult.RowsAffected()
+			if err != nil {
+				return 0, fmt.Errorf("读取投资信号别名 %s 写入结果: %w", alias.Name, err)
+			}
+			inserted += int(affected)
+		}
+	}
+
+	// 3. 全部写入成功后提交事务并返回新增数量。
+	if err := transaction.Commit(); err != nil {
+		return 0, fmt.Errorf("提交投资信号分类: %w", err)
+	}
+	return inserted, nil
+}
+
 // SyncDefaultSource 初始化当前唯一的公众号聚合 RSS 来源。
 // 输入：ctx 控制数据库操作，feedURL 是聚合 RSS 地址。
 // 输出：成功返回 nil，失败返回错误。
@@ -250,7 +343,7 @@ func (r *Repository) UpdateSourceStatus(ctx context.Context, sourceID int64, sta
 }
 
 // Articles 读取指定天数内分析成功的文章列表。
-// 输入：ctx 控制查询，days 是日期范围，limit 是 1 到 200 的上限。
+// 输入：ctx 控制查询，days 是日期范围，limit 是 1 到 5000 的上限。
 // 输出：按业务日期倒序返回文章；失败时返回错误。
 // 副作用：只读 MySQL。
 func (r *Repository) Articles(ctx context.Context, days, limit int) ([]ArticleItem, error) {
@@ -261,8 +354,8 @@ func (r *Repository) Articles(ctx context.Context, days, limit int) ([]ArticleIt
 	if limit < 1 {
 		limit = 50
 	}
-	if limit > 200 {
-		limit = 200
+	if limit > 5000 {
+		limit = 5000
 	}
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Format("2006-01-02 15:04:05")
 	rows, err := r.db.QueryContext(ctx, `

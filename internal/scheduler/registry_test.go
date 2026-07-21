@@ -15,6 +15,23 @@ type fakeNotifier struct {
 	body string
 }
 
+// TestSourceContextRoundTrip 验证任务执行来源可以传递给业务任务。
+// 输入：manual 来源和基础上下文。
+// 输出：业务侧读取到 manual；普通上下文读取为空来源。
+// 副作用：无。
+func TestSourceContextRoundTrip(t *testing.T) {
+	// 1. 写入手动来源并核对上下文往返结果。
+	ctx := WithSource(context.Background(), SourceManual)
+	if source := SourceFromContext(ctx); source != SourceManual {
+		t.Fatalf("source = %q, want manual", source)
+	}
+
+	// 2. 未携带任务来源的普通上下文保持空值。
+	if source := SourceFromContext(context.Background()); source != "" {
+		t.Fatalf("empty context source = %q", source)
+	}
+}
+
 // Text 记录任务失败通知正文。
 // 输入：上下文、标题、正文和接收人。
 // 输出：始终返回 nil。

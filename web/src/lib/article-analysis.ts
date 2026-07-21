@@ -50,6 +50,7 @@ export type ArticleDetail = ArticleItem & {
 export type TargetSignalStat = {
   name: string;
   type: string;
+  members: string[];
   recommendation_count: number;
   risk_count: number;
   count: number;
@@ -76,6 +77,7 @@ export type SyncResult = {
   updated_count: number;
   failed_sources: Array<{ source: string; error: string }>;
   analyzed_count: number;
+  classified_alias_count: number;
   skipped_count: number;
   error_count: number;
 };

@@ -114,10 +114,10 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 }
 
 // SyncScheduled 执行生产任务使用的完整抓取和分批分析流程。
-// 输入：ctx 控制最多两千篇抓取和最多十个五十篇分析批次。
+// 输入：ctx 控制处理，classifySignals 控制是否补齐六十天信号概念映射。
 // 输出：返回累计同步统计；来源失败、模型缺失或仍有待分析文章时返回错误。
 // 副作用：调用 WeChatRSS、RSS、DeepSeek，并写入 MySQL。
-func (s *Service) SyncScheduled(ctx context.Context) (SyncResult, error) {
+func (s *Service) SyncScheduled(ctx context.Context, classifySignals bool) (SyncResult, error) {
 	// 1. 抓取全部来源的当前文章，来源失败时保留明细并立即升级为任务错误。
 	result, err := s.Sync(ctx, scheduledFetchLimit, false, 0)
 	if err != nil {
@@ -133,11 +133,8 @@ func (s *Service) SyncScheduled(ctx context.Context) (SyncResult, error) {
 		return result, fmt.Errorf("读取文章分析进度: %w", err)
 	}
 	result.PendingCount = counts.PendingCount
-	if s.options.Analyzer == nil || !s.options.Analyzer.Configured() {
-		if result.PendingCount > 0 {
-			return result, fmt.Errorf("未配置 DEEPSEEK_API_KEY，仍有 %d 篇投资文章等待分析", result.PendingCount)
-		}
-		return result, nil
+	if result.PendingCount > 0 && (s.options.Analyzer == nil || !s.options.Analyzer.Configured()) {
+		return result, fmt.Errorf("未配置 DEEPSEEK_API_KEY，仍有 %d 篇投资文章等待分析", result.PendingCount)
 	}
 
 	// 3. 最多执行十个五十篇批次，持续累计并在没有成功进展时停止重试。
@@ -164,6 +161,16 @@ func (s *Service) SyncScheduled(ctx context.Context) (SyncResult, error) {
 		return result, fmt.Errorf("投资文章分析未正常完成: 待分析=%d, 已分析=%d, 已跳过=%d, 错误=%d",
 			result.PendingCount, result.AnalyzedCount, result.SkippedCount, result.ErrorCount)
 	}
+
+	// 5. 自动或 CLI 任务补扫六十天未知名称；页面手动任务跳过，避免额外等待。
+	if !classifySignals {
+		return result, nil
+	}
+	classifiedCount, err := s.classifySignalAliases(ctx, DefaultTargetDays)
+	if err != nil {
+		return result, fmt.Errorf("归类投资信号: %w", err)
+	}
+	result.ClassifiedAliasCount += classifiedCount
 	return result, nil
 }
 
@@ -215,6 +222,7 @@ func (s *Service) AnalyzePending(ctx context.Context, limit int) (AnalysisBatchR
 			result.ErrorCount++
 		}
 	}
+
 	return result, nil
 }
 
@@ -411,13 +419,17 @@ func (s *Service) Report(ctx context.Context, targetDays, marketDays int) (Repor
 	if err != nil {
 		return Report{}, fmt.Errorf("读取短期市场统计: %w", err)
 	}
+	groups, err := s.repository.SignalGroups(ctx)
+	if err != nil {
+		return Report{}, err
+	}
 
 	// 2. 聚合推荐、风险及市场枚举并附带模型说明。
 	return Report{
 		AnalysisModel:          s.options.Model,
 		AnalysisPrompt:         AnalysisPromptTemplate(),
 		PromptVersion:          PromptVersion,
-		Signals:                buildSignalStats(targetRows),
+		Signals:                buildSignalStats(targetRows, groups),
 		MoodDistribution:       buildDistribution(marketRows, true),
 		PredictionDistribution: buildDistribution(marketRows, false),
 	}, nil
@@ -425,7 +437,8 @@ func (s *Service) Report(ctx context.Context, targetDays, marketDays int) (Repor
 
 type signalAccumulator struct {
 	SignalStat
-	LatestAt string
+	LatestAt   string
+	memberKeys map[string]struct{}
 }
 
 type aggregatedSignal struct {
@@ -435,25 +448,43 @@ type aggregatedSignal struct {
 	LatestAt string
 }
 
-// buildSignalStats 合并推荐和风险为每个标的一行。
-// 输入：rows 是目标天数内分析行。
+// buildSignalStats 按概念组把推荐和风险合并为每个标的一行。
+// 输入：rows 是目标天数内分析行，groups 是已持久化的概念组和别名。
 // 输出：按总次数和最近出现时间倒序返回信号榜。
 // 副作用：无。
-func buildSignalStats(rows []analysisRow) []SignalStat {
-	// 1. 沿用旧服务顺序，先分别按名称和类型聚合推荐、风险。
+func buildSignalStats(rows []analysisRow, groups []SignalGroup) []SignalStat {
+	// 1. 建立别名索引，并沿用旧服务顺序分别聚合推荐、风险。
+	groupIndex := buildSignalGroupIndex(groups)
 	recommendations := aggregateSignals(rows, true)
 	risks := aggregateSignals(rows, false)
 
-	// 2. 推荐聚合项先进入名称榜，风险项补充计数或追加纯风险标的。
+	// 2. 推荐聚合项先进入概念榜，风险项补充计数或追加纯风险概念。
 	grouped := make(map[string]*signalAccumulator)
 	ordered := make([]*signalAccumulator, 0, len(recommendations)+len(risks))
 	merge := func(signals []aggregatedSignal, recommendation bool) {
 		for _, signal := range signals {
-			item, exists := grouped[signal.Name]
+			groupKey := "alias:" + normalizeSignalAlias(signal.Name)
+			groupName, groupType := signal.Name, signal.Type
+			if group, exists := groupIndex[normalizeSignalAlias(signal.Name)]; exists {
+				groupKey = fmt.Sprintf("group:%d:%s", group.ID, normalizeSignalAlias(group.Name))
+				groupName = group.Name
+				if strings.TrimSpace(group.Type) != "" {
+					groupType = group.Type
+				}
+			}
+			item, exists := grouped[groupKey]
 			if !exists {
-				item = &signalAccumulator{SignalStat: SignalStat{Name: signal.Name, Type: signal.Type}, LatestAt: signal.LatestAt}
-				grouped[signal.Name] = item
+				item = &signalAccumulator{
+					SignalStat: SignalStat{Name: groupName, Type: groupType, Members: []string{}},
+					LatestAt:   signal.LatestAt, memberKeys: make(map[string]struct{}),
+				}
+				grouped[groupKey] = item
 				ordered = append(ordered, item)
+			}
+			memberKey := strings.TrimSpace(signal.Name)
+			if _, exists := item.memberKeys[memberKey]; !exists {
+				item.memberKeys[memberKey] = struct{}{}
+				item.Members = append(item.Members, strings.TrimSpace(signal.Name))
 			}
 			if item.Type == "other" && signal.Type != "" && signal.Type != "other" {
 				item.Type = signal.Type
@@ -484,6 +515,36 @@ func buildSignalStats(rows []analysisRow) []SignalStat {
 		results = append(results, item.SignalStat)
 	}
 	return results
+}
+
+// buildSignalGroupIndex 把概念组别名转换为规范化名称索引。
+// 输入：groups 是数据库读取的概念组和全部别名。
+// 输出：返回原始名称到概念组的只读映射。
+// 副作用：无。
+func buildSignalGroupIndex(groups []SignalGroup) map[string]SignalGroup {
+	// 1. 为每个非空别名登记所属概念组，重复别名保留首个有效配置。
+	index := make(map[string]SignalGroup)
+	for _, group := range groups {
+		for _, alias := range group.Aliases {
+			key := normalizeSignalAlias(alias)
+			if key == "" {
+				continue
+			}
+			if _, exists := index[key]; !exists {
+				index[key] = group
+			}
+		}
+	}
+	return index
+}
+
+// normalizeSignalAlias 规范化别名查找键，不改变页面展示原文。
+// 输入：name 是模型返回或数据库保存的原始标的名称。
+// 输出：返回去除首尾空白并转为小写的稳定键。
+// 副作用：无。
+func normalizeSignalAlias(name string) string {
+	// 1. 只处理无语义差异的大小写和首尾空白，近义词交给概念映射。
+	return strings.ToLower(strings.TrimSpace(name))
 }
 
 // aggregateSignals 按名称和类型聚合推荐或风险信号。

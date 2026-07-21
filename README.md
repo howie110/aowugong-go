@@ -79,6 +79,8 @@ AOWUGONG_SCHEDULER_ENABLED=false
 FINANCE_ENABLE_REAL_TRADE=false
 ```
 
+投资文章信号通过 `investment_signal_group` 和 `investment_signal_alias` 保存规范概念及原始名称映射。初始词典将券商、券商板块、证券板块和中信证券归入“证券行业”。自动调度和 CLI 同步任务只把未知名称批量交给 DeepSeek 分类；页面手动抓取仅抓取和分析文章，避免等待历史归类。信号榜查询直接读取持久化映射，并完整展示当前 60 天实际计入统计的原始名称。
+
 CLI `aowugong job <name>` 无条件跳过迁移，只使用已经部署好的表结构。任务使用 MySQL `GET_LOCK` 跨进程互斥，因此本地补跑和服务器自动调度不会同时执行同名任务。
 
 ## 本地运行

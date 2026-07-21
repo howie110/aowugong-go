@@ -20,6 +20,8 @@ var ErrAlreadyRunning = errors.New("同名任务正在执行")
 // Source 表示任务由调度器、页面手动操作或 CLI 发起。
 type Source string
 
+type sourceContextKey struct{}
+
 const (
 	// SourceScheduler 表示 Go 内嵌定时调度触发。
 	SourceScheduler Source = "scheduler"
@@ -28,6 +30,25 @@ const (
 	// SourceCLI 表示命令行显式触发。
 	SourceCLI Source = "cli"
 )
+
+// WithSource 把统一任务执行来源写入业务上下文。
+// 输入：ctx 是基础上下文，source 是 scheduler、manual 或 cli。
+// 输出：返回携带来源的新上下文。
+// 副作用：无，不修改原上下文。
+func WithSource(ctx context.Context, source Source) context.Context {
+	// 1. 使用包私有键保存类型化来源，避免与业务上下文字段冲突。
+	return context.WithValue(ctx, sourceContextKey{}, source)
+}
+
+// SourceFromContext 读取统一任务执行来源。
+// 输入：ctx 是任务包装器传给业务函数的上下文。
+// 输出：返回 scheduler、manual、cli 或空值。
+// 副作用：无。
+func SourceFromContext(ctx context.Context) Source {
+	// 1. 只接受当前包写入的 Source 类型值。
+	source, _ := ctx.Value(sourceContextKey{}).(Source)
+	return source
+}
 
 // JobFunc 定义统一任务函数，返回摘要消息或错误。
 type JobFunc func(ctx context.Context) (string, error)
@@ -195,7 +216,7 @@ func (r *Registry) Run(ctx context.Context, name string, source Source) (Result,
 		return Result{}, err
 	}
 	r.logger.Info("任务开始", "job", definition.Name, "source", source, "execution_id", executionID)
-	runContext, cancel := context.WithTimeout(ctx, definition.Timeout)
+	runContext, cancel := context.WithTimeout(WithSource(ctx, source), definition.Timeout)
 	defer cancel()
 	outcomes := make(chan jobOutcome, 1)
 	releaseOnReturn = false

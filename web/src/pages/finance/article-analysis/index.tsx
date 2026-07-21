@@ -56,7 +56,7 @@ export function ArticleAnalysisPage() {
     try {
       const [nextReport, nextArticles, nextUser] = await Promise.all([
         fetchArticleReport(TARGET_DAYS, MARKET_DAYS),
-        fetchArticles(TARGET_DAYS, 200),
+        fetchArticles(TARGET_DAYS, 5000),
         getProfile(),
       ]);
       setReport(nextReport);
@@ -118,7 +118,7 @@ export function ArticleAnalysisPage() {
         <ModelPromptCard report={report} />
       </div>
 
-      <div className="grid gap-4 [&>*]:min-w-0 xl:h-[calc(100dvh-8rem)] xl:min-h-[28rem] xl:max-h-[calc(100dvh-8rem)] xl:grid-cols-[0.55fr_1.45fr] xl:overflow-hidden xl:[&>*]:min-h-0">
+      <div className="grid gap-4 [&>*]:min-w-0 xl:h-[calc(100dvh-8rem)] xl:min-h-[28rem] xl:max-h-[calc(100dvh-8rem)] xl:grid-cols-[minmax(20rem,0.7fr)_minmax(0,1.3fr)] xl:overflow-hidden xl:[&>*]:min-h-0">
         <SignalRankCard
           title={`信号榜 · ${TARGET_DAYS}天`}
           items={paginatedSignals}

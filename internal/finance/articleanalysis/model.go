@@ -44,6 +44,14 @@ type Signal struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// SignalGroup 描述信号榜使用的规范概念组及其原始名称。
+type SignalGroup struct {
+	ID      int64    `json:"id"`
+	Name    string   `json:"canonical_name"`
+	Type    string   `json:"type"`
+	Aliases []string `json:"aliases"`
+}
+
 // MarketJudgment 描述文章中的短期市场判断。
 type MarketJudgment struct {
 	Mood             string `json:"mood"`
@@ -96,11 +104,12 @@ type ArticleDetail struct {
 
 // SignalStat 描述信号榜的一行合并统计。
 type SignalStat struct {
-	Name                string `json:"name"`
-	Type                string `json:"type"`
-	RecommendationCount int    `json:"recommendation_count"`
-	RiskCount           int    `json:"risk_count"`
-	Count               int    `json:"count"`
+	Name                string   `json:"name"`
+	Type                string   `json:"type"`
+	Members             []string `json:"members"`
+	RecommendationCount int      `json:"recommendation_count"`
+	RiskCount           int      `json:"risk_count"`
+	Count               int      `json:"count"`
 }
 
 // DistributionItem 描述市场枚举的计数分布。
@@ -137,15 +146,16 @@ type PageSummary struct {
 
 // SyncResult 描述一次 RSS 同步和可选分析的统计。
 type SyncResult struct {
-	SourceCount   int                 `json:"source_count"`
-	FetchedCount  int                 `json:"fetched_count"`
-	InsertedCount int                 `json:"inserted_count"`
-	UpdatedCount  int                 `json:"updated_count"`
-	FailedSources []map[string]string `json:"failed_sources"`
-	AnalyzedCount int                 `json:"analyzed_count"`
-	SkippedCount  int                 `json:"skipped_count"`
-	ErrorCount    int                 `json:"error_count"`
-	PendingCount  int                 `json:"pending_count"`
+	SourceCount          int                 `json:"source_count"`
+	FetchedCount         int                 `json:"fetched_count"`
+	InsertedCount        int                 `json:"inserted_count"`
+	UpdatedCount         int                 `json:"updated_count"`
+	FailedSources        []map[string]string `json:"failed_sources"`
+	AnalyzedCount        int                 `json:"analyzed_count"`
+	ClassifiedAliasCount int                 `json:"classified_alias_count"`
+	SkippedCount         int                 `json:"skipped_count"`
+	ErrorCount           int                 `json:"error_count"`
+	PendingCount         int                 `json:"pending_count"`
 }
 
 // AnalysisBatchResult 描述一批待分析文章的处理统计。

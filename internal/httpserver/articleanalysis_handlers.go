@@ -88,7 +88,7 @@ func (h articleAnalysisHandlers) sources(w http.ResponseWriter, request *http.Re
 }
 
 // articles 返回指定天数内的已分析文章。
-// 输入：查询参数 days 范围 1 到 365，limit 范围 1 到 200。
+// 输入：查询参数 days 范围 1 到 365，limit 范围 1 到 5000。
 // 输出：写入 ArticleItem 数组。
 // 副作用：读取 MySQL 并写入 HTTP 响应。
 func (h articleAnalysisHandlers) articles(w http.ResponseWriter, request *http.Request) {
@@ -97,7 +97,7 @@ func (h articleAnalysisHandlers) articles(w http.ResponseWriter, request *http.R
 	if !ok {
 		return
 	}
-	limit, ok := boundedQueryInt(w, request, "limit", 50, 1, 200)
+	limit, ok := boundedQueryInt(w, request, "limit", 50, 1, 5000)
 	if !ok {
 		return
 	}

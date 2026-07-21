@@ -37,7 +37,7 @@ func TestBuildSignalStatsUsesRecommendationCountAsStableTieBreak(t *testing.T) {
 
 	// 2. 重复构建以覆盖 Go map 的随机遍历顺序。
 	for attempt := 0; attempt < 64; attempt++ {
-		result := buildSignalStats(rows)
+		result := buildSignalStats(rows, nil)
 		if len(result) != 2 || result[0].Name != "信号B" {
 			t.Fatalf("attempt %d signals = %#v, want 信号B first", attempt, result)
 		}
@@ -57,9 +57,63 @@ func TestBuildSignalStatsAggregatesNameAndTypeBeforeFinalMerge(t *testing.T) {
 	}
 
 	// 2. 较高频类型应在最终按名称合并时成为展示类型。
-	result := buildSignalStats(rows)
+	result := buildSignalStats(rows, nil)
 	if len(result) != 1 || result[0].Type != "concept" || result[0].RiskCount != 3 {
 		t.Fatalf("signals = %#v, want concept with three risks", result)
+	}
+}
+
+// TestBuildSignalStatsGroupsAliasesAndCountsEveryOccurrence 验证概念组聚合别名且不对同篇文章去重。
+// 输入：同一文章包含“券商”和“中信证券”，另一文章包含“券商板块”。
+// 输出：三条原始信号合并为“证券行业”，完整返回三个成员并累计三次。
+// 副作用：无。
+func TestBuildSignalStatsGroupsAliasesAndCountsEveryOccurrence(t *testing.T) {
+	// 1. 构造一个概念组和同篇文章内的两次组内命中。
+	groups := []SignalGroup{{
+		ID: 1, Name: "证券行业", Type: "sector",
+		Aliases: []string{"券商", "券商板块", "中信证券"},
+	}}
+	rows := []analysisRow{
+		{
+			Recommendations: []Signal{{Name: "券商", Type: "sector"}, {Name: "中信证券", Type: "stock"}},
+			OccurredAt:      "2026-07-20",
+		},
+		{Risks: []Signal{{Name: "券商板块", Type: "sector"}}, OccurredAt: "2026-07-19"},
+	}
+
+	// 2. 核对组名、逐条计数和完整成员列表。
+	result := buildSignalStats(rows, groups)
+	if len(result) != 1 {
+		t.Fatalf("signals = %#v, want one grouped signal", result)
+	}
+	wantMembers := []string{"券商", "中信证券", "券商板块"}
+	if result[0].Name != "证券行业" || result[0].RecommendationCount != 2 || result[0].RiskCount != 1 || result[0].Count != 3 {
+		t.Fatalf("signal = %#v, want grouped counts 2-1-3", result[0])
+	}
+	if strings.Join(result[0].Members, ",") != strings.Join(wantMembers, ",") {
+		t.Fatalf("members = %#v, want %#v", result[0].Members, wantMembers)
+	}
+}
+
+// TestBuildSignalStatsPreservesRawAliasSpellings 验证概念成员保留实际出现的大小写写法。
+// 输入：同一概念中规范化后相同的“AI硬件”和“ai硬件”。
+// 输出：统计合并为一行，成员列表仍完整保留两种原文供页面筛选。
+// 副作用：无。
+func TestBuildSignalStatsPreservesRawAliasSpellings(t *testing.T) {
+	// 1. 构造共享概念映射及两种实际文章写法。
+	groups := []SignalGroup{{ID: 2, Name: "人工智能硬件", Type: "theme", Aliases: []string{"AI硬件"}}}
+	rows := []analysisRow{{
+		Recommendations: []Signal{{Name: "AI硬件", Type: "theme"}, {Name: "ai硬件", Type: "theme"}},
+		OccurredAt:      "2026-07-20",
+	}}
+
+	// 2. 两次命中必须合并计数，但成员原文不能被大小写规范化去重。
+	result := buildSignalStats(rows, groups)
+	if len(result) != 1 || result[0].Count != 2 {
+		t.Fatalf("signals = %#v, want one concept with two hits", result)
+	}
+	if strings.Join(result[0].Members, ",") != "AI硬件,ai硬件" {
+		t.Fatalf("members = %#v, want both raw spellings", result[0].Members)
 	}
 }
 

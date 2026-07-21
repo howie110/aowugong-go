@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,7 +33,10 @@ func TestMigrateMySQLCreatesRuntimeTables(t *testing.T) {
 	}
 
 	// 3. 核对运行时依赖的关键表已经存在。
-	for _, tableName := range []string{"job_execution", "notification_log", "aowugong_fastapi_users", "tushare_daily"} {
+	for _, tableName := range []string{
+		"job_execution", "notification_log", "aowugong_fastapi_users", "tushare_daily",
+		"investment_signal_group", "investment_signal_alias",
+	} {
 		var count int
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables
 			WHERE table_schema = DATABASE() AND table_name = ?`, tableName).Scan(&count); err != nil {
@@ -40,6 +44,42 @@ func TestMigrateMySQLCreatesRuntimeTables(t *testing.T) {
 		}
 		if count != 1 {
 			t.Errorf("table %s count = %d, want 1", tableName, count)
+		}
+	}
+
+	// 4. 核对明确要求的证券行业初始词典已经落库。
+	var seededAliases int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM investment_signal_alias alias
+		JOIN investment_signal_group signal_group ON signal_group.id = alias.group_id
+		WHERE signal_group.canonical_name = '证券行业'
+		  AND alias.alias_name IN ('券商', '券商板块', '证券板块', '中信证券')
+	`).Scan(&seededAliases); err != nil {
+		t.Fatalf("query seeded securities aliases: %v", err)
+	}
+	if seededAliases != 4 {
+		t.Errorf("seeded securities aliases = %d, want 4", seededAliases)
+	}
+}
+
+// TestSignalGroupMigrationDeclaresRequiredSecuritiesAliases 验证版本化迁移包含明确的证券行业初始词典。
+// 输入：第三版 MySQL 迁移文件。
+// 输出：迁移声明“证券行业”及券商、券商板块、证券板块、中信证券四个别名。
+// 副作用：只读本地迁移文件。
+func TestSignalGroupMigrationDeclaresRequiredSecuritiesAliases(t *testing.T) {
+	// 1. 读取负责创建概念词典的版本化迁移。
+	path := filepath.Join("..", "..", "migrations", "mysql", "00003_investment_signal_groups.sql")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read signal group migration: %v", err)
+	}
+
+	// 2. 明确业务规则必须由迁移确定，不能只依赖模型临场判断。
+	text := string(content)
+	for _, value := range []string{"证券行业", "券商", "券商板块", "证券板块", "中信证券"} {
+		if !strings.Contains(text, value) {
+			t.Errorf("migration is missing %q", value)
 		}
 	}
 }

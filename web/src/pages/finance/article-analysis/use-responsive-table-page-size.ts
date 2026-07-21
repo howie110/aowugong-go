@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 const COMPACT_TABLE_PAGE_SIZE = 8;
 const DEFAULT_DENSE_TABLE_PAGE_SIZE = 15;
-const MIN_DENSE_TABLE_PAGE_SIZE = 8;
+const MIN_DENSE_TABLE_PAGE_SIZE = 3;
 const MAX_DENSE_TABLE_PAGE_SIZE = 80;
 const FALLBACK_TABLE_HEAD_HEIGHT = 40;
 const FALLBACK_TABLE_ROW_HEIGHT = 45;
@@ -36,7 +36,7 @@ export function useResponsiveTablePageSize(deps: unknown[] = []) {
       const tableTop = tableContainer.getBoundingClientRect().top;
       const headerHeight =
         tableContainer.querySelector("thead")?.getBoundingClientRect().height || FALLBACK_TABLE_HEAD_HEIGHT;
-      const rowHeights = Array.from(tableContainer.querySelectorAll("tbody tr"))
+      const rowHeights = Array.from(tableContainer.querySelectorAll("tbody tr:not([data-placeholder-row='true'])"))
         .map((row) => row.getBoundingClientRect().height)
         .filter((height) => height > 0);
       const rowHeight = rowHeights.length

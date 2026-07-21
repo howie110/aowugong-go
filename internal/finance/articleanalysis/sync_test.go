@@ -112,7 +112,10 @@ func (fixedAnalysisGateway) Configured() bool {
 // 输出：返回 cautious 市场氛围和一个推荐信号。
 // 副作用：无。
 func (fixedAnalysisGateway) SimpleChat(ctx context.Context, prompt string, maxTokens int) (string, error) {
-	// 1. 返回 fenced JSON 以验证兼容解析。
+	// 1. 分类提示词返回规范概念组，普通提示词返回文章分析结果。
+	if strings.Contains(prompt, "本轮待分类名称") {
+		return `{"groups":[{"canonical_name":"白酒行业","type":"sector","aliases":[{"name":"贵州茅台","confidence":0.96}]}]}`, nil
+	}
 	return "```json\n{\"summary\":\"分析摘要\",\"recommendations\":[{\"name\":\"贵州茅台\",\"type\":\"stock\",\"reason\":\"估值有望修复\"}],\"risks\":[],\"market\":{\"mood\":\"cautious\",\"mood_reason\":\"等待确认\",\"prediction\":\"range\",\"prediction_reason\":\"震荡\"}}\n```", nil
 }
 
@@ -138,6 +141,9 @@ func TestServiceSyncsRSSAndAnalyzesThroughUnifiedEntry(t *testing.T) {
 	}
 	if result.InsertedCount != 1 || result.UpdatedCount != 0 || result.AnalyzedCount != 1 {
 		t.Fatalf("first result = %#v", result)
+	}
+	if result.ClassifiedAliasCount != 0 {
+		t.Fatalf("direct sync classified aliases = %d, want 0", result.ClassifiedAliasCount)
 	}
 
 	// 3. 再次读取同一份 WeChatRSS 数据时跳过已有文章，不重复更新大字段。
@@ -176,11 +182,11 @@ func TestServiceScheduledSyncDrainsMultipleAnalysisBatches(t *testing.T) {
 	})
 
 	// 2. 执行生产同步入口并核对跨批累计和最终 pending。
-	result, err := service.SyncScheduled(ctx)
+	result, err := service.SyncScheduled(ctx, true)
 	if err != nil {
 		t.Fatalf("SyncScheduled() error = %v", err)
 	}
-	if result.FetchedCount != 51 || result.AnalyzedCount != 51 || result.PendingCount != 0 {
+	if result.FetchedCount != 51 || result.AnalyzedCount != 51 || result.PendingCount != 0 || result.ClassifiedAliasCount != 1 {
 		t.Errorf("result = %#v", result)
 	}
 }
@@ -200,11 +206,48 @@ func TestServiceScheduledSyncFailsWithPendingArticles(t *testing.T) {
 	service := NewService(repository, ServiceOptions{RSS: manyRSSGateway{count: 1}})
 
 	// 2. 执行生产入口并要求 pending 不会被静默吞掉。
-	result, err := service.SyncScheduled(ctx)
+	result, err := service.SyncScheduled(ctx, true)
 	if err == nil || !strings.Contains(err.Error(), "未配置 DEEPSEEK_API_KEY") {
 		t.Fatalf("SyncScheduled() error = %v, result = %#v", err, result)
 	}
 	if result.PendingCount != 1 {
 		t.Errorf("pending = %d, want 1", result.PendingCount)
+	}
+}
+
+// TestServiceScheduledSyncReportsMissingClassifierForUnknownSignals 验证自动任务不会静默跳过历史信号归类。
+// 输入：没有待分析文章、存在未知信号且未配置 DeepSeek 的自动同步。
+// 输出：返回明确的密钥缺失错误。
+// 副作用：执行模拟 MySQL 来源、计数和统计查询。
+func TestServiceScheduledSyncReportsMissingClassifierForUnknownSignals(t *testing.T) {
+	// 1. 准备空来源、零待分析文章和一个未映射信号。
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT id, source_code, source_name, source_type, feed_url, is_active").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "source_code", "source_name", "source_type", "feed_url", "is_active",
+			"description", "last_fetch_at", "last_fetch_status", "last_fetch_message",
+		}))
+	mock.ExpectQuery("SELECT[[:space:]]+\\(SELECT COUNT\\(\\*\\) FROM investment_article_source").
+		WillReturnRows(sqlmock.NewRows([]string{"sources", "articles", "analyzed", "pending", "latest"}).
+			AddRow(0, 1, 1, 0, "2026-07-20 10:00:00"))
+	mock.ExpectQuery("SELECT COALESCE\\(analysis.recommendations_json").
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"recommendations_json", "risks_json", "market_mood", "prediction", "occurred_at"}).
+			AddRow(`[{"name":"券商","type":"sector"}]`, `[]`, "neutral", "range", "2026-07-20 10:00:00"))
+	mock.ExpectQuery("SELECT g.id, g.canonical_name, g.group_type, a.alias_name").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "canonical_name", "group_type", "alias_name"}))
+
+	// 2. 执行自动完整同步并要求未知信号触发明确配置错误。
+	service := NewService(NewRepository(db), ServiceOptions{})
+	_, err = service.SyncScheduled(context.Background(), true)
+	if err == nil || !strings.Contains(err.Error(), "未配置 DEEPSEEK_API_KEY") {
+		t.Fatalf("SyncScheduled() error = %v, want missing classifier error", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("database expectations = %v", err)
 	}
 }

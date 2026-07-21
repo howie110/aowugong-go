@@ -25,15 +25,37 @@ func (fakeDataUpdater) UpdateDaily(context.Context) (financedata.SyncResult, err
 	return financedata.SyncResult{}, nil
 }
 
-type fakeArticleSyncer struct{}
+type fakeArticleSyncer struct {
+	classifySignals bool
+}
 
 // SyncScheduled 返回空生产文章同步摘要。
 // 输入：上下文。
 // 输出：返回零值成功摘要。
 // 副作用：无。
-func (fakeArticleSyncer) SyncScheduled(context.Context) (articleanalysis.SyncResult, error) {
-	// 1. 返回无需处理的测试结果。
+func (s *fakeArticleSyncer) SyncScheduled(_ context.Context, classifySignals bool) (articleanalysis.SyncResult, error) {
+	// 1. 记录是否要求完整归类并返回无需处理的测试结果。
+	s.classifySignals = classifySignals
 	return articleanalysis.SyncResult{}, nil
+}
+
+// TestSyncInvestmentArticlesSkipsClassificationForManualRun 验证页面手动抓取不等待历史信号归类。
+// 输入：携带 manual 来源的统一文章任务。
+// 输出：文章服务收到 classifySignals=false。
+// 副作用：修改测试替身的 classifySignals 字段。
+func TestSyncInvestmentArticlesSkipsClassificationForManualRun(t *testing.T) {
+	// 1. 使用记录型文章服务构造任务，并写入手动执行来源。
+	articles := &fakeArticleSyncer{classifySignals: true}
+	taskSet := &tasks{dependencies: Dependencies{Articles: articles}}
+	ctx := scheduler.WithSource(context.Background(), scheduler.SourceManual)
+
+	// 2. 执行任务并核对手动入口没有附带历史归类。
+	if _, err := taskSet.syncInvestmentArticles(ctx); err != nil {
+		t.Fatalf("syncInvestmentArticles() error = %v", err)
+	}
+	if articles.classifySignals {
+		t.Fatal("manual sync classifySignals = true, want false")
+	}
 }
 
 type fakeMonitor struct{}
@@ -79,7 +101,7 @@ func TestRegisterAllAddsSevenProductionJobs(t *testing.T) {
 	db := testdatabase.Open(t)
 	registry := scheduler.NewRegistry(db, fakeNotification{}, nil)
 	dependencies := Dependencies{
-		DB: db, Database: config.Database{DumpCommand: "mysqldump"}, Data: fakeDataUpdater{}, Articles: fakeArticleSyncer{}, Monitoring: fakeMonitor{},
+		DB: db, Database: config.Database{DumpCommand: "mysqldump"}, Data: fakeDataUpdater{}, Articles: &fakeArticleSyncer{}, Monitoring: fakeMonitor{},
 		Subscriptions: fakeSubscription{}, Notification: fakeNotification{}, BackupDir: t.TempDir(),
 		BackupRetention: 7, Now: time.Now,
 		Backup: func(context.Context, config.Database, string, int, time.Time) (string, error) {

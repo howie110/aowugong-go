@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { TargetSignalStat } from "@/lib/article-analysis";
 import { ArticlePagination } from "./article-pagination";
-import { isSameSignal } from "./page-utils";
+import { formatSignalMembers, isSameSignal } from "./page-utils";
 
 export function SignalRankCard({
   title,
@@ -35,17 +35,17 @@ export function SignalRankCard({
     <Card className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto] overflow-hidden xl:h-full xl:grid-rows-[auto_minmax(0,1fr)_auto]">
       <CardHeader className="p-4 pb-3 sm:p-5 sm:pb-3">
         <CardTitle>{title}</CardTitle>
-        <CardDescription className="truncate">同标的合并，按总数倒序。</CardDescription>
+        <CardDescription>按概念合并，按总数倒序。</CardDescription>
       </CardHeader>
-      <CardContent className="min-h-0 overflow-visible px-4 pb-0 pt-0 sm:px-5 xl:overflow-hidden xl:px-6">
-        <div ref={tableRef} className="min-h-0 overflow-visible pb-1 xl:h-full xl:overflow-hidden">
+      <CardContent className="min-h-0 overflow-visible px-4 pb-0 pt-0 sm:px-5 xl:overflow-y-auto xl:px-6">
+        <div ref={tableRef} className="min-h-0 overflow-visible pb-1 xl:h-full">
           <Table className="table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[38%] px-2">标的</TableHead>
-                <TableHead className="w-[24%] px-2">信号</TableHead>
-                <TableHead className="w-[18%] px-2 text-right">净数</TableHead>
-                <TableHead className="w-[20%] px-2 text-right">总数</TableHead>
+                <TableHead className="w-[50%] px-2">标的</TableHead>
+                <TableHead className="w-[22%] px-2">信号</TableHead>
+                <TableHead className="w-[14%] px-2 text-right">净数</TableHead>
+                <TableHead className="w-[14%] px-2 text-right">总数</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -55,7 +55,21 @@ export function SignalRankCard({
                   onClick={() => onSelect(isSameSignal(selectedSignal, item) ? null : item)}
                   className={["cursor-pointer", isSameSignal(selectedSignal, item) ? "bg-muted/70" : ""].join(" ")}
                 >
-                  <TableCell className="max-w-[7rem] truncate px-2 py-2 font-medium">{item.name}</TableCell>
+                  <TableCell className="px-2 py-2 align-top">
+                    <div className="font-medium">{item.name}</div>
+                    {item.members.length ? (
+                      <div
+                        aria-label={formatSignalMembers(item.members)}
+                        className="mt-1 flex flex-wrap gap-x-1 text-xs font-normal leading-5 text-muted-foreground"
+                      >
+                        {item.members.map((name, index) => (
+                          <span key={name} className="whitespace-nowrap">
+                            {index ? `· ${name}` : name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </TableCell>
                   <TableCell className="px-2 py-2">
                     <SignalCountCell recommendationCount={item.recommendation_count} riskCount={item.risk_count} />
                   </TableCell>
@@ -66,7 +80,7 @@ export function SignalRankCard({
                 </TableRow>
               ))}
               {emptyRows.map((_, index) => (
-                <TableRow key={`empty-${index}`}>
+                <TableRow key={`empty-${index}`} data-placeholder-row="true">
                   <TableCell className="px-2 py-2 text-muted-foreground">-</TableCell>
                   <TableCell className="px-2 py-2 text-muted-foreground">-</TableCell>
                   <TableCell className="px-2 py-2 text-right text-muted-foreground">-</TableCell>

@@ -12,13 +12,24 @@ export function formatShortDate(value?: string | null) {
   return new Date(value).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
 }
 
+/** filterArticlesBySignal 按概念组全部原始名称筛选文章；输入文章和可选信号，输出匹配列表，无副作用。 */
 export function filterArticlesBySignal(articles: ArticleItem[], signal: TargetSignalStat | null) {
+  // 1. 未选择概念组时保留完整文章列表。
   if (!signal) {
     return articles;
   }
+
+  // 2. 使用概念组全部原始成员匹配推荐或风险名称。
+  const members = new Set(signal.members?.length ? signal.members : [signal.name]);
   return articles.filter((article) => {
-    return article.recommendation_names.includes(signal.name) || article.risk_names.includes(signal.name);
+    return article.recommendation_names.some((name) => members.has(name)) || article.risk_names.some((name) => members.has(name));
   });
+}
+
+/** formatSignalMembers 完整连接输入的概念组原始名称并返回展示文本，无副作用。 */
+export function formatSignalMembers(members: string[]) {
+  // 1. 清理空名称后按后端稳定顺序完整显示。
+  return members.map((name) => name.trim()).filter(Boolean).join(" · ");
 }
 
 export function buildAccountStats(articles: ArticleItem[]) {

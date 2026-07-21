@@ -26,7 +26,7 @@ type DataUpdater interface {
 
 // ArticleSyncer 定义文章同步任务使用的业务入口。
 type ArticleSyncer interface {
-	SyncScheduled(ctx context.Context) (articleanalysis.SyncResult, error)
+	SyncScheduled(ctx context.Context, classifySignals bool) (articleanalysis.SyncResult, error)
 }
 
 // Monitor 定义服务监控任务使用的业务入口。
@@ -136,11 +136,12 @@ func (t *tasks) updateTushareDailyData(ctx context.Context) (string, error) {
 // 输出：返回抓取、写入和分析摘要；来源或模型失败时返回错误。
 // 副作用：调用 WeChatRSS、RSS、DeepSeek 并写入 MySQL。
 func (t *tasks) syncInvestmentArticles(ctx context.Context) (string, error) {
-	// 1. 通过文章服务执行最多两千篇抓取和十个五十篇分析批次。
-	result, err := t.dependencies.Articles.SyncScheduled(ctx)
-	message := fmt.Sprintf("来源=%d，抓取=%d，新增=%d，更新=%d，分析=%d，跳过=%d，错误=%d",
+	// 1. 页面手动执行优先快速返回，自动和 CLI 执行同时完成信号归类。
+	classifySignals := scheduler.SourceFromContext(ctx) != scheduler.SourceManual
+	result, err := t.dependencies.Articles.SyncScheduled(ctx, classifySignals)
+	message := fmt.Sprintf("来源=%d，抓取=%d，新增=%d，更新=%d，分析=%d，归类=%d，跳过=%d，错误=%d",
 		result.SourceCount, result.FetchedCount, result.InsertedCount, result.UpdatedCount,
-		result.AnalyzedCount, result.SkippedCount, result.ErrorCount)
+		result.AnalyzedCount, result.ClassifiedAliasCount, result.SkippedCount, result.ErrorCount)
 
 	// 2. 保留已完成摘要并把业务错误交给统一包装器通知。
 	if err != nil {
