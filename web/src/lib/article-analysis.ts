@@ -51,6 +51,7 @@ export type TargetSignalStat = {
   name: string;
   type: string;
   members: string[];
+  member_net_counts?: Record<string, number>;
   recommendation_count: number;
   risk_count: number;
   count: number;

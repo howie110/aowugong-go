@@ -477,8 +477,13 @@ func buildSignalStats(rows []analysisRow, groups []SignalGroup) []SignalStat {
 			item, exists := grouped[groupKey]
 			if !exists {
 				item = &signalAccumulator{
-					SignalStat: SignalStat{Name: groupName, Type: groupType, Members: []string{}},
-					LatestAt:   signal.LatestAt, memberKeys: make(map[string]struct{}),
+					SignalStat: SignalStat{
+						Name:            groupName,
+						Type:            groupType,
+						Members:         []string{},
+						MemberNetCounts: map[string]int{},
+					},
+					LatestAt: signal.LatestAt, memberKeys: make(map[string]struct{}),
 				}
 				grouped[groupKey] = item
 				ordered = append(ordered, item)
@@ -493,8 +498,10 @@ func buildSignalStats(rows []analysisRow, groups []SignalGroup) []SignalStat {
 			}
 			if recommendation {
 				item.RecommendationCount += signal.Count
+				item.MemberNetCounts[memberKey] += signal.Count
 			} else {
 				item.RiskCount += signal.Count
+				item.MemberNetCounts[memberKey] -= signal.Count
 			}
 			item.Count += signal.Count
 			if signal.LatestAt > item.LatestAt {

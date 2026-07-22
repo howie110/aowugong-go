@@ -81,6 +81,12 @@ test("信号榜使用 Accordion 展开可点击的具体标的", () => {
   assert.match(source, /<Badge[^>]*asChild/);
 });
 
+test("信号榜标的群标签显示各自净数", () => {
+  const source = fs.readFileSync(signalRankPath, "utf8");
+  assert.match(source, /item\.member_net_counts\?\.\[member\]\s*\?\?\s*0/);
+  assert.match(source, /<SignalNetCell[^>]*compact/);
+});
+
 test("概念组成员换行后分页只测真实行并允许降低行数", () => {
   const pageSizeSource = fs.readFileSync(pageSizePath, "utf8");
   const signalRankSource = fs.readFileSync(signalRankPath, "utf8");
@@ -102,6 +108,16 @@ test("信号榜缩短标的列并为三位数字预留稳定列宽", () => {
   assert.match(source, /w-\[18%\]/);
   assert.match(source, /grid-cols-\[42fr_25fr_15fr_18fr\]/);
   assert.match(source, /pr-9 text-right/);
+});
+
+test("手机端信号榜缩小数字并使用更紧凑的独立列比例", () => {
+  const source = fs.readFileSync(signalRankPath, "utf8");
+  assert.match(source, /grid-cols-\[45fr_22fr_14fr_19fr\]\s+sm:grid-cols-\[42fr_25fr_15fr_18fr\]/);
+  assert.match(source, /w-\[45%\][^"\n]*sm:w-\[42%\]/);
+  assert.match(source, /gap-0\.5[^"\n]*sm:gap-1/);
+  assert.match(source, /text-sm[^"\n]*sm:text-lg/);
+  assert.match(source, /pr-8[^"\n]*sm:pr-9/);
+  assert.match(source, /CardContent className="[^"\n]*px-3[^"\n]*sm:px-5/);
 });
 
 test("文章筛选加载完整六十天窗口而不是旧的两百篇", () => {

@@ -104,12 +104,13 @@ type ArticleDetail struct {
 
 // SignalStat 描述信号榜的一行合并统计。
 type SignalStat struct {
-	Name                string   `json:"name"`
-	Type                string   `json:"type"`
-	Members             []string `json:"members"`
-	RecommendationCount int      `json:"recommendation_count"`
-	RiskCount           int      `json:"risk_count"`
-	Count               int      `json:"count"`
+	Name                string         `json:"name"`
+	Type                string         `json:"type"`
+	Members             []string       `json:"members"`
+	MemberNetCounts     map[string]int `json:"member_net_counts"`
+	RecommendationCount int            `json:"recommendation_count"`
+	RiskCount           int            `json:"risk_count"`
+	Count               int            `json:"count"`
 }
 
 // DistributionItem 描述市场枚举的计数分布。

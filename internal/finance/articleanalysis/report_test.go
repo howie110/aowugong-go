@@ -100,6 +100,32 @@ func TestBuildSignalStatsGroupsAliasesAndCountsEveryOccurrence(t *testing.T) {
 	}
 }
 
+// TestBuildSignalStatsReturnsEachMemberNetCount 验证概念组同时返回每个原始标的的净数。
+// 输入：同组内分别出现纯推荐、推荐风险相抵和纯风险的三个标的。
+// 输出：成员净数分别为正数、零和负数。
+// 副作用：无。
+func TestBuildSignalStatsReturnsEachMemberNetCount(t *testing.T) {
+	// 1. 构造一个概念组及三种净数结果。
+	groups := []SignalGroup{{
+		ID: 1, Name: "证券行业", Type: "sector",
+		Aliases: []string{"中信证券", "券商", "证券板块"},
+	}}
+	rows := []analysisRow{
+		{Recommendations: []Signal{{Name: "中信证券"}, {Name: "券商"}}},
+		{Recommendations: []Signal{{Name: "券商"}}, Risks: []Signal{{Name: "券商"}, {Name: "证券板块"}}},
+	}
+
+	// 2. 核对每个标签使用自己的推荐减风险结果。
+	result := buildSignalStats(rows, groups)
+	if len(result) != 1 {
+		t.Fatalf("signals = %#v, want one grouped signal", result)
+	}
+	got := result[0].MemberNetCounts
+	if got["中信证券"] != 1 || got["券商"] != 1 || got["证券板块"] != -1 {
+		t.Fatalf("member net counts = %#v, want 中信证券=1 券商=1 证券板块=-1", got)
+	}
+}
+
 // TestBuildSignalStatsPreservesRawAliasSpellings 验证概念成员保留实际出现的大小写写法。
 // 输入：同一概念中规范化后相同的“AI硬件”和“ai硬件”。
 // 输出：统计合并为一行，成员列表仍完整保留两种原文供页面筛选。
