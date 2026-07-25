@@ -15,7 +15,7 @@ import (
 // TestRepositorySignalGroupsReturnsAllAliases 验证概念组读取不会省略任何原始名称。
 // 输入：同一概念组关联三个别名的模拟查询结果。
 // 输出：返回一个“证券行业”组及完整三个别名。
-// 副作用：执行模拟 MySQL 查询。
+// 副作用：执行模拟 SQLite 查询。
 func TestRepositorySignalGroupsReturnsAllAliases(t *testing.T) {
 	// 1. 准备按概念组和别名主键排序的数据库行。
 	db, mock, err := sqlmock.New()
@@ -48,7 +48,7 @@ func TestRepositorySignalGroupsReturnsAllAliases(t *testing.T) {
 // TestRepositorySaveSignalGroupsWritesGroupAndAliasesInOneTransaction 验证分类结果原子写入概念组和别名。
 // 输入：一个“证券行业”组及两个高置信度别名。
 // 输出：返回两条新增别名，事务完整提交。
-// 副作用：执行模拟 MySQL 事务写入。
+// 副作用：执行模拟 SQLite 事务写入。
 func TestRepositorySaveSignalGroupsWritesGroupAndAliasesInOneTransaction(t *testing.T) {
 	// 1. 声明概念组、别名写入和事务提交预期。
 	db, mock, err := sqlmock.New()
@@ -57,13 +57,13 @@ func TestRepositorySaveSignalGroupsWritesGroupAndAliasesInOneTransaction(t *test
 	}
 	defer db.Close()
 	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO investment_signal_group").
+	mock.ExpectQuery("INSERT INTO investment_signal_group").
 		WithArgs("证券行业", "sector", "deepseek", "test-model").
-		WillReturnResult(sqlmock.NewResult(7, 1))
-	mock.ExpectExec("INSERT IGNORE INTO investment_signal_alias").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
+	mock.ExpectExec("INSERT OR IGNORE INTO investment_signal_alias").
 		WithArgs(int64(7), "券商", "券商", 0.98, "deepseek", "test-model").
 		WillReturnResult(sqlmock.NewResult(11, 1))
-	mock.ExpectExec("INSERT IGNORE INTO investment_signal_alias").
+	mock.ExpectExec("INSERT OR IGNORE INTO investment_signal_alias").
 		WithArgs(int64(7), "中信证券", "中信证券", 0.95, "deepseek", "test-model").
 		WillReturnResult(sqlmock.NewResult(12, 1))
 	mock.ExpectCommit()
@@ -88,7 +88,7 @@ func TestRepositorySaveSignalGroupsWritesGroupAndAliasesInOneTransaction(t *test
 // TestRepositoryArticlesAllowsFullSignalWindowLimit 验证文章筛选可读取完整六十天窗口。
 // 输入：页面请求五千篇文章的上限。
 // 输出：SQL 使用五千而不是旧的两百上限。
-// 副作用：执行模拟 MySQL 查询。
+// 副作用：执行模拟 SQLite 查询。
 func TestRepositoryArticlesAllowsFullSignalWindowLimit(t *testing.T) {
 	// 1. 要求文章查询携带日期范围和五千条限制。
 	db, mock, err := sqlmock.New()
@@ -121,7 +121,7 @@ func TestSyncDefaultSourceOnlyFillsEmptyFeedURL(t *testing.T) {
 	// 1. 使用查询匹配器拒绝无条件覆盖 feed_url 的 upsert。
 	matcher := sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
 		statement := strings.Join(strings.Fields(actualSQL), " ")
-		if !strings.Contains(statement, "feed_url = IF(feed_url = '', ?, feed_url)") {
+		if !strings.Contains(statement, "feed_url = CASE WHEN investment_article_source.feed_url = '' THEN excluded.feed_url ELSE investment_article_source.feed_url END") {
 			return fmt.Errorf("feed_url must only be filled when empty: %s", statement)
 		}
 		return nil
@@ -132,7 +132,7 @@ func TestSyncDefaultSourceOnlyFillsEmptyFeedURL(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectExec("runtime-safe source upsert").
-		WithArgs("http://127.0.0.1:15000/api/rss/all", 1, "ready", nil, "http://127.0.0.1:15000/api/rss/all", 1).
+		WithArgs("http://127.0.0.1:15000/api/rss/all", 1, "ready", nil).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// 2. 同步默认来源并核对 SQL 满足只补空值约束。
@@ -172,7 +172,7 @@ func TestRepositorySkipsExistingArticle(t *testing.T) {
 // TestRepositoryAndReportPreserveArticleContracts 验证文章存储、详情和 60/3 天报告契约。
 // 输入：一篇当前文章和一条结构化分析结果。
 // 输出：列表、详情、信号榜和市场分布均返回前端需要的字段。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestRepositoryAndReportPreserveArticleContracts(t *testing.T) {
 	// 1. 创建完整迁移数据库并同步默认 RSS 来源。
 	ctx := context.Background()
@@ -224,7 +224,9 @@ func TestRepositoryAndReportPreserveArticleContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Report() error = %v", err)
 	}
-	if len(report.Signals) != 1 || report.Signals[0].Name != "贵州茅台" || report.Signals[0].RecommendationCount != 1 {
+	if len(report.Signals) != 1 || report.Signals[0].Name != pendingSignalGroupName ||
+		report.Signals[0].RecommendationCount != 1 ||
+		len(report.Signals[0].Members) != 1 || report.Signals[0].Members[0] != "贵州茅台" {
 		t.Errorf("signals = %#v", report.Signals)
 	}
 	if len(report.MoodDistribution) != 1 || report.MoodDistribution[0].Name != "optimistic" {
@@ -235,9 +237,9 @@ func TestRepositoryAndReportPreserveArticleContracts(t *testing.T) {
 // TestSyncDefaultSourcePreservesMigratedSourceWithoutConfig 验证空配置不会禁用已迁移文章来源。
 // 输入：一条含真实 URL、启用状态和历史更新时间的现有来源。
 // 输出：空配置同步后 URL、状态和更新时间保持不变。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestSyncDefaultSourcePreservesMigratedSourceWithoutConfig(t *testing.T) {
-	// 1. 创建迁移库并写入模拟 MySQL 迁移来源。
+	// 1. 创建迁移库并写入模拟 SQLite 迁移来源。
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	const feedURL = "http://8.138.123.59:5000/api/rss/all"

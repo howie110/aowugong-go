@@ -46,11 +46,11 @@ func TestRSSClientPollsAndParsesFeed(t *testing.T) {
 	}
 }
 
-// TestParseFeedTimeReturnsMySQLCompatibleUTC 验证 feed 时间转换为 MySQL DATETIME 可写入的 UTC 文本。
+// TestParseFeedTimeReturnsSQLiteCompatibleUTC 验证 feed 时间转换为 SQLite DATETIME 可写入的 UTC 文本。
 // 输入：提供等价于线上异常值的东八区 RSS 时间。
 // 输出：返回 YYYY-MM-DD HH:MM:SS，不包含 RFC3339 的 T 和 Z。
 // 副作用：无。
-func TestParseFeedTimeReturnsMySQLCompatibleUTC(t *testing.T) {
+func TestParseFeedTimeReturnsSQLiteCompatibleUTC(t *testing.T) {
 	// 1. 解析线上文章对应的东八区发布时间。
 	got := parseFeedTime("Thu, 16 Jul 2026 14:44:07 +0800")
 

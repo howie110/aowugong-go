@@ -8,12 +8,12 @@ import (
 	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
-// TestDashboardServiceBuildsRuntimeSummaries 验证 finance 摘要使用 MySQL 进度和 Go 运行时配置。
-// 输入：隔离 MySQL 数据与关闭的真实交易配置。
-// 输出：各页面摘要包含最新日期、七个内嵌任务和安全交易状态。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// TestDashboardServiceBuildsRuntimeSummaries 验证 finance 摘要使用 SQLite 进度和 Go 运行时配置。
+// 输入：隔离 SQLite 数据与关闭的真实交易配置。
+// 输出：各页面摘要包含最新日期、八个任务定义和安全交易状态。
+// 副作用：创建并写入隔离 SQLite 测试库。
 func TestDashboardServiceBuildsRuntimeSummaries(t *testing.T) {
-	// 1. 创建包含当前行情日期的最小 MySQL 数据集。
+	// 1. 创建包含当前行情日期的最小 SQLite 数据集。
 	ctx := context.Background()
 	db := openDashboardTestDB(t, ctx)
 
@@ -37,8 +37,8 @@ func TestDashboardServiceBuildsRuntimeSummaries(t *testing.T) {
 	if got := data.Tables[1].Latest; got != "2026-07-14" {
 		t.Errorf("daily latest = %q, want 2026-07-14", got)
 	}
-	if got := len(jobs.Jobs); got != 7 {
-		t.Errorf("jobs count = %d, want 7", got)
+	if got := len(jobs.Jobs); got != 8 {
+		t.Errorf("jobs count = %d, want 8", got)
 	}
 	if got := trading.Guards[0].Value; got != "关闭" {
 		t.Errorf("real trade value = %q, want 关闭", got)
@@ -48,12 +48,12 @@ func TestDashboardServiceBuildsRuntimeSummaries(t *testing.T) {
 	}
 }
 
-// openDashboardTestDB 创建 finance 摘要测试使用的最小 MySQL 数据库。
+// openDashboardTestDB 创建 finance 摘要测试使用的最小 SQLite 数据库。
 // 输入：t 管理测试生命周期，ctx 控制数据库操作。
 // 输出：返回已创建核心数据表和样例日期的数据库连接。
-// 副作用：创建并写入隔离 MySQL 测试 schema，失败时终止测试。
+// 副作用：创建并写入隔离 SQLite 测试库，失败时终止测试。
 func openDashboardTestDB(t *testing.T, ctx context.Context) *sql.DB {
-	// 1. 打开已完成正式迁移的隔离 MySQL schema。
+	// 1. 打开已完成正式迁移的隔离 SQLite。
 	t.Helper()
 	db := testdatabase.Open(t)
 

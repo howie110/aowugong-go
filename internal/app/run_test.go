@@ -15,8 +15,11 @@ import (
 )
 
 // TestRunShutsDownOnContextCancellation 验证 Run 会在上下文取消后优雅退出。
+// 输入：隔离 SQLite 配置和可取消测试上下文。
+// 输出：HTTP 服务启动后在十秒内无错误退出。
+// 副作用：创建临时数据库并短暂监听本机端口。
 func TestRunShutsDownOnContextCancellation(t *testing.T) {
-	// 1. 创建当前测试独享的 MySQL schema。
+	// 1. 创建当前测试独享的 SQLite 配置。
 	databaseConfig := testdatabase.Prepare(t)
 
 	// 2. 启动运行时并等待 HTTP 监听器就绪。
@@ -49,6 +52,9 @@ func TestRunShutsDownOnContextCancellation(t *testing.T) {
 }
 
 // TestRunRejectsMissingProductionMigrations 验证生产环境不会回退到编译时源码迁移目录。
+// 输入：缺少迁移目录的生产配置。
+// 输出：Run 返回明确的迁移目录错误。
+// 副作用：无，不打开数据库或监听端口。
 func TestRunRejectsMissingProductionMigrations(t *testing.T) {
 	// 1. 使用无显式迁移目录的生产配置启动应用。
 	err := Run(context.Background(), config.Config{
@@ -65,20 +71,20 @@ func TestRunRejectsMissingProductionMigrations(t *testing.T) {
 	}
 }
 
-// TestRunJobSkipsSchemaMigrations 验证 CLI 补跑只使用既有 MySQL 表结构。
-// 输入：已迁移的隔离 MySQL 与故意不存在的生产迁移目录。
+// TestRunJobSkipsSchemaMigrations 验证 CLI 补跑只使用既有 SQLite 表结构。
+// 输入：已迁移的隔离 SQLite 与故意不存在的生产迁移目录。
 // 输出：任务正常完成，不因迁移目录缺失失败。
-// 副作用：创建隔离 schema，并写入一条 test_crontab 执行记录。
+// 副作用：创建隔离数据库，并写入一条 test_crontab 执行记录。
 func TestRunJobSkipsSchemaMigrations(t *testing.T) {
 	// 1. 先由测试管理账号建立完整表结构，模拟已部署的生产库。
 	databaseConfig := testdatabase.Prepare(t)
-	db, err := database.OpenMySQL(context.Background(), databaseConfig)
+	db, err := database.OpenSQLite(context.Background(), databaseConfig)
 	if err != nil {
-		t.Fatalf("database.OpenMySQL() error = %v", err)
+		t.Fatalf("database.OpenSQLite() error = %v", err)
 	}
-	if err := database.MigrateMySQL(context.Background(), db, testdatabase.MigrationsDirectory(t)); err != nil {
+	if err := database.MigrateSQLite(context.Background(), db, testdatabase.MigrationsDirectory(t)); err != nil {
 		_ = db.Close()
-		t.Fatalf("database.MigrateMySQL() error = %v", err)
+		t.Fatalf("database.MigrateSQLite() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("db.Close() error = %v", err)
@@ -100,6 +106,9 @@ func TestRunJobSkipsSchemaMigrations(t *testing.T) {
 }
 
 // TestResolveMigrationsDirectoryUsesProductionExecutableSibling 验证生产环境使用可执行文件同级迁移目录。
+// 输入：带 migrations/sqlite 子目录的临时可执行文件路径。
+// 输出：返回发布目录中的 SQLite 迁移路径。
+// 副作用：创建测试临时目录。
 func TestResolveMigrationsDirectoryUsesProductionExecutableSibling(t *testing.T) {
 	// 1. 创建模拟生产压缩包中的可执行文件同级迁移目录。
 	executableDirectory := t.TempDir()
@@ -119,6 +128,9 @@ func TestResolveMigrationsDirectoryUsesProductionExecutableSibling(t *testing.T)
 }
 
 // TestResolveMigrationsDirectoryUsesProductionOverride 验证生产环境可使用显式迁移目录。
+// 输入：显式迁移目录和无效可执行文件路径。
+// 输出：优先返回清理后的显式目录。
+// 副作用：创建测试临时目录。
 func TestResolveMigrationsDirectoryUsesProductionOverride(t *testing.T) {
 	// 1. 创建显式迁移目录和模拟生产迁移目录。
 	overrideDirectory := filepath.Join(t.TempDir(), "custom-migrations")
@@ -141,6 +153,9 @@ func TestResolveMigrationsDirectoryUsesProductionOverride(t *testing.T) {
 }
 
 // TestResolveMigrationsDirectoryRejectsMissingProductionDirectory 验证生产环境缺少发布迁移目录时返回明确错误。
+// 输入：不存在同级迁移目录的生产可执行文件路径。
+// 输出：返回生产迁移目录缺失错误。
+// 副作用：创建测试临时目录。
 func TestResolveMigrationsDirectoryRejectsMissingProductionDirectory(t *testing.T) {
 	// 1. 使用没有同级迁移目录的模拟生产可执行文件。
 	executablePath := filepath.Join(t.TempDir(), "aowugong.exe")
@@ -159,6 +174,9 @@ func TestResolveMigrationsDirectoryRejectsMissingProductionDirectory(t *testing.
 }
 
 // TestResolveMigrationsDirectoryUsesSourceFallbackOutsideProduction 验证开发和测试环境允许源码目录回退。
+// 输入：开发环境、空显式目录和无效可执行文件路径。
+// 输出：返回仓库中的 SQLite 迁移目录。
+// 副作用：只读取源码目录元数据。
 func TestResolveMigrationsDirectoryUsesSourceFallbackOutsideProduction(t *testing.T) {
 	// 1. 计算测试源码对应的仓库根迁移目录。
 	want, err := filepath.Abs(filepath.Join("..", "..", migrationDirectoryName))
@@ -179,6 +197,9 @@ func TestResolveMigrationsDirectoryUsesSourceFallbackOutsideProduction(t *testin
 }
 
 // reserveAddress 预留一个本地 TCP 地址供测试使用。
+// 输入：t 接收监听失败报告。
+// 输出：返回当前可用的回环地址。
+// 副作用：短暂打开并关闭 TCP 监听器。
 func reserveAddress(t *testing.T) string {
 	// 1. 让操作系统分配临时端口并立即释放监听器。
 	t.Helper()
@@ -194,6 +215,9 @@ func reserveAddress(t *testing.T) string {
 }
 
 // waitForServer 等待测试服务开始接受 TCP 连接。
+// 输入：t 接收失败，address 是目标地址，done 提前报告服务退出。
+// 输出：服务可连接时返回；超时或提前退出时终止测试。
+// 副作用：反复建立并关闭本机 TCP 连接。
 func waitForServer(t *testing.T, address string, done <-chan error) {
 	// 1. 在超时前轮询服务监听状态。
 	t.Helper()

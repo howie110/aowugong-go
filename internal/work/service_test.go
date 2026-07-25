@@ -7,6 +7,9 @@ import (
 )
 
 // TestServiceNavigationNormalizesPrivateFile 验证私有导航文件会清洗链接并统计总数。
+// 输入：包含分组、重复空白和链接的临时导航 JSON。
+// 输出：返回规范化分组、入口和统计数量。
+// 副作用：创建并读取临时 JSON 文件。
 func TestServiceNavigationNormalizesPrivateFile(t *testing.T) {
 	// 1. 写入包含有效、旧字段和无效链接的私有 JSON。
 	path := filepath.Join(t.TempDir(), "navigation.json")
@@ -36,6 +39,9 @@ func TestServiceNavigationNormalizesPrivateFile(t *testing.T) {
 }
 
 // TestServiceNavigationReturnsEmptyWhenMissing 验证私有导航未配置时返回稳定空状态。
+// 输入：不存在的导航文件路径。
+// 输出：返回空分组和零统计而不报错。
+// 副作用：只检查临时路径元数据。
 func TestServiceNavigationReturnsEmptyWhenMissing(t *testing.T) {
 	// 1. 使用不存在的文件路径读取导航。
 	navigation, err := NewService(filepath.Join(t.TempDir(), "missing.json")).Navigation()

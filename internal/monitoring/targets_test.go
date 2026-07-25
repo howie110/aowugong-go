@@ -7,6 +7,9 @@ import (
 )
 
 // TestBuildTargetsIncludesDefaultsAndDedupesExtras 验证默认目标、业务目标和额外目标按 code 去重。
+// 输入：默认客户端地址和包含重复 code 的额外监控配置。
+// 输出：返回去重且探测地址正确的目标列表。
+// 副作用：无。
 func TestBuildTargetsIncludesDefaultsAndDedupesExtras(t *testing.T) {
 	// 1. 为两个内部服务分别配置本机探测地址和公网展示地址。
 	cfg := config.Clients{
@@ -36,6 +39,9 @@ func TestBuildTargetsIncludesDefaultsAndDedupesExtras(t *testing.T) {
 }
 
 // TestValidateWeChatRSSLoginPayload 验证登录过期会被转换为可读错误。
+// 输入：表示 WeChatRSS 登录过期的 JSON 响应。
+// 输出：返回明确的重新登录提示。
+// 副作用：无。
 func TestValidateWeChatRSSLoginPayload(t *testing.T) {
 	// 1. 健康载荷必须通过。
 	healthy := map[string]any{"authenticated": true, "loggedIn": true, "isExpired": false}

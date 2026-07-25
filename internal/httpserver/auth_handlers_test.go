@@ -17,6 +17,9 @@ import (
 )
 
 // TestAuthLoginAndProfile 验证 OAuth2 表单登录后可以读取当前用户资料。
+// 输入：带 admin 角色的临时用户和登录表单。
+// 输出：登录令牌可读取包含角色的当前资料。
+// 副作用：创建临时 SQLite 并执行 HTTP 测试请求。
 func TestAuthLoginAndProfile(t *testing.T) {
 	// 1. 创建管理员用户并通过登录接口取得 Bearer 令牌。
 	handler, db := newAuthenticatedTestRouter(t)
@@ -44,6 +47,9 @@ func TestAuthLoginAndProfile(t *testing.T) {
 }
 
 // TestAuthProfileRejectsMissingBearer 验证资料接口拒绝缺失的 Bearer 令牌。
+// 输入：未携带认证头的资料请求。
+// 输出：返回 401 和统一错误码。
+// 副作用：创建临时 SQLite 并执行 HTTP 测试请求。
 func TestAuthProfileRejectsMissingBearer(t *testing.T) {
 	// 1. 创建具备认证依赖的路由器但不发送令牌。
 	handler, _ := newAuthenticatedTestRouter(t)
@@ -58,6 +64,9 @@ func TestAuthProfileRejectsMissingBearer(t *testing.T) {
 }
 
 // TestPermissionsRequireAdminPermission 验证 investor 被拒绝而 admin 可以读取用户列表。
+// 输入：分别携带 investor 和 admin 令牌的权限请求。
+// 输出：investor 返回 403，admin 返回用户列表。
+// 副作用：创建临时 SQLite、用户和角色关系。
 func TestPermissionsRequireAdminPermission(t *testing.T) {
 	// 1. 创建两个角色用户并分别登录。
 	handler, db := newAuthenticatedTestRouter(t)
@@ -93,8 +102,11 @@ func TestPermissionsRequireAdminPermission(t *testing.T) {
 }
 
 // newAuthenticatedTestRouter 创建完成迁移和 RBAC 同步的 HTTP 测试路由器。
+// 输入：t 管理测试资源生命周期。
+// 输出：返回认证路由和底层临时 SQLite。
+// 副作用：创建、迁移并写入默认 RBAC 数据。
 func newAuthenticatedTestRouter(t *testing.T) (http.Handler, *sql.DB) {
-	// 1. 创建隔离 MySQL schema 并执行全部版本化迁移。
+	// 1. 创建隔离 SQLite schema 并执行全部版本化迁移。
 	t.Helper()
 	db := testdatabase.Open(t)
 
@@ -108,6 +120,9 @@ func newAuthenticatedTestRouter(t *testing.T) (http.Handler, *sql.DB) {
 }
 
 // createHTTPTestUser 创建 HTTP 场景使用的 bcrypt 用户并分配角色。
+// 输入：测试句柄、数据库、用户凭据和角色代码。
+// 输出：无；写入失败时终止测试。
+// 副作用：写入临时 SQLite 用户与角色关系。
 func createHTTPTestUser(t *testing.T, db *sql.DB, username, email, password, roleCode string) {
 	// 1. 生成 bcrypt 密码并写入测试用户。
 	t.Helper()
@@ -137,6 +152,9 @@ func createHTTPTestUser(t *testing.T, db *sql.DB, username, email, password, rol
 }
 
 // loginHTTPTestUser 调用登录接口并返回 Bearer 令牌。
+// 输入：测试句柄、HTTP 处理器、用户名和密码。
+// 输出：返回登录接口签发的访问令牌。
+// 副作用：执行一次内存 HTTP 请求。
 func loginHTTPTestUser(t *testing.T, handler http.Handler, username, password string) string {
 	// 1. 按 OAuth2PasswordRequestForm 契约发送 URL 编码表单。
 	t.Helper()

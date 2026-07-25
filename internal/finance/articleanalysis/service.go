@@ -44,7 +44,7 @@ type ServiceOptions struct {
 // Sync 抓取全部启用来源，并按选项继续分析待处理文章。
 // 输入：ctx 控制处理，fetchLimit 是每来源上限，analyze 控制是否分析，analysisLimit 是分析上限。
 // 输出：返回来源、抓取、写入和分析统计；基础数据库失败时返回错误。
-// 副作用：读取 WeChatRSS/RSS，按需调用 DeepSeek，并写入 MySQL。
+// 副作用：读取 WeChatRSS/RSS，按需调用 DeepSeek，并写入 SQLite。
 func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analysisLimit int) (SyncResult, error) {
 	// 1. 读取启用来源并初始化稳定空数组结果。
 	sources, err := s.repository.sourceRecords(ctx)
@@ -118,7 +118,7 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 // SyncScheduled 执行生产任务使用的完整抓取和分批分析流程。
 // 输入：ctx 控制处理，classifySignals 控制是否补齐六十天信号概念映射。
 // 输出：返回累计同步统计；来源失败、模型缺失或仍有待分析文章时返回错误。
-// 副作用：调用 WeChatRSS、RSS、DeepSeek，并写入 MySQL。
+// 副作用：调用 WeChatRSS、RSS、DeepSeek，并写入 SQLite。
 func (s *Service) SyncScheduled(ctx context.Context, classifySignals bool) (SyncResult, error) {
 	// 1. 抓取全部来源的当前文章，来源失败时保留明细并立即升级为任务错误。
 	result, err := s.Sync(ctx, scheduledFetchLimit, false, 0)
@@ -199,7 +199,7 @@ func formatFailedSources(sources []map[string]string) string {
 // AnalyzePending 调用模型分析最近待处理文章。
 // 输入：ctx 控制处理，limit 是 1 到 50 的文章上限。
 // 输出：返回成功、跳过、错误及逐篇结果；数据库失败时返回错误。
-// 副作用：调用 DeepSeek 并写入 MySQL 分析表。
+// 副作用：调用 DeepSeek 并写入 SQLite 分析表。
 func (s *Service) AnalyzePending(ctx context.Context, limit int) (AnalysisBatchResult, error) {
 	// 1. 读取待分析文章并准备非 nil 结果数组。
 	articles, err := s.repository.pendingArticles(ctx, limit)
@@ -231,7 +231,7 @@ func (s *Service) AnalyzePending(ctx context.Context, limit int) (AnalysisBatchR
 // analyzeOne 分析单篇文章并持久化最终状态。
 // 输入：ctx 控制模型请求，article 是待分析文章。
 // 输出：返回页面结果项、业务状态和仅数据库失败时使用的错误。
-// 副作用：调用 DeepSeek 并写入 MySQL。
+// 副作用：调用 DeepSeek 并写入 SQLite。
 func (s *Service) analyzeOne(ctx context.Context, article pendingArticle) (map[string]any, string, error) {
 	// 1. 未配置模型时保留 pending，便于配置后重试。
 	if s.options.Analyzer == nil || !s.options.Analyzer.Configured() {
@@ -305,7 +305,7 @@ type Service struct {
 }
 
 // NewService 创建投资文章分析服务。
-// 输入：repository 提供 MySQL 访问，options 提供模型名称。
+// 输入：repository 提供 SQLite 访问，options 提供模型名称。
 // 输出：返回文章服务。
 // 副作用：无。
 func NewService(repository *Repository, options ServiceOptions) *Service {
@@ -318,9 +318,9 @@ func NewService(repository *Repository, options ServiceOptions) *Service {
 }
 
 // AnalysisSummary 构建投资文章分析页面摘要。
-// 输入：ctx 控制 MySQL 查询。
+// 输入：ctx 控制 SQLite 查询。
 // 输出：返回文章和已分析计数；失败时返回错误。
-// 副作用：只读 MySQL。
+// 副作用：只读 SQLite。
 func (s *Service) AnalysisSummary(ctx context.Context) (PageSummary, error) {
 	// 1. 读取统一计数口径。
 	counts, err := s.repository.counts(ctx)
@@ -341,9 +341,9 @@ func (s *Service) AnalysisSummary(ctx context.Context) (PageSummary, error) {
 }
 
 // FetchSummary 构建投资文章抓取页面摘要。
-// 输入：ctx 控制 MySQL 查询。
+// 输入：ctx 控制 SQLite 查询。
 // 输出：返回来源、文章、待分析和已分析计数；失败时返回错误。
-// 副作用：只读 MySQL。
+// 副作用：只读 SQLite。
 func (s *Service) FetchSummary(ctx context.Context) (PageSummary, error) {
 	// 1. 读取统一计数口径。
 	counts, err := s.repository.counts(ctx)
@@ -366,9 +366,9 @@ func (s *Service) FetchSummary(ctx context.Context) (PageSummary, error) {
 }
 
 // Sources 返回页面展示的信息源列表。
-// 输入：ctx 控制 MySQL 查询。
+// 输入：ctx 控制 SQLite 查询。
 // 输出：返回全部来源；失败时返回错误。
-// 副作用：只读 MySQL。
+// 副作用：只读 SQLite。
 func (s *Service) Sources(ctx context.Context) ([]Source, error) {
 	// 1. 页面需要同时看到未配置来源状态。
 	return s.repository.Sources(ctx, false)
@@ -377,7 +377,7 @@ func (s *Service) Sources(ctx context.Context) ([]Source, error) {
 // Articles 返回指定天数内已分析文章。
 // 输入：ctx 控制查询，days 和 limit 限制范围。
 // 输出：返回文章列表；失败时返回错误。
-// 副作用：只读 MySQL。
+// 副作用：只读 SQLite。
 func (s *Service) Articles(ctx context.Context, days, limit int) ([]ArticleItem, error) {
 	// 1. 复用仓储层受限查询。
 	return s.repository.Articles(ctx, days, limit)
@@ -386,7 +386,7 @@ func (s *Service) Articles(ctx context.Context, days, limit int) ([]ArticleItem,
 // Detail 返回单篇文章详情。
 // 输入：ctx 控制查询，articleID 是文章主键。
 // 输出：返回详情或 nil；失败时返回错误。
-// 副作用：只读 MySQL。
+// 副作用：只读 SQLite。
 func (s *Service) Detail(ctx context.Context, articleID int64) (*ArticleDetail, error) {
 	// 1. 复用仓储层详情映射。
 	return s.repository.Detail(ctx, articleID)
@@ -395,7 +395,7 @@ func (s *Service) Detail(ctx context.Context, articleID int64) (*ArticleDetail, 
 // UpdatePromptFeedback 保存管理员修正意见并返回最新详情。
 // 输入：ctx 控制写入，articleID 是文章主键，feedback 是修正意见。
 // 输出：返回详情或 nil；失败时返回错误。
-// 副作用：写入 MySQL。
+// 副作用：写入 SQLite。
 func (s *Service) UpdatePromptFeedback(ctx context.Context, articleID int64, feedback string) (*ArticleDetail, error) {
 	// 1. 由仓储层统一截断并更新反馈。
 	return s.repository.UpdatePromptFeedback(ctx, articleID, feedback)
@@ -404,7 +404,7 @@ func (s *Service) UpdatePromptFeedback(ctx context.Context, articleID int64, fee
 // Report 构建信号榜和短期市场分布。
 // 输入：ctx 控制查询，targetDays 默认 60，marketDays 默认 3。
 // 输出：返回完整分析报告；失败时返回错误。
-// 副作用：只读 MySQL。
+// 副作用：只读 SQLite。
 func (s *Service) Report(ctx context.Context, targetDays, marketDays int) (Report, error) {
 	// 1. 分别读取信号榜和市场判断的独立日期范围。
 	if targetDays < 1 {

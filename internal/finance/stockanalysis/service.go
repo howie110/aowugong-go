@@ -16,7 +16,7 @@ type Service struct {
 }
 
 // NewService 创建股票仓位分析服务。
-// 输入：repository 提供受限 MySQL 查询。
+// 输入：repository 提供受限 SQLite 查询。
 // 输出：返回分析服务。
 // 副作用：无。
 func NewService(repository *Repository) *Service {
@@ -25,9 +25,9 @@ func NewService(repository *Repository) *Service {
 }
 
 // Summary 生成股票仓位分析页顶部摘要。
-// 输入：ctx 控制 MySQL 查询。
+// 输入：ctx 控制 SQLite 查询。
 // 输出：返回四项指标；失败时返回带业务上下文的错误。
-// 副作用：只读 MySQL。
+// 副作用：只读 SQLite。
 func (s *Service) Summary(ctx context.Context) (Summary, error) {
 	// 1. 复用完整报告，保证摘要和图表口径一致。
 	report, err := s.Report(ctx, 500)
@@ -60,9 +60,9 @@ func (s *Service) Summary(ctx context.Context) (Summary, error) {
 }
 
 // Report 生成股票仓位完整分析报告。
-// 输入：ctx 控制 MySQL 查询，limit 限制最近快照数量。
+// 输入：ctx 控制 SQLite 查询，limit 限制最近快照数量。
 // 输出：返回趋势、账户、持仓、洞察和变化；失败时返回错误。
-// 副作用：只读 MySQL。
+// 副作用：只读 SQLite。
 func (s *Service) Report(ctx context.Context, limit int) (Report, error) {
 	// 1. 读取受限快照并聚合时间线和账户。
 	rows, err := s.repository.snapshots(ctx, limit)

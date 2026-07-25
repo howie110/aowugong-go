@@ -76,7 +76,7 @@ type SignalGroupRebuildResult struct {
 // RebuildSignalGroups 使用 DeepSeek 全局收敛现有概念组和未归类标的。
 // 输入：ctx 控制查询和模型调用，days 是统计范围，apply 控制是否替换线上词典。
 // 输出：返回可审查的重组摘要；模型结果不完整或不安全时返回错误。
-// 副作用：调用 DeepSeek；apply 为 true 时在单个事务内重建 MySQL 概念词典。
+// 副作用：调用 DeepSeek；apply 为 true 时在单个事务内重建 SQLite 概念词典。
 func (s *Service) RebuildSignalGroups(ctx context.Context, days int, apply bool) (SignalGroupRebuildResult, error) {
 	// 1. 读取完整旧词典和统计范围内的原始信号，构造不丢失来源的全局输入。
 	if days < 1 {

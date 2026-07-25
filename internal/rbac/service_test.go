@@ -9,6 +9,9 @@ import (
 )
 
 // TestServiceSyncDefaultsIsIdempotent 验证默认角色和权限按 code 幂等同步。
+// 输入：空临时 SQLite 和两次默认同步。
+// 输出：角色与权限数量稳定且无重复。
+// 副作用：创建并写入临时 SQLite。
 func TestServiceSyncDefaultsIsIdempotent(t *testing.T) {
 	// 1. 连续同步两次默认数据。
 	service, db := newTestService(t)
@@ -33,6 +36,9 @@ func TestServiceSyncDefaultsIsIdempotent(t *testing.T) {
 }
 
 // TestServiceAdminHasEveryPermission 验证 admin 角色天然拥有全部权限。
+// 输入：分配 admin 角色的测试用户。
+// 输出：用户拥有任意默认页面权限。
+// 副作用：创建并写入临时 SQLite。
 func TestServiceAdminHasEveryPermission(t *testing.T) {
 	// 1. 同步默认 RBAC 数据并创建管理员用户。
 	service, db := newTestService(t)
@@ -59,6 +65,9 @@ func TestServiceAdminHasEveryPermission(t *testing.T) {
 }
 
 // TestServiceInvestorGetsOnlyArticleAnalysis 验证 investor 仅有文章分析权限。
+// 输入：分配 investor 角色的测试用户。
+// 输出：文章分析权限通过，管理权限被拒绝。
+// 副作用：创建并写入临时 SQLite。
 func TestServiceInvestorGetsOnlyArticleAnalysis(t *testing.T) {
 	// 1. 同步默认 RBAC 数据并创建投资者用户。
 	service, db := newTestService(t)
@@ -84,9 +93,12 @@ func TestServiceInvestorGetsOnlyArticleAnalysis(t *testing.T) {
 	}
 }
 
-// newTestService 创建使用隔离 MySQL 数据库的 RBAC 服务。
+// newTestService 创建使用隔离 SQLite 数据库的 RBAC 服务。
+// 输入：t 管理临时数据库生命周期。
+// 输出：返回 RBAC 服务和底层 SQLite。
+// 副作用：创建、迁移并注册清理临时 SQLite。
 func newTestService(t *testing.T) (*Service, *sql.DB) {
-	// 1. 打开并迁移独立的 MySQL 测试 schema。
+	// 1. 打开并迁移独立的 SQLite 测试 schema。
 	t.Helper()
 	db := testdatabase.Open(t)
 
@@ -95,6 +107,9 @@ func newTestService(t *testing.T) (*Service, *sql.DB) {
 }
 
 // insertTestUser 写入供 RBAC 场景使用的用户记录。
+// 输入：测试句柄、数据库、用户名和邮箱。
+// 输出：返回新用户主键。
+// 副作用：向临时 SQLite 插入用户。
 func insertTestUser(t *testing.T, db *sql.DB, username, email string) int64 {
 	// 1. 写入无角色的活动用户并返回自增标识。
 	t.Helper()

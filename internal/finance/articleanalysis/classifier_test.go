@@ -231,7 +231,7 @@ func TestBuildSignalClassificationPromptRequiresCanonicalIndustryRollup(t *testi
 // TestServiceClassifySignalAliasesPersistsUnknownNames 验证任务内部批量分类并持久化未知名称。
 // 输入：六十天内的券商和中信证券信号、空概念词典及固定 DeepSeek 响应。
 // 输出：新增两个别名并把两者写入同一证券行业组。
-// 副作用：执行模拟 MySQL 查询、事务写入和模型调用。
+// 副作用：执行模拟 SQLite 查询、事务写入和模型调用。
 func TestServiceClassifySignalAliasesPersistsUnknownNames(t *testing.T) {
 	// 1. 准备统计行、空概念词典和完整分类响应。
 	db, mock, err := sqlmock.New()
@@ -247,13 +247,13 @@ func TestServiceClassifySignalAliasesPersistsUnknownNames(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "canonical_name", "group_type", "alias_name"}))
 	gateway := &fixedSignalClassificationGateway{response: `{"decisions":[{"name":"券商","action":"create","canonical_name":"证券行业","type":"sector","confidence":0.98},{"name":"中信证券","action":"create","canonical_name":"证券行业","type":"sector","confidence":0.96}]}`}
 	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO investment_signal_group").
+	mock.ExpectQuery("INSERT INTO investment_signal_group").
 		WithArgs("证券行业", "sector", "deepseek", "test-model").
-		WillReturnResult(sqlmock.NewResult(7, 1))
-	mock.ExpectExec("INSERT IGNORE INTO investment_signal_alias").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
+	mock.ExpectExec("INSERT OR IGNORE INTO investment_signal_alias").
 		WithArgs(int64(7), "券商", "券商", 0.98, "deepseek", "test-model").
 		WillReturnResult(sqlmock.NewResult(11, 1))
-	mock.ExpectExec("INSERT IGNORE INTO investment_signal_alias").
+	mock.ExpectExec("INSERT OR IGNORE INTO investment_signal_alias").
 		WithArgs(int64(7), "中信证券", "中信证券", 0.96, "deepseek", "test-model").
 		WillReturnResult(sqlmock.NewResult(12, 1))
 	mock.ExpectCommit()

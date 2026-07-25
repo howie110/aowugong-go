@@ -12,6 +12,9 @@ import (
 )
 
 // TestWeReadClientRetriesLatestSkillVersion 验证网关提示新版本时只自动重试一次。
+// 输入：先返回版本提示、再返回成功结果的本地测试网关。
+// 输出：客户端使用最新版本完成第二次请求。
+// 副作用：启动本地 HTTP 测试服务。
 func TestWeReadClientRetriesLatestSkillVersion(t *testing.T) {
 	// 1. 创建先返回升级信息、再返回业务数据的测试网关。
 	callCount := 0
@@ -44,6 +47,9 @@ func TestWeReadClientRetriesLatestSkillVersion(t *testing.T) {
 }
 
 // TestWeReadClientRequiresAPIKey 验证未配置密钥时不会请求外部网关。
+// 输入：缺少 API Key 的微信读书配置。
+// 输出：请求在联网前返回配置错误。
+// 副作用：无。
 func TestWeReadClientRequiresAPIKey(t *testing.T) {
 	// 1. 创建空密钥客户端并尝试调用。
 	client := NewWeReadClient(config.WeRead{GatewayURL: "http://127.0.0.1", SkillVersion: "1.0.0"}, &http.Client{Timeout: time.Second})

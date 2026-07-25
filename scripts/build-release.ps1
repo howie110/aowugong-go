@@ -29,6 +29,7 @@ try {
     $env:GOOS = "linux"
     $env:GOARCH = "amd64"
     go build -trimpath -ldflags "-s -w" -o (Join-Path $PackageDir "aowugong") ./cmd/aowugong
+    go build -trimpath -ldflags "-s -w" -o (Join-Path $PackageDir "aowugong-migrate") ./cmd/migrate
     Copy-Item "web/dist" (Join-Path $PackageDir "web/dist") -Recurse
     Copy-Item "migrations", "configs", "init", "scripts" $PackageDir -Recurse
     Copy-Item "README.md" $PackageDir

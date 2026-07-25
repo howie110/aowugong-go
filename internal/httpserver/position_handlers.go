@@ -36,7 +36,7 @@ func registerPositionRoutes(router chi.Router, authService *auth.Service, rbacSe
 // summary 返回股票仓位导入页面摘要。
 // 输入：request 已通过认证和仓位权限校验。
 // 输出：写入摘要 JSON。
-// 副作用：读取 MySQL 并写入 HTTP 响应。
+// 副作用：读取 SQLite 并写入 HTTP 响应。
 func (h positionHandlers) summary(w http.ResponseWriter, request *http.Request) {
 	// 1. 读取统一仓位摘要并转换服务错误。
 	result, err := h.service.Summary(request.Context())
@@ -50,7 +50,7 @@ func (h positionHandlers) summary(w http.ResponseWriter, request *http.Request) 
 // recent 返回最近股票仓位导入记录。
 // 输入：查询参数 limit 可选，范围 1 到 100。
 // 输出：写入 Snapshot 数组。
-// 副作用：读取 MySQL 并写入 HTTP 响应。
+// 副作用：读取 SQLite 并写入 HTTP 响应。
 func (h positionHandlers) recent(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析并约束记录上限。
 	limit := 20
@@ -75,7 +75,7 @@ func (h positionHandlers) recent(w http.ResponseWriter, request *http.Request) {
 // upload 读取一批 multipart 截图并调用统一仓位处理服务。
 // 输入：表单包含 files、snapshot_date、broker_name 和 source_app。
 // 输出：写入每个文件的成功或失败结果。
-// 副作用：读取请求体、写入文件和 MySQL，并调用阿里云 OCR。
+// 副作用：读取请求体、写入文件和 SQLite，并调用阿里云 OCR。
 func (h positionHandlers) upload(w http.ResponseWriter, request *http.Request) {
 	// 1. 限制总请求大小并解析 multipart 表单。
 	request.Body = http.MaxBytesReader(w, request.Body, maxPositionRequestBytes)

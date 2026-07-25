@@ -83,13 +83,13 @@ type Result struct {
 
 // Registry 保存唯一任务定义并提供统一执行包装器。
 type Registry struct {
-	db                *sql.DB
-	notifier          Notifier
-	logger            *slog.Logger
-	mysqlAdvisoryLock bool
-	mutex             sync.Mutex
-	definitions       map[string]Definition
-	running           map[string]bool
+	db           *sql.DB
+	notifier     Notifier
+	logger       *slog.Logger
+	databaseLock bool
+	mutex        sync.Mutex
+	definitions  map[string]Definition
+	running      map[string]bool
 }
 
 // RegistryOption 调整任务注册表的基础设施行为。
@@ -111,7 +111,7 @@ func NewRegistry(db *sql.DB, notifier Notifier, logger *slog.Logger, options ...
 	}
 	registry := &Registry{
 		db: db, notifier: notifier, logger: logger,
-		mysqlAdvisoryLock: true, definitions: make(map[string]Definition), running: make(map[string]bool),
+		databaseLock: true, definitions: make(map[string]Definition), running: make(map[string]bool),
 	}
 
 	// 2. 应用测试或特殊基础设施显式提供的选项。
@@ -123,14 +123,14 @@ func NewRegistry(db *sql.DB, notifier Notifier, logger *slog.Logger, options ...
 	return registry
 }
 
-// WithoutMySQLAdvisoryLock 关闭跨进程 MySQL 建议锁。
+// WithoutDatabaseLock 关闭跨进程 SQLite 任务锁。
 // 输入：无。
-// 输出：返回只供非 MySQL 测试夹具使用的注册表选项。
+// 输出：返回只供 SQL mock 测试使用的注册表选项。
 // 副作用：应用后任务仅保留当前进程内互斥，不得用于正式运行时。
-func WithoutMySQLAdvisoryLock() RegistryOption {
+func WithoutDatabaseLock() RegistryOption {
 	// 1. 返回显式关闭数据库锁的配置函数。
 	return func(registry *Registry) {
-		registry.mysqlAdvisoryLock = false
+		registry.databaseLock = false
 	}
 }
 
@@ -190,7 +190,7 @@ func (r *Registry) Definitions() []Definition {
 // Run 通过统一包装器执行一个已注册任务。
 // 输入：ctx 控制调用，name 是任务名，source 是 scheduler/manual/cli。
 // 输出：返回执行状态；并发、超时、panic 或业务失败时返回错误。
-// 副作用：执行任务、写 MySQL、记录日志，失败时发送微信通知。
+// 副作用：执行任务、写 SQLite、记录日志，失败时发送微信通知。
 func (r *Registry) Run(ctx context.Context, name string, source Source) (Result, error) {
 	// 1. 查找定义并原子获取同名任务执行权。
 	definition, err := r.acquire(name)
@@ -206,8 +206,8 @@ func (r *Registry) Run(ctx context.Context, name string, source Source) (Result,
 		return Result{}, fmt.Errorf("任务 %s 仅允许手动或 CLI 执行", definition.Name)
 	}
 	unlockDatabase := func() error { return nil }
-	if r.mysqlAdvisoryLock {
-		unlockDatabase, err = acquireMySQLLock(ctx, r.db, definition.ConcurrencyKey)
+	if r.databaseLock {
+		unlockDatabase, err = acquireSQLiteLock(ctx, r.db, definition.ConcurrencyKey, definition.Timeout)
 		if err != nil {
 			r.release(definition.ConcurrencyKey)
 			return Result{}, err
@@ -323,7 +323,7 @@ func execute(ctx context.Context, job JobFunc) (message string, err error) {
 // startExecution 写入任务开始记录并返回主键。
 // 输入：ctx 控制写入，name、source 和 startedAt 描述执行。
 // 输出：返回自增主键；写入失败时返回错误。
-// 副作用：向 MySQL job_execution 新增 running 记录。
+// 副作用：向 SQLite job_execution 新增 running 记录。
 func (r *Registry) startExecution(ctx context.Context, name string, source Source, startedAt time.Time) (int64, error) {
 	// 1. 写入统一开始状态并读取主键。
 	result, err := r.db.ExecContext(ctx, `INSERT INTO job_execution(
@@ -342,7 +342,7 @@ func (r *Registry) startExecution(ctx context.Context, name string, source Sourc
 // finishExecution 更新任务最终状态、耗时、消息和错误。
 // 输入：ctx 控制写入，result 是执行结果，runErr 是业务错误。
 // 输出：成功返回 nil，更新失败返回错误。
-// 副作用：更新 MySQL job_execution 指定记录。
+// 副作用：更新 SQLite job_execution 指定记录。
 func (r *Registry) finishExecution(ctx context.Context, result Result, runErr error) error {
 	// 1. 将可选错误转换为 SQL NULL 并更新唯一执行记录。
 	var errorMessage any

@@ -8,6 +8,9 @@ import (
 )
 
 // TestServiceSaveUsesDateUpsert 验证同一天页面录入会插入、跳过或覆盖。
+// 输入：同一日期的新增、相同和不同输赢金额。
+// 输出：分别得到 inserted、unchanged 和 updated。
+// 副作用：创建并写入临时 SQLite。
 func TestServiceSaveUsesDateUpsert(t *testing.T) {
 	// 1. 首次保存日期应插入记录。
 	service := newTestService(t)
@@ -39,6 +42,9 @@ func TestServiceSaveUsesDateUpsert(t *testing.T) {
 }
 
 // TestServiceReportMatchesLegacyCalculations 验证摘要、趋势和周期统计沿用旧项目口径。
+// 输入：跨多个日期的固定麻将战绩。
+// 输出：报告摘要、累计趋势和周期统计符合既有规则。
+// 副作用：创建并写入临时 SQLite。
 func TestServiceReportMatchesLegacyCalculations(t *testing.T) {
 	// 1. 写入一胜一负一平的三天记录。
 	service := newTestService(t)
@@ -71,9 +77,12 @@ func TestServiceReportMatchesLegacyCalculations(t *testing.T) {
 	}
 }
 
-// newTestService 创建使用隔离 MySQL 的麻将测试服务。
+// newTestService 创建使用隔离 SQLite 的麻将测试服务。
+// 输入：t 管理临时数据库生命周期。
+// 输出：返回已连接临时仓储的麻将服务。
+// 副作用：创建并迁移临时 SQLite。
 func newTestService(t *testing.T) *Service {
-	// 1. 打开隔离 MySQL schema 并执行完整迁移。
+	// 1. 打开隔离 SQLite schema 并执行完整迁移。
 	t.Helper()
 	db := testdatabase.Open(t)
 

@@ -1,6 +1,6 @@
 [Unit]
 Description=Aowugong Go modular monolith
-After=network-online.target local-fs.target docker.service mysqld.service
+After=network-online.target local-fs.target
 Wants=network-online.target
 
 [Service]
@@ -9,6 +9,7 @@ User=@RUN_USER@
 Group=@RUN_GROUP@
 WorkingDirectory=@APP_ROOT@/current
 EnvironmentFile=@APP_ROOT@/shared/.env
+Environment=TZ=Asia/Shanghai
 ExecStart=@APP_ROOT@/current/aowugong
 Restart=on-failure
 RestartSec=5

@@ -48,7 +48,7 @@ func registerFinanceRoutes(router chi.Router, authService *auth.Service, rbacSer
 		writeJSON(w, http.StatusOK, service.NotificationsSummary())
 	})
 
-	// 5. 数据摘要查询 MySQL 并统一处理失败响应。
+	// 5. 数据摘要查询 SQLite 并统一处理失败响应。
 	registerFinanceGET(router, authService, rbacService, "/api/v1/finance/data/summary", rbac.PermissionFinanceData, func(w http.ResponseWriter, request *http.Request) {
 		result, err := service.DataSummary(request.Context())
 		if err != nil {

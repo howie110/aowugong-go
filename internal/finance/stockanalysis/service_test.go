@@ -11,7 +11,7 @@ import (
 // TestServiceBuildsPortfolioReportAndTreatsStandardBondAsCash 验证组合聚合与现金等价物口径。
 // 输入：两日两个账户的资产快照，最新日包含“标准券”持仓。
 // 输出：报告正确聚合账户，并把标准券市值从股票仓位移入现金。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestServiceBuildsPortfolioReportAndTreatsStandardBondAsCash(t *testing.T) {
 	// 1. 创建完整迁移数据库并写入四条仓位快照。
 	ctx := context.Background()
@@ -62,7 +62,7 @@ func TestServiceBuildsPortfolioReportAndTreatsStandardBondAsCash(t *testing.T) {
 // seedStockAnalysisSnapshot 写入仓位分析测试使用的单账户快照。
 // 输入：日期、账户、资产金额和可选持仓明细。
 // 输出：无，写入失败时终止测试。
-// 副作用：写入测试 MySQL 的资产和持仓表。
+// 副作用：写入测试 SQLite 的资产和持仓表。
 func seedStockAnalysisSnapshot(t *testing.T, ctx context.Context, repository *position.Repository, date, suffix string, total, market, cash float64, holdings []position.Holding) {
 	// 1. 组装账户快照并仅在提供明细时标记解析成功。
 	t.Helper()

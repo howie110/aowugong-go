@@ -205,7 +205,7 @@ func TestRegroupSignalSourcesRetriesWhenSingletonGroupsDominate(t *testing.T) {
 // TestServiceRebuildSignalGroupsDryRunDoesNotWriteDatabase 验证全局归类支持先只读预演。
 // 输入：一个已有证券组、一个未知黄金标的和固定的全局归类响应。
 // 输出：返回两个目标概念组及两个别名，但 Applied 为 false 且不执行替换 SQL。
-// 副作用：读取模拟 MySQL 并调用固定模型，不写数据库。
+// 副作用：读取模拟 SQLite 并调用固定模型，不写数据库。
 func TestServiceRebuildSignalGroupsDryRunDoesNotWriteDatabase(t *testing.T) {
 	// 1. 准备统计行、现有概念组和全覆盖模型响应。
 	db, mock, err := sqlmock.New()
@@ -246,7 +246,7 @@ func TestServiceRebuildSignalGroupsDryRunDoesNotWriteDatabase(t *testing.T) {
 // TestRepositoryReplaceSignalGroupsAtomicallyRebuildsDictionary 验证全局词典只在单个事务中整体替换。
 // 输入：一个新证券行业组和两个原始别名。
 // 输出：先清空旧映射，再写入新组与别名并提交。
-// 副作用：执行模拟 MySQL 删除和插入事务。
+// 副作用：执行模拟 SQLite 删除和插入事务。
 func TestRepositoryReplaceSignalGroupsAtomicallyRebuildsDictionary(t *testing.T) {
 	// 1. 声明原子替换的全部 SQL 预期。
 	db, mock, err := sqlmock.New()

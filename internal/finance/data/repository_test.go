@@ -10,7 +10,7 @@ import (
 // TestRepositoryReplacesDailyDateAndQueriesByRange 验证日线按交易日原子替换和范围查询。
 // 输入：同一交易日的两批日线以及一个代码和日期范围。
 // 输出：旧批次被完整替换，查询仅返回目标代码范围内的数据。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestRepositoryReplacesDailyDateAndQueriesByRange(t *testing.T) {
 	// 1. 创建完整迁移数据库和日线仓储。
 	ctx := context.Background()
@@ -52,7 +52,7 @@ func TestRepositoryReplacesDailyDateAndQueriesByRange(t *testing.T) {
 // TestRepositoryListsMissingOpenDates 验证同步任务只选择缺少日线的开市日期。
 // 输入：三天交易日历，其中一天休市，一天已有日线。
 // 输出：只返回仍缺失的开市日。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestRepositoryListsMissingOpenDates(t *testing.T) {
 	// 1. 创建数据库并写入交易日历与一个已有交易日。
 	ctx := context.Background()

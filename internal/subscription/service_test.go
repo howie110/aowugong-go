@@ -9,6 +9,9 @@ import (
 )
 
 // TestServiceCRUDAndDerivedStatus 验证订阅增删改查和动态到期状态。
+// 输入：固定业务日期和一条订阅写入请求。
+// 输出：新增、更新、查询和删除结果及派生状态正确。
+// 副作用：创建并写入临时 SQLite。
 func TestServiceCRUDAndDerivedStatus(t *testing.T) {
 	// 1. 创建固定当前日期的订阅服务并新增一条记录。
 	service := newTestService(t)
@@ -63,6 +66,9 @@ func TestServiceCRUDAndDerivedStatus(t *testing.T) {
 }
 
 // TestServiceListExpiringUsesExactReminderDay 验证到期提醒只匹配正好提前指定天数的记录。
+// 输入：固定业务日期和多个不同到期日订阅。
+// 输出：只返回精确命中提醒日的记录。
+// 副作用：创建并写入临时 SQLite。
 func TestServiceListExpiringUsesExactReminderDay(t *testing.T) {
 	// 1. 使用默认六条订阅并把当前日期固定在一条记录到期前十天。
 	service := newTestService(t)
@@ -78,9 +84,12 @@ func TestServiceListExpiringUsesExactReminderDay(t *testing.T) {
 	}
 }
 
-// newTestService 创建使用隔离 MySQL 的订阅测试服务。
+// newTestService 创建使用隔离 SQLite 的订阅测试服务。
+// 输入：t 管理临时数据库生命周期。
+// 输出：返回已连接临时仓储的订阅服务。
+// 副作用：创建并迁移临时 SQLite。
 func newTestService(t *testing.T) *Service {
-	// 1. 打开隔离 MySQL schema 并执行完整迁移。
+	// 1. 打开隔离 SQLite schema 并执行完整迁移。
 	t.Helper()
 	db := testdatabase.Open(t)
 

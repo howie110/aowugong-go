@@ -12,7 +12,7 @@ import (
 // TestArticleAnalysisArticlesAcceptsFullSignalWindowLimit 验证文章接口允许页面读取完整六十天窗口。
 // 输入：携带 limit=5000 的文章列表请求和空查询结果。
 // 输出：返回 200，仓储收到五千条上限。
-// 副作用：执行模拟 MySQL 查询并写入测试 HTTP 响应。
+// 副作用：执行模拟 SQLite 查询并写入测试 HTTP 响应。
 func TestArticleAnalysisArticlesAcceptsFullSignalWindowLimit(t *testing.T) {
 	// 1. 准备期望五千条上限的模拟文章查询。
 	db, mock, err := sqlmock.New()

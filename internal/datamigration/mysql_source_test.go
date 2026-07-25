@@ -1,4 +1,4 @@
-package database
+package datamigration
 
 import (
 	"testing"
@@ -13,9 +13,8 @@ import (
 // 副作用：无，不建立真实数据库连接。
 func TestNewMySQLDriverConfigBuildsSafeRuntimeOptions(t *testing.T) {
 	// 1. 构造本地 SSH 隧道对应的数据库配置。
-	cfg := config.Database{
-		Host: "127.0.0.1", Port: 13306, Name: "aowugong", User: "worker", Password: "secret",
-		MaxOpenConns: 8, MaxIdleConns: 2, ConnMaxLifetime: 5 * time.Minute,
+	cfg := config.MySQLSource{
+		Host: "127.0.0.1", Port: 13306, Database: "aowugong", User: "worker", Password: "secret",
 	}
 
 	// 2. 转换并核对不会改变仓储语义的驱动参数。
@@ -43,7 +42,9 @@ func TestNewMySQLDriverConfigBuildsSafeRuntimeOptions(t *testing.T) {
 // 副作用：无，不建立真实数据库连接。
 func TestNewMySQLDriverConfigRejectsIncompleteIdentity(t *testing.T) {
 	// 1. 构造缺少密码的配置并执行转换。
-	_, err := newMySQLDriverConfig(config.Database{Host: "127.0.0.1", Port: 3306, Name: "aowugong", User: "app"})
+	_, err := newMySQLDriverConfig(config.MySQLSource{
+		Host: "127.0.0.1", Port: 3306, Database: "aowugong", User: "app",
+	})
 
 	// 2. 断言在驱动初始化前被拒绝。
 	if err == nil {

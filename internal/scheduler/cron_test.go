@@ -42,7 +42,7 @@ func TestCronSchedulerRegistersDefinitionsAndStops(t *testing.T) {
 // 副作用：短暂启动并停止测试 Cron。
 func TestCronSchedulerSkipsManualOnlyDefinitions(t *testing.T) {
 	// 1. 注册只供页面或 CLI 调用的任务。
-	registry := NewRegistry(nil, nil, nil, WithoutMySQLAdvisoryLock())
+	registry := NewRegistry(nil, nil, nil, WithoutDatabaseLock())
 	if err := registry.Register(Definition{
 		Name: "manual_only", ManualOnly: true, Timeout: time.Minute,
 		Run: func(context.Context) (string, error) { return "ok", nil },
@@ -63,7 +63,7 @@ func TestCronSchedulerSkipsManualOnlyDefinitions(t *testing.T) {
 // TestCronSchedulerStopCancelsRunningJob 验证停止调度器会取消已经派发的任务上下文。
 // 输入：一个每秒触发并等待上下文取消的任务。
 // 输出：Stop 取消任务并在关闭时限内返回成功。
-// 副作用：启动短生命周期 Cron 并写入测试 MySQL 执行记录。
+// 副作用：启动短生命周期 Cron 并写入测试 SQLite 执行记录。
 func TestCronSchedulerStopCancelsRunningJob(t *testing.T) {
 	// 1. 注册每秒触发的协作任务并等待它开始执行。
 	registry := newTestRegistry(t, &fakeNotifier{})

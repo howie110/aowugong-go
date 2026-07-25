@@ -1,24 +1,40 @@
 package database
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
+	"time"
 
-	"github.com/go-sql-driver/mysql"
+	"github.com/howiedata/aowugong-go/internal/config"
 )
 
-// TestIsDuplicateKeyRecognizesWrappedMySQLError 验证唯一键错误经过业务包装后仍可识别。
-// 输入：包装后的 MySQL 1062 错误和普通错误。
-// 输出：仅 1062 返回 true。
-// 副作用：无。
-func TestIsDuplicateKeyRecognizesWrappedMySQLError(t *testing.T) {
-	// 1. 构造驱动唯一键错误并增加一层业务上下文。
-	duplicate := fmt.Errorf("新增记录: %w", &mysql.MySQLError{Number: 1062, Message: "duplicate"})
+// TestIsDuplicateKeyRecognizesWrappedSQLiteError 验证唯一键错误经过业务包装后仍可识别。
+// 输入：SQLite 唯一键冲突和普通错误。
+// 输出：仅 SQLite 约束冲突返回 true。
+// 副作用：创建并写入测试临时 SQLite 文件。
+func TestIsDuplicateKeyRecognizesWrappedSQLiteError(t *testing.T) {
+	// 1. 创建唯一索引并触发真实 SQLite 驱动错误。
+	db, err := OpenSQLite(context.Background(), config.Database{
+		Path: filepath.Join(t.TempDir(), "duplicate.db"), MaxOpenConns: 1,
+		MaxIdleConns: 1, BusyTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE duplicate_test(name TEXT NOT NULL UNIQUE);
+		INSERT INTO duplicate_test(name) VALUES('same')`); err != nil {
+		t.Fatalf("prepare duplicate table: %v", err)
+	}
+	_, err = db.Exec("INSERT INTO duplicate_test(name) VALUES(?)", "same")
+	duplicate := fmt.Errorf("新增记录: %w", err)
 
 	// 2. 断言唯一键和普通错误被准确区分。
 	if !IsDuplicateKey(duplicate) {
-		t.Error("IsDuplicateKey(1062) = false, want true")
+		t.Error("IsDuplicateKey(SQLite constraint) = false, want true")
 	}
 	if IsDuplicateKey(errors.New("unique constraint")) {
 		t.Error("IsDuplicateKey(text error) = true, want false")

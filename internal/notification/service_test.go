@@ -43,8 +43,8 @@ func (s *fakeSender) SendImage(_ context.Context, _, _ string) (map[string]any, 
 
 // TestServiceFormatsTextAndWritesNotificationLog 验证统一标题格式和发送日志。
 // 输入：三级标题、正文和成功的模拟 OpeniLink 发送器。
-// 输出：发送统一文本，并在 MySQL 写入 success 日志。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 输出：发送统一文本，并在 SQLite 写入 success 日志。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestServiceFormatsTextAndWritesNotificationLog(t *testing.T) {
 	// 1. 创建数据库、模拟发送器和通知服务。
 	ctx := context.Background()
@@ -72,8 +72,8 @@ func TestServiceFormatsTextAndWritesNotificationLog(t *testing.T) {
 
 // TestServiceLogsSendFailureAndReturnsError 验证外部发送失败会入库并向调用方返回。
 // 输入：返回网络错误的模拟发送器。
-// 输出：返回错误并在 MySQL 写入 failed 日志和错误信息。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 输出：返回错误并在 SQLite 写入 failed 日志和错误信息。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestServiceLogsSendFailureAndReturnsError(t *testing.T) {
 	// 1. 创建数据库和预设失败发送器。
 	ctx := context.Background()

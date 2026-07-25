@@ -9,6 +9,9 @@ import (
 )
 
 // TestLoadUsesDevelopmentDefaults 验证开发环境的默认运行配置。
+// 输入：空环境查询函数。
+// 输出：返回 2345、72 小时令牌和 SQLite 默认参数。
+// 副作用：无。
 func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 	// 1. 使用空环境加载默认配置。
 	cfg, err := Load(newLookup(nil))
@@ -24,66 +27,73 @@ func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 		t.Errorf("HTTP.Address = %q, want 0.0.0.0:2345", cfg.HTTP.Address)
 	}
 
-	// 3. 断言令牌有效期和默认 MySQL 连接参数。
+	// 3. 断言令牌有效期和默认 SQLite 连接参数。
 	if cfg.Auth.TokenLifetime != 72*time.Hour {
 		t.Errorf("TokenLifetime = %s, want %s", cfg.Auth.TokenLifetime, 72*time.Hour)
 	}
-	if cfg.Database.Host != "127.0.0.1" || cfg.Database.Port != 3306 {
-		t.Errorf("Database address = %s:%d, want 127.0.0.1:3306", cfg.Database.Host, cfg.Database.Port)
+	if cfg.Database.Path != filepath.Clean("storage/data/aowugong.db") {
+		t.Errorf("Database.Path = %q, want storage/data/aowugong.db", cfg.Database.Path)
 	}
-	if cfg.Database.Name != "aowugong" || cfg.Database.User != "aowugong" {
-		t.Errorf("Database identity = %s/%s, want aowugong/aowugong", cfg.Database.Name, cfg.Database.User)
-	}
-	if cfg.Database.MaxOpenConns != 8 || cfg.Database.MaxIdleConns != 2 {
-		t.Errorf("Database pool = %d/%d, want 8/2", cfg.Database.MaxOpenConns, cfg.Database.MaxIdleConns)
+	if cfg.Database.MaxOpenConns != 4 || cfg.Database.MaxIdleConns != 2 || cfg.Database.BusyTimeout != 5*time.Second {
+		t.Errorf("Database = pool %d/%d timeout %s, want 4/2 and 5s",
+			cfg.Database.MaxOpenConns, cfg.Database.MaxIdleConns, cfg.Database.BusyTimeout)
 	}
 }
 
-// TestEnvironmentExampleUsesMySQLSettings 验证环境示例只提供 MySQL 运行配置。
-func TestEnvironmentExampleUsesMySQLSettings(t *testing.T) {
+// TestEnvironmentExampleUsesSQLiteRuntimeSettings 验证环境示例以 SQLite 作为运行时数据库。
+// 输入：仓库 configs/.env.example。
+// 输出：示例包含 SQLite 运行字段和一次性 MySQL 来源字段。
+// 副作用：读取配置模板文件。
+func TestEnvironmentExampleUsesSQLiteRuntimeSettings(t *testing.T) {
 	// 1. 读取仓库中的环境变量示例。
 	content, err := os.ReadFile(filepath.Join("..", "..", "configs", ".env.example"))
 	if err != nil {
 		t.Fatalf("os.ReadFile() error = %v", err)
 	}
 
-	// 2. 断言示例包含 MySQL 字段且不再暴露 SQLite 运行路径。
-	for _, key := range []string{"AOWUGONG_MYSQL_HOST=", "AOWUGONG_MYSQL_PORT=", "AOWUGONG_MYSQL_DATABASE=", "AOWUGONG_MYSQL_USER=", "AOWUGONG_MYSQL_PASSWORD="} {
+	// 2. 断言示例包含 SQLite 运行字段和一次性 MySQL 迁移来源。
+	for _, key := range []string{
+		"AOWUGONG_SQLITE_PATH=", "AOWUGONG_SQLITE_BUSY_TIMEOUT_MS=",
+		"AOWUGONG_MYSQL_HOST=", "AOWUGONG_MYSQL_PORT=", "AOWUGONG_MYSQL_DATABASE=",
+	} {
 		if !strings.Contains(string(content), key) {
 			t.Errorf(".env.example missing %s", key)
 		}
 	}
-	if strings.Contains(string(content), "AOWUGONG_DATABASE_PATH=") {
-		t.Error(".env.example still contains SQLite database path")
-	}
 }
 
-// TestLoadUsesMySQLOverrides 验证 MySQL 地址、身份和连接池均可由环境变量覆盖。
-func TestLoadUsesMySQLOverrides(t *testing.T) {
-	// 1. 提供本地 SSH 隧道和受限任务账号配置。
+// TestLoadUsesSQLiteAndMigrationOverrides 验证运行库和一次性迁移来源可分别覆盖。
+// 输入：完整 SQLite 和 MySQL 环境变量映射。
+// 输出：配置分别保存运行路径、连接池和迁移来源。
+// 副作用：无。
+func TestLoadUsesSQLiteAndMigrationOverrides(t *testing.T) {
+	// 1. 提供 SQLite 运行参数和旧 MySQL 来源配置。
 	cfg, err := Load(newLookup(map[string]string{
-		"AOWUGONG_MYSQL_HOST":            "127.0.0.1",
-		"AOWUGONG_MYSQL_PORT":            "13306",
-		"AOWUGONG_MYSQL_DATABASE":        "aowugong",
-		"AOWUGONG_MYSQL_USER":            "aowugong_worker",
-		"AOWUGONG_MYSQL_PASSWORD":        "test-password",
-		"AOWUGONG_MYSQL_MAX_OPEN_CONNS":  "12",
-		"AOWUGONG_MYSQL_MAX_IDLE_CONNS":  "3",
-		"AOWUGONG_MYSQL_SKIP_MIGRATIONS": "true",
+		"AOWUGONG_SQLITE_PATH":            "tmp/test.db",
+		"AOWUGONG_SQLITE_MAX_OPEN_CONNS":  "6",
+		"AOWUGONG_SQLITE_MAX_IDLE_CONNS":  "1",
+		"AOWUGONG_SQLITE_BUSY_TIMEOUT_MS": "8000",
+		"AOWUGONG_SQLITE_SKIP_MIGRATIONS": "true",
+		"AOWUGONG_MYSQL_HOST":             "127.0.0.1",
+		"AOWUGONG_MYSQL_PORT":             "13306",
+		"AOWUGONG_MYSQL_DATABASE":         "aowugong",
+		"AOWUGONG_MYSQL_USER":             "aowugong_worker",
+		"AOWUGONG_MYSQL_PASSWORD":         "test-password",
 	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	// 2. 断言全部网络数据库参数已加载。
-	if cfg.Database.Host != "127.0.0.1" || cfg.Database.Port != 13306 {
-		t.Errorf("Database address = %s:%d, want 127.0.0.1:13306", cfg.Database.Host, cfg.Database.Port)
+	// 2. 断言运行库与迁移来源没有混用。
+	if cfg.Database.Path != filepath.Clean("tmp/test.db") {
+		t.Errorf("Database.Path = %q", cfg.Database.Path)
 	}
-	if cfg.Database.User != "aowugong_worker" || cfg.Database.Password != "test-password" {
-		t.Errorf("Database credentials were not loaded")
+	if cfg.Database.MaxOpenConns != 6 || cfg.Database.MaxIdleConns != 1 || cfg.Database.BusyTimeout != 8*time.Second {
+		t.Errorf("Database = %#v", cfg.Database)
 	}
-	if cfg.Database.MaxOpenConns != 12 || cfg.Database.MaxIdleConns != 3 {
-		t.Errorf("Database pool = %d/%d, want 12/3", cfg.Database.MaxOpenConns, cfg.Database.MaxIdleConns)
+	if cfg.Migration.MySQL.Host != "127.0.0.1" || cfg.Migration.MySQL.Port != 13306 ||
+		cfg.Migration.MySQL.User != "aowugong_worker" || cfg.Migration.MySQL.Password != "test-password" {
+		t.Errorf("Migration.MySQL = %#v", cfg.Migration.MySQL)
 	}
 	if !cfg.Database.SkipMigrations {
 		t.Error("Database.SkipMigrations = false, want true")
@@ -91,6 +101,9 @@ func TestLoadUsesMySQLOverrides(t *testing.T) {
 }
 
 // TestLoadUsesHTTPAddressOverride 验证 HTTP 地址可由环境变量覆盖。
+// 输入：自定义 AOWUGONG_HTTP_ADDRESS。
+// 输出：配置使用指定监听地址。
+// 副作用：无。
 func TestLoadUsesHTTPAddressOverride(t *testing.T) {
 	// 1. 提供开发环境的自定义监听地址。
 	cfg, err := Load(newLookup(map[string]string{
@@ -107,6 +120,9 @@ func TestLoadUsesHTTPAddressOverride(t *testing.T) {
 }
 
 // TestLoadRequiresProductionSecrets 验证生产环境要求两个密钥。
+// 输入：缺少 JWT 和加密密钥的生产环境。
+// 输出：加载返回生产密钥校验错误。
+// 副作用：无。
 func TestLoadRequiresProductionSecrets(t *testing.T) {
 	// 1. 以缺少密钥的生产环境加载配置。
 	_, err := Load(newLookup(map[string]string{
@@ -120,13 +136,15 @@ func TestLoadRequiresProductionSecrets(t *testing.T) {
 }
 
 // TestLoadAcceptsProductionSecrets 验证生产环境接受完整密钥配置。
+// 输入：包含 JWT 与加密密钥的生产环境。
+// 输出：配置加载成功并保留密钥。
+// 副作用：无。
 func TestLoadAcceptsProductionSecrets(t *testing.T) {
 	// 1. 以完整生产密钥加载配置。
 	cfg, err := Load(newLookup(map[string]string{
 		"AOWUGONG_ENV":            "production",
 		"AOWUGONG_JWT_SECRET":     "jwt-secret",
 		"AOWUGONG_ENCRYPTION_KEY": "encryption-key",
-		"AOWUGONG_MYSQL_PASSWORD": "mysql-password",
 	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -141,22 +159,29 @@ func TestLoadAcceptsProductionSecrets(t *testing.T) {
 	}
 }
 
-// TestLoadRequiresProductionDatabasePassword 验证生产环境拒绝缺少 MySQL 密码。
-func TestLoadRequiresProductionDatabasePassword(t *testing.T) {
-	// 1. 提供应用密钥但故意省略数据库密码。
+// TestLoadRejectsProductionDevelopmentUpstream 验证生产环境不能代理另一套 API。
+// 输入：配置开发上游地址的生产环境。
+// 输出：加载返回开发代理禁用错误。
+// 副作用：无。
+func TestLoadRejectsProductionDevelopmentUpstream(t *testing.T) {
+	// 1. 提供完整密钥并故意配置开发上游。
 	_, err := Load(newLookup(map[string]string{
-		"AOWUGONG_ENV":            "production",
-		"AOWUGONG_JWT_SECRET":     "jwt-secret",
-		"AOWUGONG_ENCRYPTION_KEY": "encryption-key",
+		"AOWUGONG_ENV":              "production",
+		"AOWUGONG_JWT_SECRET":       "jwt-secret",
+		"AOWUGONG_ENCRYPTION_KEY":   "encryption-key",
+		"AOWUGONG_DEV_UPSTREAM_URL": "http://8.138.123.59:2345",
 	}))
 
-	// 2. 断言配置加载失败且错误指向 MySQL。
-	if err == nil || !strings.Contains(err.Error(), "MySQL") {
-		t.Fatalf("Load() error = %v, want MySQL validation error", err)
+	// 2. 断言配置加载失败且错误指向开发上游。
+	if err == nil || !strings.Contains(err.Error(), "开发 API 上游") {
+		t.Fatalf("Load() error = %v, want development upstream validation error", err)
 	}
 }
 
 // TestLoadNormalizesPaths 验证静态目录路径会被清理。
+// 输入：包含冗余路径段的静态与 SQLite 路径。
+// 输出：配置返回清理后的平台路径。
+// 副作用：无。
 func TestLoadNormalizesPaths(t *testing.T) {
 	// 1. 提供包含相对路径片段的静态目录配置。
 	cfg, err := Load(newLookup(map[string]string{
@@ -173,6 +198,9 @@ func TestLoadNormalizesPaths(t *testing.T) {
 }
 
 // TestLoadUsesMigrationsDirectoryOverride 验证迁移目录可由环境变量覆盖并规范化。
+// 输入：包含冗余路径段的迁移目录环境变量。
+// 输出：配置返回清理后的迁移目录。
+// 副作用：无。
 func TestLoadUsesMigrationsDirectoryOverride(t *testing.T) {
 	// 1. 提供包含相对路径片段的迁移目录。
 	cfg, err := Load(newLookup(map[string]string{
@@ -190,6 +218,9 @@ func TestLoadUsesMigrationsDirectoryOverride(t *testing.T) {
 }
 
 // newLookup 创建供配置测试使用的环境查询函数。
+// 输入：环境键值映射。
+// 输出：返回符合 LookupEnv 契约的闭包。
+// 副作用：无。
 func newLookup(values map[string]string) LookupEnv {
 	// 1. 返回与操作系统环境兼容的查询函数。
 	return func(key string) (string, bool) {

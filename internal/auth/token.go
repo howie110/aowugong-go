@@ -14,12 +14,18 @@ type TokenManager struct {
 }
 
 // NewTokenManager 创建使用指定密钥与有效期的令牌管理器。
+// 输入：secret 是签名密钥，lifetime 是令牌有效期。
+// 输出：返回可签发和解析 JWT 的管理器。
+// 副作用：无。
 func NewTokenManager(secret string, lifetime time.Duration) *TokenManager {
 	// 1. 复制密钥并保留调用方指定的精确有效期。
 	return &TokenManager{secret: []byte(secret), lifetime: lifetime}
 }
 
 // Create 在指定时刻为用户名签发 JWT。
+// 输入：username 是令牌主体，issuedAt 是签发时间。
+// 输出：返回签名 JWT；配置或签名失败时返回错误。
+// 副作用：无。
 func (m *TokenManager) Create(username string, issuedAt time.Time) (string, error) {
 	// 1. 校验签发所需的最小输入。
 	if username == "" || len(m.secret) == 0 || m.lifetime <= 0 {
@@ -41,6 +47,9 @@ func (m *TokenManager) Create(username string, issuedAt time.Time) (string, erro
 }
 
 // Parse 在指定时刻校验并解析 JWT。
+// 输入：token 是 JWT 文本，now 是校验基准时间。
+// 输出：返回有效声明；签名、结构或期限无效时返回错误。
+// 副作用：无。
 func (m *TokenManager) Parse(token string, now time.Time) (Claims, error) {
 	// 1. 解析令牌并限制只接受 HS256 签名。
 	claims := &jwt.RegisteredClaims{}

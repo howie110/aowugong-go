@@ -12,14 +12,14 @@ import (
 const (
 	defaultEnvironment        = "development"
 	defaultHTTPAddress        = "0.0.0.0:2345"
+	defaultSQLitePath         = "storage/data/aowugong.db"
+	defaultSQLiteMaxOpenConns = 4
+	defaultSQLiteMaxIdleConns = 2
+	defaultSQLiteBusyTimeout  = 5 * time.Second
 	defaultMySQLHost          = "127.0.0.1"
 	defaultMySQLPort          = 3306
 	defaultMySQLDatabase      = "aowugong"
 	defaultMySQLUser          = "aowugong"
-	defaultMySQLMaxOpenConns  = 8
-	defaultMySQLMaxIdleConns  = 2
-	defaultMySQLConnLifetime  = 5 * time.Minute
-	defaultMySQLDumpCommand   = "mysqldump"
 	defaultStaticDir          = "web/dist"
 	defaultTokenLifetime      = 72 * time.Hour
 	defaultWorkNavigationPath = "storage/private/work/navigation.json"
@@ -37,6 +37,8 @@ type Config struct {
 	MigrationsDir string
 	HTTP          HTTP
 	Database      Database
+	Migration     Migration
+	Development   Development
 	Auth          Auth
 	Storage       Storage
 	Clients       Clients
@@ -50,18 +52,32 @@ type HTTP struct {
 	StaticDir string
 }
 
-// Database 描述 MySQL 网络连接和连接池配置。
+// Database 描述 SQLite 文件、锁等待和连接池配置。
 type Database struct {
-	Host            string
-	Port            int
-	Name            string
-	User            string
-	Password        string
-	DumpCommand     string
-	MaxOpenConns    int
-	MaxIdleConns    int
-	ConnMaxLifetime time.Duration
-	SkipMigrations  bool
+	Path           string
+	MaxOpenConns   int
+	MaxIdleConns   int
+	BusyTimeout    time.Duration
+	SkipMigrations bool
+}
+
+// Migration 描述一次性数据迁移所需的旧 MySQL 来源。
+type Migration struct {
+	MySQL MySQLSource
+}
+
+// MySQLSource 描述只供 cmd/migrate 使用的旧 MySQL 连接。
+type MySQLSource struct {
+	Host     string
+	Port     int
+	Database string
+	User     string
+	Password string
+}
+
+// Development 描述本地前端复用线上 API 的开发模式。
+type Development struct {
+	UpstreamURL string
 }
 
 // Auth 描述令牌与加密配置。
@@ -71,7 +87,7 @@ type Auth struct {
 	TokenLifetime time.Duration
 }
 
-// Storage 描述运行时文件位置和 MySQL 备份保留策略。
+// Storage 描述运行时文件位置和 SQLite 备份保留策略。
 type Storage struct {
 	WorkNavigationPath string
 	BackupDir          string
@@ -144,6 +160,9 @@ type Scheduler struct {
 }
 
 // Load 从环境变量加载并校验应用配置。
+// 输入：lookup 按名称读取进程环境变量。
+// 输出：返回已规范化配置；格式、范围或生产密钥无效时返回错误。
+// 副作用：无，不修改进程环境。
 func Load(lookup LookupEnv) (Config, error) {
 	// 1. 建立所有运行环境共用的默认配置。
 	cfg := Config{
@@ -153,9 +172,14 @@ func Load(lookup LookupEnv) (Config, error) {
 			StaticDir: defaultStaticDir,
 		},
 		Database: Database{
-			Host: defaultMySQLHost, Port: defaultMySQLPort, Name: defaultMySQLDatabase,
-			User: defaultMySQLUser, DumpCommand: defaultMySQLDumpCommand, MaxOpenConns: defaultMySQLMaxOpenConns,
-			MaxIdleConns: defaultMySQLMaxIdleConns, ConnMaxLifetime: defaultMySQLConnLifetime,
+			Path: defaultSQLitePath, MaxOpenConns: defaultSQLiteMaxOpenConns,
+			MaxIdleConns: defaultSQLiteMaxIdleConns, BusyTimeout: defaultSQLiteBusyTimeout,
+		},
+		Migration: Migration{
+			MySQL: MySQLSource{
+				Host: defaultMySQLHost, Port: defaultMySQLPort,
+				Database: defaultMySQLDatabase, User: defaultMySQLUser,
+			},
 		},
 		Auth: Auth{
 			TokenLifetime: defaultTokenLifetime,
@@ -208,11 +232,12 @@ func Load(lookup LookupEnv) (Config, error) {
 		cfg.Auth.EncryptionKey = strings.TrimSpace(value)
 	}
 	loadString(lookup, "AOWUGONG_WORK_NAVIGATION_PATH", &cfg.Storage.WorkNavigationPath)
-	loadString(lookup, "AOWUGONG_MYSQL_HOST", &cfg.Database.Host)
-	loadString(lookup, "AOWUGONG_MYSQL_DATABASE", &cfg.Database.Name)
-	loadString(lookup, "AOWUGONG_MYSQL_USER", &cfg.Database.User)
-	loadString(lookup, "AOWUGONG_MYSQL_PASSWORD", &cfg.Database.Password)
-	loadString(lookup, "AOWUGONG_MYSQL_DUMP_COMMAND", &cfg.Database.DumpCommand)
+	loadString(lookup, "AOWUGONG_SQLITE_PATH", &cfg.Database.Path)
+	loadString(lookup, "AOWUGONG_DEV_UPSTREAM_URL", &cfg.Development.UpstreamURL)
+	loadString(lookup, "AOWUGONG_MYSQL_HOST", &cfg.Migration.MySQL.Host)
+	loadString(lookup, "AOWUGONG_MYSQL_DATABASE", &cfg.Migration.MySQL.Database)
+	loadString(lookup, "AOWUGONG_MYSQL_USER", &cfg.Migration.MySQL.User)
+	loadString(lookup, "AOWUGONG_MYSQL_PASSWORD", &cfg.Migration.MySQL.Password)
 	loadString(lookup, "AOWUGONG_BACKUP_DIR", &cfg.Storage.BackupDir)
 	loadString(lookup, "AOWUGONG_POSITION_UPLOAD_DIR", &cfg.Storage.PositionUploadDir)
 	loadString(lookup, "AOWUGONG_POSITION_TEMP_DIR", &cfg.Storage.PositionTempDir)
@@ -242,15 +267,20 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err := loadInt(lookup, "AOWUGONG_BACKUP_RETENTION", &cfg.Storage.BackupRetention, 1, 365); err != nil {
 		return Config{}, err
 	}
-	if err := loadInt(lookup, "AOWUGONG_MYSQL_PORT", &cfg.Database.Port, 1, 65535); err != nil {
+	if err := loadInt(lookup, "AOWUGONG_MYSQL_PORT", &cfg.Migration.MySQL.Port, 1, 65535); err != nil {
 		return Config{}, err
 	}
-	if err := loadInt(lookup, "AOWUGONG_MYSQL_MAX_OPEN_CONNS", &cfg.Database.MaxOpenConns, 1, 100); err != nil {
+	if err := loadInt(lookup, "AOWUGONG_SQLITE_MAX_OPEN_CONNS", &cfg.Database.MaxOpenConns, 1, 32); err != nil {
 		return Config{}, err
 	}
-	if err := loadInt(lookup, "AOWUGONG_MYSQL_MAX_IDLE_CONNS", &cfg.Database.MaxIdleConns, 0, 100); err != nil {
+	if err := loadInt(lookup, "AOWUGONG_SQLITE_MAX_IDLE_CONNS", &cfg.Database.MaxIdleConns, 0, 32); err != nil {
 		return Config{}, err
 	}
+	busyTimeoutMS := int(cfg.Database.BusyTimeout / time.Millisecond)
+	if err := loadInt(lookup, "AOWUGONG_SQLITE_BUSY_TIMEOUT_MS", &busyTimeoutMS, 100, 60000); err != nil {
+		return Config{}, err
+	}
+	cfg.Database.BusyTimeout = time.Duration(busyTimeoutMS) * time.Millisecond
 	if err := loadInt(lookup, "POSITION_UPLOAD_MAX_MB", &cfg.Clients.PositionOCR.UploadMaxMB, 1, 100); err != nil {
 		return Config{}, err
 	}
@@ -260,12 +290,13 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err := loadBool(lookup, "AOWUGONG_SCHEDULER_ENABLED", &cfg.Scheduler.Enabled); err != nil {
 		return Config{}, err
 	}
-	if err := loadBool(lookup, "AOWUGONG_MYSQL_SKIP_MIGRATIONS", &cfg.Database.SkipMigrations); err != nil {
+	if err := loadBool(lookup, "AOWUGONG_SQLITE_SKIP_MIGRATIONS", &cfg.Database.SkipMigrations); err != nil {
 		return Config{}, err
 	}
 
-	// 3. 清理路径并验证数据库连接池和生产环境密钥。
+	// 3. 清理路径并验证 SQLite 连接池和生产环境密钥。
 	cfg.HTTP.StaticDir = filepath.Clean(cfg.HTTP.StaticDir)
+	cfg.Database.Path = filepath.Clean(cfg.Database.Path)
 	cfg.Storage.WorkNavigationPath = filepath.Clean(cfg.Storage.WorkNavigationPath)
 	cfg.Storage.BackupDir = filepath.Clean(cfg.Storage.BackupDir)
 	cfg.Storage.PositionUploadDir = filepath.Clean(cfg.Storage.PositionUploadDir)
@@ -273,17 +304,24 @@ func Load(lookup LookupEnv) (Config, error) {
 	if cfg.MigrationsDir != "" {
 		cfg.MigrationsDir = filepath.Clean(cfg.MigrationsDir)
 	}
-	cfg.Database.Host = strings.TrimSpace(cfg.Database.Host)
-	cfg.Database.Name = strings.TrimSpace(cfg.Database.Name)
-	cfg.Database.User = strings.TrimSpace(cfg.Database.User)
+	cfg.Migration.MySQL.Host = strings.TrimSpace(cfg.Migration.MySQL.Host)
+	cfg.Migration.MySQL.Database = strings.TrimSpace(cfg.Migration.MySQL.Database)
+	cfg.Migration.MySQL.User = strings.TrimSpace(cfg.Migration.MySQL.User)
+	cfg.Development.UpstreamURL = strings.TrimRight(strings.TrimSpace(cfg.Development.UpstreamURL), "/")
+	if cfg.Database.Path == "." || strings.TrimSpace(cfg.Database.Path) == "" {
+		return Config{}, fmt.Errorf("SQLite 数据库路径不能为空")
+	}
 	if cfg.Database.MaxIdleConns > cfg.Database.MaxOpenConns {
-		return Config{}, fmt.Errorf("MySQL 空闲连接数不能大于最大连接数")
+		return Config{}, fmt.Errorf("SQLite 空闲连接数不能大于最大连接数")
+	}
+	if cfg.Database.BusyTimeout <= 0 {
+		return Config{}, fmt.Errorf("SQLite 锁等待时间必须大于零")
 	}
 	if cfg.Environment == "production" && (cfg.Auth.JWTSecret == "" || cfg.Auth.EncryptionKey == "") {
 		return Config{}, fmt.Errorf("生产环境必须配置 JWT 与加密密钥")
 	}
-	if cfg.Environment == "production" && cfg.Database.Password == "" {
-		return Config{}, fmt.Errorf("生产环境必须配置 MySQL 密码")
+	if cfg.Environment == "production" && cfg.Development.UpstreamURL != "" {
+		return Config{}, fmt.Errorf("生产环境不能配置开发 API 上游")
 	}
 
 	return cfg, nil

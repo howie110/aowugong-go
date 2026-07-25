@@ -11,7 +11,7 @@ import (
 // TestRepositoryUpsertsDailyAccountAndReplacesHoldings 验证仓位快照覆盖和明细替换规则。
 // 输入：同一日期、同一账户的两次仓位快照。
 // 输出：只保留一个最新资产快照，并以第二次持仓明细为准。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestRepositoryUpsertsDailyAccountAndReplacesHoldings(t *testing.T) {
 	// 1. 创建完整迁移数据库并同步默认账户别名。
 	ctx := context.Background()
@@ -72,7 +72,7 @@ func TestRepositoryUpsertsDailyAccountAndReplacesHoldings(t *testing.T) {
 // TestRecentSnapshotKeepsEmptyHoldingsArray 验证最近快照保持旧接口的空持仓数组契约。
 // 输入：一条没有加载持仓明细的资产快照。
 // 输出：Holdings 非 nil，JSON 中 holdings 是空数组而不是缺失或 null。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestRecentSnapshotKeepsEmptyHoldingsArray(t *testing.T) {
 	// 1. 写入一条资产快照并通过最近记录入口重新读取。
 	ctx := context.Background()
@@ -118,7 +118,7 @@ func TestRecentSnapshotKeepsEmptyHoldingsArray(t *testing.T) {
 // TestSyncDefaultAccountsDoesNotRewriteUnchangedRows 验证启动初始化不会污染已迁移账户时间。
 // 输入：内容已等于默认值但 updated_at 为历史时间的账户。
 // 输出：再次同步后历史更新时间保持不变。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestSyncDefaultAccountsDoesNotRewriteUnchangedRows(t *testing.T) {
 	// 1. 创建迁移库、默认账户并设置可识别的历史更新时间。
 	ctx := context.Background()

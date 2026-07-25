@@ -1,0 +1,23 @@
+[Unit]
+Description=Aowugong Go SQLite canary
+After=network-online.target local-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@RUN_USER@
+Group=@RUN_GROUP@
+WorkingDirectory=@APP_ROOT@/canary
+EnvironmentFile=@APP_ROOT@/shared/.env.sqlite-canary
+Environment=TZ=Asia/Shanghai
+ExecStart=@APP_ROOT@/canary/aowugong
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+LimitNOFILE=8192
+MemoryLimit=256M
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true

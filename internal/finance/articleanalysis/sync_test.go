@@ -122,7 +122,7 @@ func (fixedAnalysisGateway) SimpleChat(ctx context.Context, prompt string, maxTo
 // TestServiceSyncsRSSAndAnalyzesThroughUnifiedEntry 验证抓取与分析完整业务入口。
 // 输入：固定 RSS 和模型客户端、已启用默认来源。
 // 输出：同步插入并分析一篇文章，cautious 最终存为 neutral。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestServiceSyncsRSSAndAnalyzesThroughUnifiedEntry(t *testing.T) {
 	// 1. 创建数据库、来源和带假客户端的服务。
 	ctx := context.Background()
@@ -168,7 +168,7 @@ func TestServiceSyncsRSSAndAnalyzesThroughUnifiedEntry(t *testing.T) {
 // TestServiceScheduledSyncDrainsMultipleAnalysisBatches 验证生产任务会清空多批待分析文章。
 // 输入：一次抓取五十一篇文章，单批分析上限为五十。
 // 输出：返回五十一篇成功、零待处理，证明不是只执行一批。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestServiceScheduledSyncDrainsMultipleAnalysisBatches(t *testing.T) {
 	// 1. 创建包含默认来源的临时数据库和批量文章服务。
 	ctx := context.Background()
@@ -194,7 +194,7 @@ func TestServiceScheduledSyncDrainsMultipleAnalysisBatches(t *testing.T) {
 // TestServiceScheduledSyncFailsWithPendingArticles 验证模型未配置时任务必须失败告警。
 // 输入：抓取一篇文章且不配置 DeepSeek 客户端。
 // 输出：返回 pending=1 和包含未配置密钥的错误。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestServiceScheduledSyncFailsWithPendingArticles(t *testing.T) {
 	// 1. 创建无分析客户端的临时文章服务。
 	ctx := context.Background()
@@ -218,7 +218,7 @@ func TestServiceScheduledSyncFailsWithPendingArticles(t *testing.T) {
 // TestServiceScheduledSyncReportsMissingClassifierForUnknownSignals 验证自动任务不会静默跳过历史信号归类。
 // 输入：没有待分析文章、存在未知信号且未配置 DeepSeek 的自动同步。
 // 输出：返回明确的密钥缺失错误。
-// 副作用：执行模拟 MySQL 来源、计数和统计查询。
+// 副作用：执行模拟 SQLite 来源、计数和统计查询。
 func TestServiceScheduledSyncReportsMissingClassifierForUnknownSignals(t *testing.T) {
 	// 1. 准备空来源、零待分析文章和一个未映射信号。
 	db, mock, err := sqlmock.New()

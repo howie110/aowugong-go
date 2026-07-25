@@ -29,8 +29,8 @@ func (fixedOCR) Recognize(ctx context.Context, image []byte) (map[string]any, er
 
 // TestServiceProcessesImageAndStoresSnapshot 验证图片校验、OCR、解析和入库完整流程。
 // 输入：有效 PNG 图片和固定 OCR 客户端。
-// 输出：返回 saved 结果，并在上传目录和 MySQL 中留下快照。
-// 副作用：在测试临时目录写入图片、裁剪图并写入隔离 MySQL schema。
+// 输出：返回 saved 结果，并在上传目录和 SQLite 中留下快照。
+// 副作用：在测试临时目录写入图片、裁剪图并写入隔离 SQLite schema。
 func TestServiceProcessesImageAndStoresSnapshot(t *testing.T) {
 	// 1. 创建迁移数据库、默认账户和上传服务。
 	ctx := context.Background()

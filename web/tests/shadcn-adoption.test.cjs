@@ -147,3 +147,17 @@ test("敏感数据开关使用 Toggle 和 Tooltip", () => {
   assert.match(header, /<Toggle/);
   assert.match(header, /<Tooltip/);
 });
+
+test("只读数据库页面使用 shadcn 数据浏览组件", () => {
+  const database = readSource("pages/database.tsx");
+  const finance = readSource("lib/finance.ts");
+  const navigation = readSource("components/layout/app-navigation.ts");
+  assert.match(database, /<Table>/);
+  assert.match(database, /<Select/);
+  assert.match(database, /<InputGroup/);
+  assert.match(database, /<Pagination/);
+  assert.match(database, /<ScrollArea/);
+  assert.doesNotMatch(database, /<table/);
+  assert.match(finance, /database: "page:database"/);
+  assert.match(navigation, /key: "database"/);
+});

@@ -2,19 +2,35 @@
 
 # server-release-lib.sh 集中保存发布、切换和回滚脚本共用的服务器操作。
 
+# die 输出错误并终止当前发布脚本。
+# 输入：任意错误上下文文本。
+# 输出：向标准错误输出带前缀的信息。
+# 副作用：以状态码 1 结束当前进程。
 die() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
 }
 
+# require_root 校验当前脚本由 root 执行。
+# 输入：无。
+# 输出：无；非 root 时终止。
+# 副作用：无。
 require_root() {
   [ "$(id -u)" -eq 0 ] || die "请使用 root 执行服务器发布脚本"
 }
 
+# require_command 校验服务器具备指定命令。
+# 输入：命令名称。
+# 输出：无；命令缺失时终止。
+# 副作用：无。
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "缺少命令: $1"
 }
 
+# set_env_value 原子设置环境文件中的单个键值。
+# 输入：环境文件、键名和值。
+# 输出：无；读写失败时终止。
+# 副作用：覆盖指定环境文件并保留原所有者。
 set_env_value() {
   local file="$1"
   local key="$2"
@@ -35,6 +51,10 @@ set_env_value() {
   rm -f "$temp"
 }
 
+# set_env_default 仅在键为空或缺失时写入默认值。
+# 输入：环境文件、键名和默认值。
+# 输出：无。
+# 副作用：必要时修改指定环境文件。
 set_env_default() {
   local file="$1"
   local key="$2"
@@ -42,12 +62,20 @@ set_env_default() {
   [ -n "$(read_env_value "$file" "$key")" ] || set_env_value "$file" "$key" "$value"
 }
 
+# read_env_value 读取环境文件中指定键的首个值。
+# 输入：环境文件和键名。
+# 输出：输出值；键不存在时输出空字符串。
+# 副作用：无。
 read_env_value() {
   local file="$1"
   local key="$2"
   awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$file"
 }
 
+# wait_for_health 重试访问服务健康地址。
+# 输入：健康地址和可选重试次数。
+# 输出：成功返回 0，耗尽重试返回 1。
+# 副作用：发起本机 HTTP 请求并在失败间隔休眠。
 wait_for_health() {
   local url="$1"
   local attempts="${2:-30}"
@@ -61,6 +89,10 @@ wait_for_health() {
   return 1
 }
 
+# point_symlink 原子切换发布软链接。
+# 输入：软链接路径和目标目录。
+# 输出：无；切换失败时终止。
+# 副作用：创建或替换指定软链接。
 point_symlink() {
   local link_path="$1"
   local target_path="$2"
@@ -69,6 +101,10 @@ point_symlink() {
   mv -Tf "$temporary" "$link_path"
 }
 
+# ensure_swap 在服务器没有 Swap 时创建 2GB swapfile。
+# 输入：无。
+# 输出：无；条件异常时终止。
+# 副作用：可能创建 /swapfile、修改 fstab 和 swappiness。
 ensure_swap() {
   local swap_state
   local available_kb
@@ -130,6 +166,10 @@ ensure_swap() {
   fi
 }
 
+# validate_legacy_crontab_file 校验旧项目任务标记是否成对。
+# 输入：crontab 文本文件路径。
+# 输出：格式正确返回 0，否则返回 1。
+# 副作用：无。
 validate_legacy_crontab_file() {
   local path="$1"
   awk '
@@ -148,6 +188,10 @@ validate_legacy_crontab_file() {
   ' "$path"
 }
 
+# remove_legacy_crontab 移除旧 FastAPI 项目的定时任务并保存副本。
+# 输入：crontab 用户、旧项目路径和备份路径。
+# 输出：无；标记异常或写入失败时返回非零。
+# 副作用：修改指定用户 crontab 并写入备份文件。
 remove_legacy_crontab() {
   local run_user="$1"
   local legacy_project="$2"
@@ -173,6 +217,10 @@ remove_legacy_crontab() {
   rm -f "$current_path" "$filtered_path"
 }
 
+# restore_crontab 把备份中的旧项目任务恢复到当前 crontab。
+# 输入：crontab 用户、备份路径和可选旧项目路径。
+# 输出：无；恢复失败时返回非零。
+# 副作用：修改指定用户 crontab。
 restore_crontab() {
   local run_user="$1"
   local backup_path="$2"
@@ -202,6 +250,10 @@ restore_crontab() {
   rm -f "$current_path" "$filtered_path"
 }
 
+# save_service_state 保存 systemd 服务启用和运行状态。
+# 输入：服务名和状态文件路径。
+# 输出：无。
+# 副作用：写入权限为 0600 的状态文件。
 save_service_state() {
   local service_name="$1"
   local state_path="$2"
@@ -213,6 +265,10 @@ save_service_state() {
   chmod 0600 "$state_path"
 }
 
+# restore_service_state 恢复先前记录的 systemd 服务状态。
+# 输入：服务名和状态文件路径。
+# 输出：无；systemd 操作失败时返回非零。
+# 副作用：启停及启用或禁用指定服务。
 restore_service_state() {
   local service_name="$1"
   local state_path="$2"

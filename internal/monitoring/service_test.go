@@ -12,6 +12,9 @@ import (
 )
 
 // TestCheckTargetUsesProbeURLAndKeepsPublicURL 验证探测走本机地址而结果保留公网跳转地址。
+// 输入：公网展示地址和本机测试探测地址。
+// 输出：探测成功且结果保留公网地址。
+// 副作用：启动本地 HTTP 服务并写入临时 SQLite。
 func TestCheckTargetUsesProbeURLAndKeepsPublicURL(t *testing.T) {
 	// 1. 准备一个不可用的公网展示端点和一个正常的内部探测端点。
 	var publicRequests atomic.Int32
@@ -43,6 +46,9 @@ func TestCheckTargetUsesProbeURLAndKeepsPublicURL(t *testing.T) {
 }
 
 // TestCheckOpenILinkUsesHTTPWithoutReadingDatabase 验证 OpeniLink 监控只调用内部 HTTP 接口。
+// 输入：返回健康状态的本地 OpeniLink 模拟服务。
+// 输出：监控结果正常且未依赖 OpeniLink 数据库文件。
+// 副作用：启动本地 HTTP 服务并写入临时 SQLite。
 func TestCheckOpenILinkUsesHTTPWithoutReadingDatabase(t *testing.T) {
 	// 1. 准备返回预期空内容错误的 OpeniLink 发送接口。
 	var requests atomic.Int32

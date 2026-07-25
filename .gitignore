@@ -22,6 +22,7 @@ profile.cov
 web/node_modules/
 web/dist/
 dist/
+.cache/
 
 # Runtime data and generated migration reports
 storage/

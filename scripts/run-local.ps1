@@ -1,6 +1,6 @@
-﻿param(
-    [string]$JobName = "",
+param(
     [string]$EnvFile = "",
+    [string]$UpstreamURL = "http://8.138.123.59:2345",
     [string]$GoCommand = "go"
 )
 
@@ -10,66 +10,55 @@ if (-not $EnvFile) {
     $EnvFile = Join-Path $root ".env"
 }
 
-# 1. 从 Git 忽略的环境文件读取键值，不执行其中任何 PowerShell 表达式。
-if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
-    throw "本地配置不存在: $EnvFile"
-}
+# 1. 可选加载 Git 忽略的本地环境文件，不执行其中任何 PowerShell 表达式。
 $originalValues = @{}
 $loadedKeys = [System.Collections.Generic.List[string]]::new()
-foreach ($line in Get-Content -LiteralPath $EnvFile -Encoding UTF8) {
-    if ($line -notmatch '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
-        continue
+if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
+    foreach ($line in Get-Content -LiteralPath $EnvFile -Encoding UTF8) {
+        if ($line -notmatch '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
+            continue
+        }
+        $key = $Matches[1]
+        $value = $Matches[2].Trim()
+        if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+        $originalValues[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
+        [Environment]::SetEnvironmentVariable($key, $value, "Process")
+        $loadedKeys.Add($key)
     }
-    $key = $Matches[1]
-    $value = $Matches[2].Trim()
-    if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
-        $value = $value.Substring(1, $value.Length - 2)
-    }
-    $originalValues[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
-    [Environment]::SetEnvironmentVariable($key, $value, "Process")
-    $loadedKeys.Add($key)
 }
 
 try {
-    # 2. 强制本地只经回环隧道连接，并关闭迁移、自动调度和真实交易。
-    if ($env:AOWUGONG_MYSQL_HOST -notin @("127.0.0.1", "localhost")) {
-        throw "本地运行只允许通过 127.0.0.1 SSH 隧道连接 MySQL。"
-    }
-    if (-not $env:AOWUGONG_MYSQL_PORT) {
-        throw "缺少 AOWUGONG_MYSQL_PORT；SSH 隧道建议使用 13306。"
-    }
-    foreach ($key in @("AOWUGONG_MYSQL_SKIP_MIGRATIONS", "AOWUGONG_SCHEDULER_ENABLED", "FINANCE_ENABLE_REAL_TRADE")) {
+    # 2. 强制本地 2345 使用线上 API，关闭调度和真实交易，不创建本地 SQLite。
+    foreach ($key in @(
+        "AOWUGONG_ENV",
+        "AOWUGONG_HTTP_ADDRESS",
+        "AOWUGONG_DEV_UPSTREAM_URL",
+        "AOWUGONG_SCHEDULER_ENABLED",
+        "FINANCE_ENABLE_REAL_TRADE"
+    )) {
         if (-not $originalValues.ContainsKey($key)) {
             $originalValues[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
             $loadedKeys.Add($key)
         }
     }
-    $env:AOWUGONG_MYSQL_SKIP_MIGRATIONS = "true"
+    $env:AOWUGONG_ENV = "development"
+    $env:AOWUGONG_HTTP_ADDRESS = "127.0.0.1:2345"
+    $env:AOWUGONG_DEV_UPSTREAM_URL = $UpstreamURL.TrimEnd("/")
     $env:AOWUGONG_SCHEDULER_ENABLED = "false"
     $env:FINANCE_ENABLE_REAL_TRADE = "false"
-
-    # 3. 在执行 Go 前主动探测隧道，避免任务误判为数据库故障。
-    $client = [System.Net.Sockets.TcpClient]::new()
-    try {
-        $connect = $client.BeginConnect($env:AOWUGONG_MYSQL_HOST, [int]$env:AOWUGONG_MYSQL_PORT, $null, $null)
-        if (-not $connect.AsyncWaitHandle.WaitOne(3000)) {
-            throw "MySQL 隧道连接超时。"
-        }
-        $client.EndConnect($connect)
+    if ($env:AOWUGONG_DEV_UPSTREAM_URL -notmatch '^https?://') {
+        throw "线上 API 地址必须以 http:// 或 https:// 开头。"
     }
-    finally {
-        $client.Dispose()
+    if (-not (Test-Path -LiteralPath (Join-Path $root "web/dist/index.html") -PathType Leaf)) {
+        throw "缺少 web/dist/index.html，请先在 web 目录执行 npm run build。"
     }
 
-    # 4. 空任务名启动本地 HTTP；提供任务名时走与线上相同的 Registry.Run。
+    # 3. 前台启动本地 Go；页面来自当前代码，全部 API 数据来自线上服务。
     Push-Location $root
     try {
-        if ($JobName) {
-            & $GoCommand run ./cmd/aowugong job $JobName
-        }
-        else {
-            & $GoCommand run ./cmd/aowugong
-        }
+        & $GoCommand run -buildvcs=false ./cmd/aowugong
         if ($LASTEXITCODE -ne 0) {
             throw "本地 Go 进程退出，状态码 $LASTEXITCODE。"
         }
@@ -79,7 +68,7 @@ try {
     }
 }
 finally {
-    # 5. 恢复调用脚本前的进程环境，避免生产凭据残留到后续命令。
+    # 4. 恢复脚本运行前的进程环境。
     foreach ($key in $loadedKeys) {
         [Environment]::SetEnvironmentVariable($key, $originalValues[$key], "Process")
     }

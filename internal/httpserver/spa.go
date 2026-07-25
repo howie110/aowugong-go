@@ -13,12 +13,18 @@ type spaHandler struct {
 }
 
 // newSPAHandler 创建静态资源与 SPA 回退处理器。
+// 输入：staticDir 是前端生产构建目录。
+// 输出：返回使用该目录的 SPA 处理器。
+// 副作用：无，不读取文件。
 func newSPAHandler(staticDir string) spaHandler {
 	// 1. 清理静态文件根目录。
 	return spaHandler{staticDir: filepath.Clean(staticDir)}
 }
 
 // ServeHTTP 返回静态资源或 SPA 入口文件。
+// 输入：w 接收响应，request 提供请求路径。
+// 输出：无。
+// 副作用：读取静态文件并写入 HTTP 响应。
 func (s spaHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	// 1. 拒绝未配置静态目录的前端请求。
 	if s.staticDir == "." || s.staticDir == "" {

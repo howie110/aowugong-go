@@ -26,10 +26,10 @@ func (s *fakeDailySource) Daily(_ context.Context, startDate, _ string) ([]clien
 	}}, nil
 }
 
-// TestServiceUpdatesOnlyMissingOpenDates 验证日线同步只拉取缺失开市日并写入 MySQL。
+// TestServiceUpdatesOnlyMissingOpenDates 验证日线同步只拉取缺失开市日并写入 SQLite。
 // 输入：一个已有开市日、一个缺失开市日、一个休市日和模拟 Tushare。
 // 输出：只请求并写入缺失开市日，返回日期与行数摘要。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestServiceUpdatesOnlyMissingOpenDates(t *testing.T) {
 	// 1. 创建数据库、交易日历和一个已有交易日。
 	ctx := context.Background()

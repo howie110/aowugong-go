@@ -13,6 +13,9 @@ import (
 const migratedBcryptPassword = "$2a$10$NY3688Y4F/CXkeYA3q118eMu7YCjEGKPaPGAFXZp9SewmzmAfE9Jy"
 
 // TestServiceLoginAcceptsMigratedBcrypt 验证既有 60 字符 bcrypt 密码可以登录。
+// 输入：迁移格式的 bcrypt 用户记录和正确密码。
+// 输出：登录成功并返回令牌。
+// 副作用：创建并写入临时 SQLite。
 func TestServiceLoginAcceptsMigratedBcrypt(t *testing.T) {
 	// 1. 写入模拟生产迁移后的 bcrypt 用户。
 	service, db := newTestService(t)
@@ -29,6 +32,9 @@ func TestServiceLoginAcceptsMigratedBcrypt(t *testing.T) {
 }
 
 // TestServiceLoginRejectsInactiveUser 验证禁用用户无法获取令牌。
+// 输入：禁用用户和正确密码。
+// 输出：登录返回 ErrUnauthorized。
+// 副作用：创建并写入临时 SQLite。
 func TestServiceLoginRejectsInactiveUser(t *testing.T) {
 	// 1. 写入禁用用户。
 	service, db := newTestService(t)
@@ -42,6 +48,9 @@ func TestServiceLoginRejectsInactiveUser(t *testing.T) {
 }
 
 // TestServiceRegisterRejectsDuplicateUsername 验证注册拒绝重复用户名。
+// 输入：已存在用户名和新的注册请求。
+// 输出：注册返回 ErrConflict。
+// 副作用：创建并写入临时 SQLite。
 func TestServiceRegisterRejectsDuplicateUsername(t *testing.T) {
 	// 1. 先注册一个用户。
 	service, _ := newTestService(t)
@@ -57,6 +66,9 @@ func TestServiceRegisterRejectsDuplicateUsername(t *testing.T) {
 }
 
 // TestServiceRegisterStoresBcryptPassword 验证新注册密码以 bcrypt 形式存储。
+// 输入：新用户名和原始密码。
+// 输出：数据库保存可验证且不等于明文的 bcrypt 哈希。
+// 副作用：创建并写入临时 SQLite。
 func TestServiceRegisterStoresBcryptPassword(t *testing.T) {
 	// 1. 注册新的公开用户。
 	service, db := newTestService(t)
@@ -75,6 +87,9 @@ func TestServiceRegisterStoresBcryptPassword(t *testing.T) {
 }
 
 // TestServiceProfileIncludesRolesAndPermissions 验证资料返回角色和权限集合。
+// 输入：带 investor 角色的测试用户。
+// 输出：资料包含用户、角色和对应页面权限。
+// 副作用：创建并写入临时 SQLite。
 func TestServiceProfileIncludesRolesAndPermissions(t *testing.T) {
 	// 1. 写入带角色和权限关联的用户。
 	service, db := newTestService(t)
@@ -102,6 +117,9 @@ func TestServiceProfileIncludesRolesAndPermissions(t *testing.T) {
 }
 
 // TestTokenManagerUsesExactlySeventyTwoHours 验证 JWT 过期时间精确为 72 小时。
+// 输入：固定签发时间和 72 小时令牌管理器。
+// 输出：解析声明的有效期精确等于 72 小时。
+// 副作用：无。
 func TestTokenManagerUsesExactlySeventyTwoHours(t *testing.T) {
 	// 1. 在固定时刻签发令牌。
 	issuedAt := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
@@ -122,6 +140,9 @@ func TestTokenManagerUsesExactlySeventyTwoHours(t *testing.T) {
 }
 
 // TestTokenManagerRejectsMalformedAndExpiredToken 验证令牌解析拒绝非法和过期令牌。
+// 输入：损坏令牌和超过到期时间的有效令牌。
+// 输出：两种解析均返回 ErrInvalidToken。
+// 副作用：无。
 func TestTokenManagerRejectsMalformedAndExpiredToken(t *testing.T) {
 	// 1. 创建可控时间的令牌管理器。
 	issuedAt := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
@@ -140,9 +161,12 @@ func TestTokenManagerRejectsMalformedAndExpiredToken(t *testing.T) {
 	}
 }
 
-// newTestService 创建使用隔离 MySQL 数据库的认证服务。
+// newTestService 创建使用隔离 SQLite 数据库的认证服务。
+// 输入：t 管理临时数据库生命周期。
+// 输出：返回认证服务和底层 SQLite 连接。
+// 副作用：创建、迁移并注册清理临时 SQLite。
 func newTestService(t *testing.T) (*Service, *sql.DB) {
-	// 1. 打开并迁移独立的 MySQL 测试 schema。
+	// 1. 打开并迁移独立的 SQLite 测试 schema。
 	t.Helper()
 	db := testdatabase.Open(t)
 
@@ -151,6 +175,9 @@ func newTestService(t *testing.T) (*Service, *sql.DB) {
 }
 
 // insertTestUser 写入供认证场景使用的用户记录。
+// 输入：测试句柄、数据库、用户字段、密码哈希和启用状态。
+// 输出：无；写入失败时终止测试。
+// 副作用：向临时 SQLite 插入用户。
 func insertTestUser(t *testing.T, db *sql.DB, username, email, passwordHash string, active bool) {
 	// 1. 直接写入迁移后表结构以模拟既有生产数据。
 	t.Helper()

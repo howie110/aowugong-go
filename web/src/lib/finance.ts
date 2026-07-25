@@ -17,6 +17,7 @@ export type FinancePageKey =
   | "subscriptions"
   | "monitoring"
   | "work"
+  | "database"
   | "permissions";
 
 export type FinanceMetric = {
@@ -72,6 +73,7 @@ export const pagePermissionMap: Record<FinancePageKey, string> = {
   subscriptions: "page:subscriptions",
   monitoring: "page:monitoring",
   work: "page:work",
+  database: "page:database",
   permissions: "page:permissions",
 };
 
@@ -136,6 +138,10 @@ export const pageMetaMap: Record<FinancePageKey, { title: string; description: s
     title: "工作导航",
     description: "常用系统、工具和资料入口。",
   },
+  database: {
+    title: "数据库",
+    description: "只读查看 SQLite 表结构、数据和脱敏导出。",
+  },
   permissions: {
     title: "权限管理",
     description: "把用户加入角色，角色权限由系统预设维护。",
@@ -162,6 +168,7 @@ const pageEndpointMap: Record<FinancePageKey, string> = {
   subscriptions: "/api/v1/subscriptions/summary",
   monitoring: "/api/v1/monitoring/summary",
   work: "/api/v1/work/navigation",
+  database: "/api/v1/database/summary",
   permissions: "/api/v1/permissions/summary",
 };
 
@@ -196,6 +203,9 @@ export function getFinancePagePath(pageKey: FinancePageKey) {
   if (pageKey === "monitoring") {
     return "/monitoring";
   }
+  if (pageKey === "database") {
+    return "/database";
+  }
   return `/${pageKey}`;
 }
 
@@ -222,6 +232,7 @@ export function getFinancePageFromPath(pathname: string): FinancePageKey {
     path === "subscriptions" ||
     path === "monitoring" ||
     path === "work" ||
+    path === "database" ||
     path === "permissions"
   ) {
     return path;

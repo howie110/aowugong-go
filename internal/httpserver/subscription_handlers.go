@@ -36,7 +36,7 @@ func registerSubscriptionRoutes(router chi.Router, authService *auth.Service, rb
 // summary 返回订阅页面摘要。
 // 输入：request 已通过认证和订阅权限校验。
 // 输出：写入 Summary。
-// 副作用：读取 MySQL，空表时写入默认记录，并写入 HTTP 响应。
+// 副作用：读取 SQLite，空表时写入默认记录，并写入 HTTP 响应。
 func (h subscriptionHandlers) summary(w http.ResponseWriter, request *http.Request) {
 	// 1. 调用统一服务生成摘要。
 	summary, err := h.service.Summary(request.Context())
@@ -50,7 +50,7 @@ func (h subscriptionHandlers) summary(w http.ResponseWriter, request *http.Reque
 // list 返回全部订阅记录。
 // 输入：request 已通过认证和订阅权限校验。
 // 输出：写入 Record 数组。
-// 副作用：读取 MySQL，空表时写入默认记录，并写入 HTTP 响应。
+// 副作用：读取 SQLite，空表时写入默认记录，并写入 HTTP 响应。
 func (h subscriptionHandlers) list(w http.ResponseWriter, request *http.Request) {
 	// 1. 从服务读取带实时状态的列表。
 	records, err := h.service.List(request.Context())
@@ -64,7 +64,7 @@ func (h subscriptionHandlers) list(w http.ResponseWriter, request *http.Request)
 // create 新增订阅记录。
 // 输入：request 包含 JSON 可编辑字段和认证用户。
 // 输出：写入新建 Record。
-// 副作用：写入 MySQL 和 HTTP 响应。
+// 副作用：写入 SQLite 和 HTTP 响应。
 func (h subscriptionHandlers) create(w http.ResponseWriter, request *http.Request) {
 	// 1. 解码页面提交字段并读取创建用户名。
 	var payload subscription.WriteRequest
@@ -90,7 +90,7 @@ func (h subscriptionHandlers) create(w http.ResponseWriter, request *http.Reques
 // update 全量更新订阅记录。
 // 输入：路径包含 recordID，请求体包含全部可编辑字段。
 // 输出：写入更新后 Record。
-// 副作用：写入 MySQL 和 HTTP 响应。
+// 副作用：写入 SQLite 和 HTTP 响应。
 func (h subscriptionHandlers) update(w http.ResponseWriter, request *http.Request) {
 	// 1. 校验路径主键并解码 JSON 请求。
 	recordID, err := strconv.ParseInt(chi.URLParam(request, "recordID"), 10, 64)
@@ -116,7 +116,7 @@ func (h subscriptionHandlers) update(w http.ResponseWriter, request *http.Reques
 // delete 删除订阅记录。
 // 输入：路径包含 recordID。
 // 输出：写入 deleted=true。
-// 副作用：删除 MySQL 记录并写入 HTTP 响应。
+// 副作用：删除 SQLite 记录并写入 HTTP 响应。
 func (h subscriptionHandlers) delete(w http.ResponseWriter, request *http.Request) {
 	// 1. 校验路径主键并调用删除服务。
 	recordID, err := strconv.ParseInt(chi.URLParam(request, "recordID"), 10, 64)

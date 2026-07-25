@@ -2,11 +2,11 @@ package job
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/howiedata/aowugong-go/internal/config"
 	"github.com/howiedata/aowugong-go/internal/finance/articleanalysis"
 	financedata "github.com/howiedata/aowugong-go/internal/finance/data"
 	"github.com/howiedata/aowugong-go/internal/monitoring"
@@ -106,18 +106,18 @@ func (fakeNotification) Text(context.Context, []string, string, string) error {
 // TestRegisterAllAddsEightProductionJobs 验证固定任务名称和频率全部进入统一注册表。
 // 输入：完整的测试依赖和空任务注册表。
 // 输出：注册七项定时任务和一项仅手动任务，并能通过同一 Run 入口执行测试任务。
-// 副作用：创建并写入隔离 MySQL 测试 schema。
+// 副作用：创建并写入隔离 SQLite 测试库。
 func TestRegisterAllAddsEightProductionJobs(t *testing.T) {
-	// 1. 创建完成迁移的 MySQL 和任务注册表。
+	// 1. 创建完成迁移的 SQLite 和任务注册表。
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	registry := scheduler.NewRegistry(db, fakeNotification{}, nil)
 	dependencies := Dependencies{
-		DB: db, Database: config.Database{DumpCommand: "mysqldump"}, Data: fakeDataUpdater{}, Articles: &fakeArticleSyncer{}, Monitoring: fakeMonitor{},
+		DB: db, Data: fakeDataUpdater{}, Articles: &fakeArticleSyncer{}, Monitoring: fakeMonitor{},
 		Subscriptions: fakeSubscription{}, Notification: fakeNotification{}, BackupDir: t.TempDir(),
 		BackupRetention: 7, Now: time.Now,
-		Backup: func(context.Context, config.Database, string, int, time.Time) (string, error) {
-			return "test-backup.sql.gz", nil
+		Backup: func(context.Context, *sql.DB, string, int, time.Time) (string, error) {
+			return "test-backup.db", nil
 		},
 	}
 
@@ -130,18 +130,19 @@ func TestRegisterAllAddsEightProductionJobs(t *testing.T) {
 		t.Fatalf("definition count = %d, want 8", len(definitions))
 	}
 	wanted := map[string]string{
-		"test_crontab": "0 9 * * *", "update_tushare_daily_data": "0 20 * * *",
+		"test_crontab": "0 9 * * *", "update_tushare_daily_data": "",
 		"sync_investment_articles": "0 8,20 * * *", "check_service_monitors": "30 8 * * *",
 		"check_subscription_expiry_notify": "30 9 * * *", "openilink_reply_reminder": "0 10 * * *",
-		"backup_mysql":                     "30 3 * * *",
+		"backup_sqlite":                    "30 3 * * *",
 		"rebuild_investment_signal_groups": "",
 	}
 	for _, definition := range definitions {
 		if wanted[definition.Name] != definition.Schedule {
 			t.Errorf("schedule %s = %q, want %q", definition.Name, definition.Schedule, wanted[definition.Name])
 		}
-		if definition.Name == "rebuild_investment_signal_groups" && !definition.ManualOnly {
-			t.Error("rebuild signal groups should be manual-only")
+		if (definition.Name == "rebuild_investment_signal_groups" ||
+			definition.Name == "update_tushare_daily_data") && !definition.ManualOnly {
+			t.Errorf("%s should be manual-only", definition.Name)
 		}
 	}
 
