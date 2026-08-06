@@ -149,6 +149,7 @@ type PageSummary struct {
 type SyncResult struct {
 	SourceCount          int                 `json:"source_count"`
 	FetchedCount         int                 `json:"fetched_count"`
+	LatestFetchedAt      string              `json:"latest_fetched_at,omitempty"`
 	InsertedCount        int                 `json:"inserted_count"`
 	UpdatedCount         int                 `json:"updated_count"`
 	FailedSources        []map[string]string `json:"failed_sources"`

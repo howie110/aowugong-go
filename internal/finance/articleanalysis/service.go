@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/howiedata/aowugong-go/internal/client"
 )
@@ -18,6 +19,7 @@ const (
 	scheduledFetchLimit         = 2000
 	scheduledAnalysisBatchLimit = 50
 	scheduledAnalysisMaxBatches = 10
+	scheduledRSSStaleAfter      = 72 * time.Hour
 	pendingSignalGroupName      = "待归类"
 	pendingSignalGroupType      = "pending"
 )
@@ -39,6 +41,7 @@ type ServiceOptions struct {
 	FeedURL  string
 	RSS      RSSGateway
 	Analyzer AnalysisGateway
+	Now      func() time.Time
 }
 
 // Sync 抓取全部启用来源，并按选项继续分析待处理文章。
@@ -80,6 +83,9 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 		}
 		inserted, updated, unchanged := 0, 0, 0
 		for _, item := range items {
+			if item.PublishedAt > result.LatestFetchedAt {
+				result.LatestFetchedAt = item.PublishedAt
+			}
 			action, _, err := s.repository.UpsertArticle(ctx, source.ID, feedEntryFromClient(item))
 			if err != nil {
 				return SyncResult{}, fmt.Errorf("保存来源 %s 文章: %w", source.SourceName, err)
@@ -130,6 +136,9 @@ func (s *Service) SyncScheduled(ctx context.Context, classifySignals bool) (Sync
 	}
 
 	// 2. 读取抓取后 pending；模型未配置时保留数据并明确失败告警。
+	if err := s.validateScheduledRSSFreshness(result); err != nil {
+		return result, err
+	}
 	counts, err := s.repository.counts(ctx)
 	if err != nil {
 		return result, fmt.Errorf("读取文章分析进度: %w", err)
@@ -174,6 +183,44 @@ func (s *Service) SyncScheduled(ctx context.Context, classifySignals bool) (Sync
 	}
 	result.ClassifiedAliasCount += classifiedCount
 	return result, nil
+}
+
+// validateScheduledRSSFreshness 检查定时抓取的上游 RSS 是否长期没有新文章。
+// 输入：result 是本次 RSS 抓取统计，包含上游最新发布时间。
+// 输出：上游最新文章超过固定阈值时返回错误；正常或没有可判断时间时返回 nil。
+// 副作用：无，不访问数据库、不发送通知。
+func (s *Service) validateScheduledRSSFreshness(result SyncResult) error {
+	// 1. 只有 RSS 成功返回文章并带发布时间时，才判断上游是否停更。
+	if result.FetchedCount == 0 || strings.TrimSpace(result.LatestFetchedAt) == "" {
+		return nil
+	}
+	latest, err := time.Parse("2006-01-02 15:04:05", result.LatestFetchedAt)
+	if err != nil {
+		return nil
+	}
+
+	// 2. 使用可注入时钟计算滞后时间，超过三天交给任务包装器失败通知。
+	now := time.Now
+	if s.options.Now != nil {
+		now = s.options.Now
+	}
+	lag := now().UTC().Sub(latest.UTC())
+	if lag > scheduledRSSStaleAfter {
+		return fmt.Errorf("WeChatRSS 上游最新文章过旧: 最新=%s, 已滞后=%s, 请检查微信登录或公众号抓取", result.LatestFetchedAt, formatDurationHours(lag))
+	}
+	return nil
+}
+
+// formatDurationHours 把持续时间压缩成通知可读的小时文本。
+// 输入：duration 是需要展示的持续时间。
+// 输出：返回形如 192h 的整数小时文本。
+// 副作用：无。
+func formatDurationHours(duration time.Duration) string {
+	// 1. 使用向下取整小时，避免通知里出现过长的小数秒。
+	if duration < time.Hour {
+		return duration.String()
+	}
+	return fmt.Sprintf("%dh", int(duration.Hours()))
 }
 
 // formatFailedSources 把失败文章来源和原因合并为通知可读文本。

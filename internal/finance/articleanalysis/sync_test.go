@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/howiedata/aowugong-go/internal/client"
@@ -20,6 +21,8 @@ type manyRSSGateway struct {
 type recordingRSSGateway struct {
 	feedURL string
 }
+
+type staleRSSGateway struct{}
 
 // Fetch 记录当前进程实际使用的 RSS 地址。
 // 输入：ctx、sourceID、feedURL 和 limit 模拟正式客户端。
@@ -93,6 +96,19 @@ func (f *fixedRSSGateway) Fetch(ctx context.Context, sourceID int64, feedURL str
 		ArticleKey: "sync-article-key", ExternalID: "sync-1", Title: "同步文章",
 		Link: "https://example.com/sync", Author: "完整作者", PublishedAt: shanghaiNowText(),
 		Summary: "同步摘要", Content: "同步正文",
+	}}, nil
+}
+
+// Fetch 返回一篇发布时间明显落后的文章，模拟 WeChatRSS 登录失效后只剩旧缓存。
+// 输入：ctx、sourceID、feedURL 和 limit 模拟正式 RSS 客户端。
+// 输出：返回一篇已过期但接口仍然 200 的文章。
+// 副作用：无。
+func (staleRSSGateway) Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.RSSItem, error) {
+	// 1. 返回固定旧文章，确保定时任务能识别上游停更而不是静默成功。
+	return []client.RSSItem{{
+		ArticleKey: "stale-article-key", ExternalID: "stale-1", Title: "旧缓存文章",
+		Link: "https://example.com/stale", Author: "旧作者", PublishedAt: "2026-07-29 06:10:08",
+		Summary: "旧摘要", Content: "旧正文",
 	}}, nil
 }
 
@@ -219,6 +235,34 @@ func TestServiceScheduledSyncFailsWithPendingArticles(t *testing.T) {
 // 输入：没有待分析文章、存在未知信号且未配置 DeepSeek 的自动同步。
 // 输出：返回明确的密钥缺失错误。
 // 副作用：执行模拟 SQLite 来源、计数和统计查询。
+
+// TestServiceScheduledSyncFailsWhenRSSLatestArticleIsStale 验证上游 RSS 长期停更时任务失败通知。
+// 输入：WeChatRSS 返回旧缓存文章，当前时间超过旧文章 72 小时。
+// 输出：返回包含上游最新文章过旧的错误。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
+func TestServiceScheduledSyncFailsWhenRSSLatestArticleIsStale(t *testing.T) {
+	// 1. 创建默认来源，并用旧缓存 RSS 与固定模型完成基础同步流程。
+	ctx := context.Background()
+	db := testdatabase.Open(t)
+	repository := NewRepository(db)
+	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000/rss/all.xml"); err != nil {
+		t.Fatalf("SyncDefaultSource() error = %v", err)
+	}
+	service := NewService(repository, ServiceOptions{
+		Model: "test-model", RSS: staleRSSGateway{}, Analyzer: fixedAnalysisGateway{},
+		Now: func() time.Time { return time.Date(2026, 8, 6, 10, 0, 0, 0, time.FixedZone("CST", 8*3600)) },
+	})
+
+	// 2. 执行生产定时入口，要求旧缓存不再被当成成功抓取。
+	result, err := service.SyncScheduled(ctx, false)
+	if err == nil || !strings.Contains(err.Error(), "WeChatRSS 上游最新文章过旧") {
+		t.Fatalf("SyncScheduled() error = %v, result = %#v", err, result)
+	}
+	if result.LatestFetchedAt != "2026-07-29 06:10:08" {
+		t.Fatalf("LatestFetchedAt = %q", result.LatestFetchedAt)
+	}
+}
+
 func TestServiceScheduledSyncReportsMissingClassifierForUnknownSignals(t *testing.T) {
 	// 1. 准备空来源、零待分析文章和一个未映射信号。
 	db, mock, err := sqlmock.New()
