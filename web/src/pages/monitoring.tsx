@@ -95,7 +95,7 @@ function ServiceMonitorCard({ services }: { services: ServiceMonitorResult[] }) 
     <Card>
       <CardHeader>
         <CardTitle>服务监控</CardTitle>
-        <CardDescription>每天 08:30 自动检测一次，HTTP 5xx 或无法连接记为异常。</CardDescription>
+        <CardDescription>每天 22:00 自动检测一次，HTTP 5xx 或无法连接记为异常。</CardDescription>
       </CardHeader>
       <CardContent>
         <Table>
