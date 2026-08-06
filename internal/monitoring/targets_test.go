@@ -25,16 +25,13 @@ func TestBuildTargetsIncludesDefaultsAndDedupesExtras(t *testing.T) {
 		]`,
 	}
 
-	// 2. 结果应包含五个唯一目标，页面地址使用公网，探测地址使用本机链路。
+	// 2. 结果应包含四个唯一目标，已停用的 WeChatRSS 不再进入监控清单。
 	targets := BuildTargets(cfg)
-	if len(targets) != 5 {
-		t.Fatalf("target count = %d, want 5: %#v", len(targets), targets)
+	if len(targets) != 4 {
+		t.Fatalf("target count = %d, want 4: %#v", len(targets), targets)
 	}
-	if targets[2].URL != "http://8.138.123.59:5000/api/admin/status" || targets[2].ProbeURL != "http://127.0.0.1:5000/api/admin/status" {
-		t.Errorf("wechat target = %#v", targets[2])
-	}
-	if targets[3].Code != "openilink-hub" || targets[3].URL != "http://8.138.123.59:9800/" || targets[3].ProbeURL != "http://127.0.0.1:9800/bot/v1/message/send" {
-		t.Errorf("openilink target = %#v", targets[3])
+	if targets[2].Code != "openilink-hub" || targets[2].URL != "http://8.138.123.59:9800/" || targets[2].ProbeURL != "http://127.0.0.1:9800/bot/v1/message/send" {
+		t.Errorf("openilink target = %#v", targets[2])
 	}
 }
 

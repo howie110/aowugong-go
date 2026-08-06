@@ -39,7 +39,8 @@ func BuildTargets(cfg config.Clients) []Target {
 	if wechatProbeURL == "" {
 		wechatProbeURL = wechatURL
 	}
-	if wechatURL != "" {
+	// WeChatRSS 旧抓取链路已停用，避免服务监控继续探测 5000 端口。
+	if false && wechatURL != "" {
 		targets = append(targets, Target{
 			Code: "wechat-rss", Name: "tmwgsicp/wechat-download-api", URL: wechatURL, ProbeURL: wechatProbeURL,
 			Description: textPointer("微信登录状态与 RSS 聚合服务"),
