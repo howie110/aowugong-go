@@ -199,16 +199,16 @@ func (r *Repository) ReplaceSignalGroups(ctx context.Context, groups []signalGro
 	return inserted, nil
 }
 
-// SyncDefaultSource 初始化当前唯一的公众号聚合 RSS 来源。
-// 输入：ctx 控制数据库操作，feedURL 是聚合 RSS 地址。
+// SyncDefaultSource 初始化当前唯一的 Miniflux 投资文章来源。
+// 输入：ctx 控制数据库操作，feedURL 是 Miniflux 根地址。
 // 输出：成功返回 nil，失败返回错误。
-// 副作用：写入 investment_article_source；已有非空地址不会被当前进程覆盖。
+// 副作用：写入 investment_article_source；启用时会把旧 WeChatRSS 元数据切换为 Miniflux。
 func (r *Repository) SyncDefaultSource(ctx context.Context, feedURL string) error {
-	// 1. 根据 RSS 地址决定默认来源是否启用。
+	// 1. 根据 Miniflux 地址决定默认来源是否启用。
 	feedURL = strings.TrimSpace(feedURL)
 	active := 0
 	status := "missing_url"
-	message := "未配置 INVESTMENT_ARTICLE_AGGREGATE_RSS_URL"
+	message := "未配置 MINIFLUX_API_TOKEN"
 	if feedURL != "" {
 		active = 1
 		status = "ready"
@@ -221,7 +221,7 @@ func (r *Repository) SyncDefaultSource(ctx context.Context, feedURL string) erro
 			INSERT OR IGNORE INTO investment_article_source (
 				source_code, source_name, source_type, feed_url, is_active,
 				description, last_fetch_status, last_fetch_message
-			) VALUES ('wechat_aggregate', '公众号聚合', 'wechat_rss_aggregate', ?, ?, '微信公众号聚合 RSS。', ?, ?)
+			) VALUES ('wechat_aggregate', 'Miniflux 投资文章', 'miniflux', ?, ?, 'Miniflux 投资文章分类。', ?, ?)
 		`, feedURL, active, status, nullableArticleText(message))
 		if err != nil {
 			return fmt.Errorf("补建默认文章来源: %w", err)
@@ -229,18 +229,18 @@ func (r *Repository) SyncDefaultSource(ctx context.Context, feedURL string) erro
 		return nil
 	}
 
-	// 3. 有效地址只补充缺失地址，并更新不区分运行环境的来源元数据。
+	// 3. 有效地址覆盖旧抓取端点，但复用原来源代码和主键保留文章关联。
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO investment_article_source (
 			source_code, source_name, source_type, feed_url, is_active,
 			description, last_fetch_status, last_fetch_message
-		) VALUES ('wechat_aggregate', '公众号聚合', 'wechat_rss_aggregate', ?, ?, '微信公众号聚合 RSS。', ?, ?)
+		) VALUES ('wechat_aggregate', 'Miniflux 投资文章', 'miniflux', ?, ?, 'Miniflux 投资文章分类。', ?, ?)
 		ON CONFLICT(source_code) DO UPDATE SET
-			source_name = '公众号聚合',
-			source_type = 'wechat_rss_aggregate',
-			feed_url = CASE WHEN investment_article_source.feed_url = '' THEN excluded.feed_url ELSE investment_article_source.feed_url END,
+			source_name = 'Miniflux 投资文章',
+			source_type = 'miniflux',
+			feed_url = excluded.feed_url,
 			is_active = excluded.is_active,
-			description = '微信公众号聚合 RSS。',
+			description = 'Miniflux 投资文章分类。',
 			updated_at = datetime('now', '+8 hours')
 	`, feedURL, active, status, nullableArticleText(message))
 	if err != nil {
@@ -292,7 +292,7 @@ func (r *Repository) Sources(ctx context.Context, activeOnly bool) ([]Source, er
 	return results, nil
 }
 
-// sourceRecords 返回同步任务需要的启用来源和 RSS 地址。
+// sourceRecords 返回同步任务需要的启用来源和 Miniflux 地址。
 // 输入：ctx 控制查询。
 // 输出：返回内部来源记录；失败时返回错误。
 // 副作用：只读 SQLite。
@@ -309,7 +309,7 @@ func (r *Repository) sourceRecords(ctx context.Context) ([]sourceRecord, error) 
 	return results, nil
 }
 
-// UpsertArticle 按稳定文章键新增 RSS 文章，已有文章直接返回。
+// UpsertArticle 按稳定文章键或原文链接新增外部文章，已有文章直接返回。
 // 输入：ctx 控制事务，sourceID 是来源，entry 是规范化文章。
 // 输出：返回 inserted 或 unchanged 及文章主键；失败时返回错误。
 // 副作用：仅在文章尚未入库时写入 investment_article。
@@ -323,8 +323,19 @@ func (r *Repository) UpsertArticle(ctx context.Context, sourceID int64, entry Fe
 	if err != sql.ErrNoRows {
 		return "", 0, fmt.Errorf("查询现有投资文章: %w", err)
 	}
+	link := truncateRunes(strings.TrimSpace(entry.Link), 1000)
+	if link != "" {
+		err = r.db.QueryRowContext(ctx,
+			"SELECT id FROM investment_article WHERE link = ? ORDER BY id ASC LIMIT 1", link).Scan(&existingID)
+		if err == nil {
+			return "unchanged", existingID, nil
+		}
+		if err != sql.ErrNoRows {
+			return "", 0, fmt.Errorf("按链接查询现有投资文章: %w", err)
+		}
+	}
 
-	// 2. 读取来源名称并准备新增文章字段。
+	// 2. 稳定键和链接均未命中时，读取来源名称并准备新增文章字段。
 	var sourceName string
 	if err := r.db.QueryRowContext(ctx, "SELECT source_name FROM investment_article_source WHERE id = ?", sourceID).Scan(&sourceName); err != nil {
 		return "", 0, fmt.Errorf("查询投资文章来源: %w", err)
@@ -335,13 +346,12 @@ func (r *Repository) UpsertArticle(ctx context.Context, sourceID int64, entry Fe
 	}
 	rawJSON, err := json.Marshal(entry.RawEntry)
 	if err != nil {
-		return "", 0, fmt.Errorf("序列化 RSS 原始文章: %w", err)
+		return "", 0, fmt.Errorf("序列化外部原始文章: %w", err)
 	}
 
 	// 3. 写入新文章，并在极小概率并发冲突时通过唯一键保留稳定主键。
 	externalID := nullableArticleText(truncateRunes(entry.ExternalID, 255))
 	title := fallbackTitle(truncateRunes(entry.Title, 480))
-	link := truncateRunes(entry.Link, 1000)
 	author = truncateRunes(author, 100)
 	publishedAt := nullableArticleText(entry.PublishedAt)
 	summary := nullableArticleText(entry.Summary)
@@ -762,7 +772,7 @@ func signalNames(items []Signal) []string {
 	return results
 }
 
-// fallbackTitle 给空 RSS 标题提供稳定占位值。
+// fallbackTitle 给空文章标题提供稳定占位值。
 // 输入：value 是清理后的标题。
 // 输出：非空返回原值，空值返回“未命名文章”。
 // 副作用：无。

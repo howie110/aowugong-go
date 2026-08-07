@@ -25,7 +25,13 @@ dist/
 .cache/
 
 # Runtime data and generated migration reports
-storage/
+storage/*
+!storage/private/
+storage/private/*
+!storage/private/vpn/
+storage/private/vpn/*
+!storage/private/vpn/.gitkeep
+!storage/private/vpn/README.md
 
 # Go workspace file
 go.work

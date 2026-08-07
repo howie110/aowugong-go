@@ -12,31 +12,31 @@ import (
 	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
-type fixedRSSGateway struct{}
+type fixedArticleGateway struct{}
 
-type manyRSSGateway struct {
+type manyArticleGateway struct {
 	count int
 }
 
-type recordingRSSGateway struct {
+type recordingArticleGateway struct {
 	feedURL string
 }
 
-type staleRSSGateway struct{}
+type staleArticleGateway struct{}
 
-// Fetch 记录当前进程实际使用的 RSS 地址。
+// Fetch 记录当前进程实际使用的 Miniflux 地址。
 // 输入：ctx、sourceID、feedURL 和 limit 模拟正式客户端。
 // 输出：返回空文章集合。
 // 副作用：把 feedURL 保存到测试替身。
-func (g *recordingRSSGateway) Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.RSSItem, error) {
+func (g *recordingArticleGateway) Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.ArticleItem, error) {
 	// 1. 记录地址并返回稳定空集合。
 	g.feedURL = feedURL
-	return []client.RSSItem{}, nil
+	return []client.ArticleItem{}, nil
 }
 
 // TestServiceUsesRuntimeFeedURL 验证共享数据库地址不会覆盖当前进程配置。
 // 输入：数据库保存服务器地址，当前进程配置本地 SSH 隧道地址。
-// 输出：RSS 客户端收到当前进程配置地址。
+// 输出：Miniflux 客户端收到当前进程配置地址。
 // 副作用：执行模拟来源查询和状态更新。
 func TestServiceUsesRuntimeFeedURL(t *testing.T) {
 	// 1. 创建包含服务器持久化地址的模拟文章来源。
@@ -49,20 +49,20 @@ func TestServiceUsesRuntimeFeedURL(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "source_code", "source_name", "source_type", "feed_url", "is_active",
 			"description", "last_fetch_at", "last_fetch_status", "last_fetch_message",
-		}).AddRow(1, "wechat_aggregate", "公众号聚合", "wechat_rss_aggregate",
-			"http://127.0.0.1:5000/api/rss/all", 1, "", "", "success", ""))
+		}).AddRow(1, "wechat_aggregate", "Miniflux 投资文章", "miniflux",
+			"http://8.138.123.59:5000", 1, "", "", "success", ""))
 	mock.ExpectExec("UPDATE investment_article_source").WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// 2. 执行本地同步并核对只使用本地进程的隧道地址。
-	rss := &recordingRSSGateway{}
+	articles := &recordingArticleGateway{}
 	service := NewService(NewRepository(db), ServiceOptions{
-		RSS: rss, FeedURL: "http://127.0.0.1:15000/api/rss/all",
+		Articles: articles, FeedURL: "http://127.0.0.1:15000",
 	})
 	if _, err := service.Sync(context.Background(), 30, false, 0); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	if rss.feedURL != "http://127.0.0.1:15000/api/rss/all" {
-		t.Fatalf("Fetch() feedURL = %q", rss.feedURL)
+	if articles.feedURL != "http://127.0.0.1:15000" {
+		t.Fatalf("Fetch() feedURL = %q", articles.feedURL)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("database expectations = %v", err)
@@ -73,11 +73,11 @@ func TestServiceUsesRuntimeFeedURL(t *testing.T) {
 // 输入：ctx、sourceID、feedURL 和 limit 模拟正式客户端。
 // 输出：返回 count 篇具有唯一键的文章。
 // 副作用：无。
-func (g manyRSSGateway) Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.RSSItem, error) {
+func (g manyArticleGateway) Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.ArticleItem, error) {
 	// 1. 按配置数量生成稳定文章，验证任务会继续下一分析批次。
-	items := make([]client.RSSItem, 0, g.count)
+	items := make([]client.ArticleItem, 0, g.count)
 	for index := 0; index < g.count; index++ {
-		items = append(items, client.RSSItem{
+		items = append(items, client.ArticleItem{
 			ArticleKey: fmt.Sprintf("scheduled-%03d", index), ExternalID: fmt.Sprintf("scheduled-%03d", index),
 			Title: fmt.Sprintf("定时文章 %03d", index), Link: fmt.Sprintf("https://example.com/scheduled/%d", index),
 			Author: "完整作者", PublishedAt: shanghaiNowText(), Summary: "摘要", Content: "正文",
@@ -90,22 +90,22 @@ func (g manyRSSGateway) Fetch(ctx context.Context, sourceID int64, feedURL strin
 // 输入：ctx、sourceID、feedURL 和 limit 模拟正式客户端。
 // 输出：返回一篇当前文章。
 // 副作用：无。
-func (f *fixedRSSGateway) Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.RSSItem, error) {
+func (f *fixedArticleGateway) Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.ArticleItem, error) {
 	// 1. 返回稳定键和完整作者的规范化文章。
-	return []client.RSSItem{{
+	return []client.ArticleItem{{
 		ArticleKey: "sync-article-key", ExternalID: "sync-1", Title: "同步文章",
 		Link: "https://example.com/sync", Author: "完整作者", PublishedAt: shanghaiNowText(),
 		Summary: "同步摘要", Content: "同步正文",
 	}}, nil
 }
 
-// Fetch 返回一篇发布时间明显落后的文章，模拟 WeChatRSS 登录失效后只剩旧缓存。
-// 输入：ctx、sourceID、feedURL 和 limit 模拟正式 RSS 客户端。
+// Fetch 返回一篇发布时间明显落后的文章，模拟 Miniflux 上游只剩旧缓存。
+// 输入：ctx、sourceID、feedURL 和 limit 模拟正式 Miniflux 客户端。
 // 输出：返回一篇已过期但接口仍然 200 的文章。
 // 副作用：无。
-func (staleRSSGateway) Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.RSSItem, error) {
+func (staleArticleGateway) Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.ArticleItem, error) {
 	// 1. 返回固定旧文章，确保定时任务能识别上游停更而不是静默成功。
-	return []client.RSSItem{{
+	return []client.ArticleItem{{
 		ArticleKey: "stale-article-key", ExternalID: "stale-1", Title: "旧缓存文章",
 		Link: "https://example.com/stale", Author: "旧作者", PublishedAt: "2026-07-29 06:10:08",
 		Summary: "旧摘要", Content: "旧正文",
@@ -135,20 +135,20 @@ func (fixedAnalysisGateway) SimpleChat(ctx context.Context, prompt string, maxTo
 	return "```json\n{\"summary\":\"分析摘要\",\"recommendations\":[{\"name\":\"贵州茅台\",\"type\":\"stock\",\"reason\":\"估值有望修复\"}],\"risks\":[],\"market\":{\"mood\":\"cautious\",\"mood_reason\":\"等待确认\",\"prediction\":\"range\",\"prediction_reason\":\"震荡\"}}\n```", nil
 }
 
-// TestServiceSyncsRSSAndAnalyzesThroughUnifiedEntry 验证抓取与分析完整业务入口。
-// 输入：固定 RSS 和模型客户端、已启用默认来源。
+// TestServiceSyncsArticlesAndAnalyzesThroughUnifiedEntry 验证抓取与分析完整业务入口。
+// 输入：固定文章和模型客户端、已启用默认来源。
 // 输出：同步插入并分析一篇文章，cautious 最终存为 neutral。
 // 副作用：创建并写入隔离 SQLite 测试 schema。
-func TestServiceSyncsRSSAndAnalyzesThroughUnifiedEntry(t *testing.T) {
+func TestServiceSyncsArticlesAndAnalyzesThroughUnifiedEntry(t *testing.T) {
 	// 1. 创建数据库、来源和带假客户端的服务。
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000/rss/all.xml"); err != nil {
+	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
 		t.Fatalf("SyncDefaultSource() error = %v", err)
 	}
-	rss := &fixedRSSGateway{}
-	service := NewService(repository, ServiceOptions{Model: "test-model", RSS: rss, Analyzer: fixedAnalysisGateway{}})
+	sourceClient := &fixedArticleGateway{}
+	service := NewService(repository, ServiceOptions{Model: "test-model", Articles: sourceClient, Analyzer: fixedAnalysisGateway{}})
 
 	// 2. 通过统一入口执行抓取和分析。
 	result, err := service.Sync(ctx, 30, true, 10)
@@ -162,7 +162,7 @@ func TestServiceSyncsRSSAndAnalyzesThroughUnifiedEntry(t *testing.T) {
 		t.Fatalf("direct sync classified aliases = %d, want 0", result.ClassifiedAliasCount)
 	}
 
-	// 3. 再次读取同一份 WeChatRSS 数据时跳过已有文章，不重复更新大字段。
+	// 3. 再次读取同一份 Miniflux 数据时跳过已有文章，不重复更新大字段。
 	repeated, err := service.Sync(ctx, 30, false, 0)
 	if err != nil {
 		t.Fatalf("second Sync() error = %v", err)
@@ -190,11 +190,11 @@ func TestServiceScheduledSyncDrainsMultipleAnalysisBatches(t *testing.T) {
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000/rss/all.xml"); err != nil {
+	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
 		t.Fatalf("SyncDefaultSource() error = %v", err)
 	}
 	service := NewService(repository, ServiceOptions{
-		Model: "test-model", RSS: manyRSSGateway{count: 51}, Analyzer: fixedAnalysisGateway{},
+		Model: "test-model", Articles: manyArticleGateway{count: 51}, Analyzer: fixedAnalysisGateway{},
 	})
 
 	// 2. 执行生产同步入口并核对跨批累计和最终 pending。
@@ -216,10 +216,10 @@ func TestServiceScheduledSyncFailsWithPendingArticles(t *testing.T) {
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000/rss/all.xml"); err != nil {
+	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
 		t.Fatalf("SyncDefaultSource() error = %v", err)
 	}
-	service := NewService(repository, ServiceOptions{RSS: manyRSSGateway{count: 1}})
+	service := NewService(repository, ServiceOptions{Articles: manyArticleGateway{count: 1}})
 
 	// 2. 执行生产入口并要求 pending 不会被静默吞掉。
 	result, err := service.SyncScheduled(ctx, true)
@@ -236,30 +236,51 @@ func TestServiceScheduledSyncFailsWithPendingArticles(t *testing.T) {
 // 输出：返回明确的密钥缺失错误。
 // 副作用：执行模拟 SQLite 来源、计数和统计查询。
 
-// TestServiceScheduledSyncFailsWhenRSSLatestArticleIsStale 验证上游 RSS 长期停更时任务失败通知。
-// 输入：WeChatRSS 返回旧缓存文章，当前时间超过旧文章 72 小时。
+// TestServiceScheduledSyncFailsWhenArticleLatestIsStale 验证 Miniflux 上游长期停更时任务失败通知。
+// 输入：Miniflux 返回旧缓存文章，当前时间超过旧文章 72 小时。
 // 输出：返回包含上游最新文章过旧的错误。
 // 副作用：创建并写入隔离 SQLite 测试 schema。
-func TestServiceScheduledSyncFailsWhenRSSLatestArticleIsStale(t *testing.T) {
-	// 1. 创建默认来源，并用旧缓存 RSS 与固定模型完成基础同步流程。
+func TestServiceScheduledSyncFailsWhenArticleLatestIsStale(t *testing.T) {
+	// 1. 创建默认来源，并用 Miniflux 旧缓存与固定模型完成基础同步流程。
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000/rss/all.xml"); err != nil {
+	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
 		t.Fatalf("SyncDefaultSource() error = %v", err)
 	}
 	service := NewService(repository, ServiceOptions{
-		Model: "test-model", RSS: staleRSSGateway{}, Analyzer: fixedAnalysisGateway{},
+		Model: "test-model", Articles: staleArticleGateway{}, Analyzer: fixedAnalysisGateway{},
 		Now: func() time.Time { return time.Date(2026, 8, 6, 10, 0, 0, 0, time.FixedZone("CST", 8*3600)) },
 	})
 
 	// 2. 执行生产定时入口，要求旧缓存不再被当成成功抓取。
 	result, err := service.SyncScheduled(ctx, false)
-	if err == nil || !strings.Contains(err.Error(), "WeChatRSS 上游最新文章过旧") {
+	if err == nil || !strings.Contains(err.Error(), "Miniflux 上游最新文章过旧") {
 		t.Fatalf("SyncScheduled() error = %v, result = %#v", err, result)
 	}
 	if result.LatestFetchedAt != "2026-07-29 06:10:08" {
 		t.Fatalf("LatestFetchedAt = %q", result.LatestFetchedAt)
+	}
+}
+
+// TestServiceScheduledSyncFailsWhenMinifluxReturnsNoArticles 验证自动任务不会把空上游当成成功。
+// 输入：已启用 Miniflux 来源，但客户端返回零篇文章。
+// 输出：返回明确的空分类错误，供任务包装器发送微信通知。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
+func TestServiceScheduledSyncFailsWhenMinifluxReturnsNoArticles(t *testing.T) {
+	// 1. 创建启用来源，并使用返回空集合的文章客户端。
+	ctx := context.Background()
+	db := testdatabase.Open(t)
+	repository := NewRepository(db)
+	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("SyncDefaultSource() error = %v", err)
+	}
+	service := NewService(repository, ServiceOptions{Articles: &recordingArticleGateway{}})
+
+	// 2. 自动任务必须失败，避免长时间无文章却没有通知。
+	result, err := service.SyncScheduled(ctx, false)
+	if err == nil || !strings.Contains(err.Error(), "Miniflux 未返回任何投资文章") {
+		t.Fatalf("SyncScheduled() error = %v, result = %#v", err, result)
 	}
 }
 

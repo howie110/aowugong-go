@@ -10,7 +10,7 @@ const (
 	DefaultMarketDays = 3
 )
 
-// Source 描述投资文章 RSS 信息源。
+// Source 描述投资文章外部信息源。
 type Source struct {
 	ID               int64  `json:"id"`
 	SourceCode       string `json:"source_code"`
@@ -24,7 +24,7 @@ type Source struct {
 	LastFetchMessage string `json:"last_fetch_message,omitempty"`
 }
 
-// FeedEntry 描述从 RSS 或 Atom 规范化得到的一篇文章。
+// FeedEntry 描述从外部文章 API 规范化得到的一篇文章。
 type FeedEntry struct {
 	ArticleKey  string
 	ExternalID  string
@@ -145,7 +145,7 @@ type PageSummary struct {
 	LatestArticleAt string       `json:"latest_article_at,omitempty"`
 }
 
-// SyncResult 描述一次 RSS 同步和可选分析的统计。
+// SyncResult 描述一次外部文章同步和可选分析的统计。
 type SyncResult struct {
 	SourceCount          int                 `json:"source_count"`
 	FetchedCount         int                 `json:"fetched_count"`

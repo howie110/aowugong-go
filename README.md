@@ -8,7 +8,7 @@
 - 前端：React、TypeScript、Vite、shadcn/ui、Tailwind CSS
 - 任务：`robfig/cron/v3`，固定时区 `Asia/Shanghai`
 - 认证：bcrypt、JWT，登录有效期 72 小时
-- 外部服务：DeepSeek、Tushare、WeChatRSS、OpeniLink Hub、微信读书、阿里云 OCR
+- 外部服务：Miniflux、DeepSeek、Tushare、OpeniLink Hub、微信读书、阿里云 OCR
 - 生产：Linux amd64 发布产物、systemd，无需 Go、Node、Python、MySQL 或 Docker
 
 ## 目录
@@ -63,6 +63,19 @@ synchronous=NORMAL
 - 密码、令牌和密钥字段始终隐藏
 - 不接受任意 SQL，不提供新增、修改或删除
 
+## Miniflux
+
+投资文章由 aowugong 通过 Miniflux API 的 `投资文章` 分类读取。Miniflux 使用独立 PostgreSQL 数据库，aowugong 主库仍为 SQLite，两者不混用。
+
+```text
+Miniflux:  http://8.138.123.59:5000
+PostgreSQL: 127.0.0.1:5432，仅服务器本机监听
+```
+
+Miniflux 登录信息保存在服务器 `/root/miniflux-access.txt`，aowugong API Token 保存在 `/etc/miniflux/aowugong-api-token`，文件权限均为 `0600`。生产环境通过 `MINIFLUX_*` 注入连接参数，不在仓库保存密码或 Token。
+
+境外订阅使用服务器 Xray 本机代理：HTTP `127.0.0.1:6152`、SOCKS `127.0.0.1:6153`，两个端口均不对公网监听。Miniflux 通过 `HTTP_CLIENT_PROXY` 配置代理，只有开启“通过代理抓取”的订阅会使用它。节点配置在本地 `storage/private/vpn/` 管理，生产副本位于 `/usr/local/etc/xray/config.json`，明文节点凭据不进入公开仓库。
+
 ## 本地开发
 
 先构建前端：
@@ -96,7 +109,7 @@ cd ..
 | 时间 | 任务 | 说明 |
 |---|---|---|
 | 09:00 | `test_crontab` | 每日任务链路测试 |
-| 仅手动 | `sync_investment_articles` | 同步并分析投资文章；等待新文章源后恢复定时 |
+| 仅手动 | `sync_investment_articles` | 同步并分析 Miniflux 投资文章；订阅导入验收后恢复定时 |
 | 22:00 | `check_service_monitors` | 服务连通性检查 |
 | 09:30 | `check_subscription_expiry_notify` | 订阅到期提醒 |
 | 10:00 | `openilink_reply_reminder` | OpeniLink 回复提醒 |
@@ -151,10 +164,14 @@ MySQL 旧数据和 FastAPI 服务配置保留用于回滚。完成页面和数�
 | `AOWUGONG_ENCRYPTION_KEY` | 生产加密密钥 |
 | `AOWUGONG_BACKUP_*` | SQLite 快照目录和保留数 |
 | `AOWUGONG_SCHEDULER_ENABLED` | 是否启动内嵌 Cron |
+| `MINIFLUX_BASE_URL` | Miniflux 内部 API 根地址 |
+| `MINIFLUX_MONITOR_URL` | 服务监控页面展示的公网入口 |
+| `MINIFLUX_API_TOKEN` | aowugong 专用 API Token |
+| `MINIFLUX_CATEGORY` | 投资文章分类名称，默认 `投资文章` |
 | `FINANCE_ENABLE_REAL_TRADE` | 真实交易总开关，默认 `false` |
 | `AOWUGONG_MYSQL_*` | 仅一次性迁移旧数据时使用 |
 
-其余 DeepSeek、Tushare、OpeniLink、微信读书、WeChatRSS 和 OCR 配置见 `.env.example`。
+其余 DeepSeek、Tushare、OpeniLink、微信读书和 OCR 配置见 `.env.example`。
 
 ## 验证
 
@@ -221,7 +238,7 @@ DEPLOY_MODE=main APP_PORT=2345 SCHEDULER_ENABLED=true \
   ./scripts/bootstrap-release.sh v1.0.1
 ```
 
-发布和切换不会修改 WeChatRSS 5000、OpeniLink Hub 9800、SSH、防火墙或安全组。
+发布和切换不会修改 Miniflux 5000、PostgreSQL、OpeniLink Hub 9800、SSH、防火墙或安全组。
 
 ## 回滚
 

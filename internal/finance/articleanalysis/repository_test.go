@@ -2,7 +2,6 @@ package articleanalysis
 
 import (
 	"context"
-	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -113,34 +112,40 @@ func TestRepositoryArticlesAllowsFullSignalWindowLimit(t *testing.T) {
 	}
 }
 
-// TestSyncDefaultSourceOnlyFillsEmptyFeedURL 验证运行环境地址不会覆盖共享来源地址。
-// 输入：当前进程提供一个有效 RSS 地址。
-// 输出：重复来源只在原地址为空时补值。
-// 副作用：执行一条模拟来源 upsert。
-func TestSyncDefaultSourceOnlyFillsEmptyFeedURL(t *testing.T) {
-	// 1. 使用查询匹配器拒绝无条件覆盖 feed_url 的 upsert。
-	matcher := sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
-		statement := strings.Join(strings.Fields(actualSQL), " ")
-		if !strings.Contains(statement, "feed_url = CASE WHEN investment_article_source.feed_url = '' THEN excluded.feed_url ELSE investment_article_source.feed_url END") {
-			return fmt.Errorf("feed_url must only be filled when empty: %s", statement)
-		}
-		return nil
-	})
-	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(matcher))
-	if err != nil {
-		t.Fatalf("sqlmock.New() error = %v", err)
+// TestSyncDefaultSourceReplacesLegacyWeChatMetadata 验证启用 Miniflux 时复用原文章来源主键。
+// 输入：一条已有文章关联的旧 WeChatRSS 来源和新的 Miniflux 根地址。
+// 输出：来源地址、类型和说明切换为 Miniflux，原来源主键保持不变。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
+func TestSyncDefaultSourceReplacesLegacyWeChatMetadata(t *testing.T) {
+	// 1. 写入旧 WeChatRSS 来源，模拟线上已有文章引用的稳定来源。
+	ctx := context.Background()
+	db := testdatabase.Open(t)
+	if _, err := db.ExecContext(ctx, `INSERT INTO investment_article_source(
+		source_code, source_name, source_type, feed_url, weight, is_active, description
+	) VALUES('wechat_aggregate','公众号聚合','wechat_rss_aggregate','http://127.0.0.1:5000/api/rss/all',1,1,'微信公众号聚合 RSS。')`); err != nil {
+		t.Fatalf("insert legacy source: %v", err)
 	}
-	defer db.Close()
-	mock.ExpectExec("runtime-safe source upsert").
-		WithArgs("http://127.0.0.1:15000/api/rss/all", 1, "ready", nil).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+	var originalID int64
+	if err := db.QueryRowContext(ctx, `SELECT id FROM investment_article_source WHERE source_code = 'wechat_aggregate'`).Scan(&originalID); err != nil {
+		t.Fatalf("query legacy source: %v", err)
+	}
 
-	// 2. 同步默认来源并核对 SQL 满足只补空值约束。
-	if err := NewRepository(db).SyncDefaultSource(context.Background(), "http://127.0.0.1:15000/api/rss/all"); err != nil {
+	// 2. 切换来源并核对原主键上的元数据被完整替换。
+	if err := NewRepository(db).SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
 		t.Fatalf("SyncDefaultSource() error = %v", err)
 	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("database expectations = %v", err)
+	var id int64
+	var name, sourceType, feedURL, description string
+	var active int
+	if err := db.QueryRowContext(ctx, `SELECT id, source_name, source_type, feed_url, is_active, description
+		FROM investment_article_source WHERE source_code = 'wechat_aggregate'`).
+		Scan(&id, &name, &sourceType, &feedURL, &active, &description); err != nil {
+		t.Fatalf("query switched source: %v", err)
+	}
+	if id != originalID || name != "Miniflux 投资文章" || sourceType != "miniflux" ||
+		feedURL != "http://127.0.0.1:5000" || active != 1 || description != "Miniflux 投资文章分类。" {
+		t.Fatalf("source = id:%d name:%q type:%q url:%q active:%d description:%q",
+			id, name, sourceType, feedURL, active, description)
 	}
 }
 
@@ -169,16 +174,52 @@ func TestRepositorySkipsExistingArticle(t *testing.T) {
 	}
 }
 
+// TestRepositorySkipsArticleWithExistingLink 验证切换文章来源后按原链接复用历史文章。
+// 输入：旧文章键和新 Miniflux 文章键使用同一个文章 URL。
+// 输出：第二次写入返回 unchanged 和旧文章主键，表内仍只有一篇文章。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
+func TestRepositorySkipsArticleWithExistingLink(t *testing.T) {
+	// 1. 创建默认来源并写入旧文章键。
+	ctx := context.Background()
+	db := testdatabase.Open(t)
+	repository := NewRepository(db)
+	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("SyncDefaultSource() error = %v", err)
+	}
+	sources, err := repository.Sources(ctx, true)
+	if err != nil || len(sources) != 1 {
+		t.Fatalf("Sources() = %#v, %v", sources, err)
+	}
+	firstAction, firstID, err := repository.UpsertArticle(ctx, sources[0].ID, FeedEntry{
+		ArticleKey: "legacy-rss-key", Title: "历史文章", Link: "https://example.com/same-article",
+	})
+	if err != nil || firstAction != "inserted" {
+		t.Fatalf("first UpsertArticle() = %q, %d, %v", firstAction, firstID, err)
+	}
+
+	// 2. 使用新的 Miniflux 文章键写入同一 URL，必须复用旧记录。
+	secondAction, secondID, err := repository.UpsertArticle(ctx, sources[0].ID, FeedEntry{
+		ArticleKey: "miniflux-key", Title: "历史文章", Link: "https://example.com/same-article",
+	})
+	if err != nil || secondAction != "unchanged" || secondID != firstID {
+		t.Fatalf("second UpsertArticle() = %q, %d, %v, want unchanged/%d", secondAction, secondID, err, firstID)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM investment_article").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("article count = %d, %v, want 1", count, err)
+	}
+}
+
 // TestRepositoryAndReportPreserveArticleContracts 验证文章存储、详情和 60/3 天报告契约。
 // 输入：一篇当前文章和一条结构化分析结果。
 // 输出：列表、详情、信号榜和市场分布均返回前端需要的字段。
 // 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestRepositoryAndReportPreserveArticleContracts(t *testing.T) {
-	// 1. 创建完整迁移数据库并同步默认 RSS 来源。
+	// 1. 创建完整迁移数据库并同步默认 Miniflux 来源。
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000/rss/all.xml"); err != nil {
+	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
 		t.Fatalf("SyncDefaultSource() error = %v", err)
 	}
 	sources, err := repository.Sources(ctx, true)

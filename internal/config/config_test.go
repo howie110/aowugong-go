@@ -42,7 +42,7 @@ func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 
 // TestEnvironmentExampleUsesSQLiteRuntimeSettings 验证环境示例以 SQLite 作为运行时数据库。
 // 输入：仓库 configs/.env.example。
-// 输出：示例包含 SQLite 运行字段和一次性 MySQL 来源字段。
+// 输出：示例包含 SQLite、一次性 MySQL 来源和 Miniflux API 字段，不再包含旧 RSS 配置。
 // 副作用：读取配置模板文件。
 func TestEnvironmentExampleUsesSQLiteRuntimeSettings(t *testing.T) {
 	// 1. 读取仓库中的环境变量示例。
@@ -51,13 +51,21 @@ func TestEnvironmentExampleUsesSQLiteRuntimeSettings(t *testing.T) {
 		t.Fatalf("os.ReadFile() error = %v", err)
 	}
 
-	// 2. 断言示例包含 SQLite 运行字段和一次性 MySQL 迁移来源。
+	// 2. 断言示例包含 SQLite、一次性 MySQL 迁移来源和 Miniflux API。
 	for _, key := range []string{
 		"AOWUGONG_SQLITE_PATH=", "AOWUGONG_SQLITE_BUSY_TIMEOUT_MS=",
 		"AOWUGONG_MYSQL_HOST=", "AOWUGONG_MYSQL_PORT=", "AOWUGONG_MYSQL_DATABASE=",
+		"MINIFLUX_BASE_URL=", "MINIFLUX_MONITOR_URL=", "MINIFLUX_API_TOKEN=", "MINIFLUX_CATEGORY=",
 	} {
 		if !strings.Contains(string(content), key) {
 			t.Errorf(".env.example missing %s", key)
+		}
+	}
+
+	// 3. 旧 WeChatRSS 配置不能继续出现在唯一模板中。
+	for _, key := range []string{"INVESTMENT_ARTICLE_AGGREGATE_RSS_URL=", "WECHAT_RSS_MONITOR_URL="} {
+		if strings.Contains(string(content), key) {
+			t.Errorf(".env.example still contains retired %s", key)
 		}
 	}
 }
@@ -116,6 +124,30 @@ func TestLoadUsesHTTPAddressOverride(t *testing.T) {
 	// 2. 断言环境变量覆盖默认开发地址。
 	if cfg.HTTP.Address != "127.0.0.1:3456" {
 		t.Errorf("HTTP.Address = %q, want 127.0.0.1:3456", cfg.HTTP.Address)
+	}
+}
+
+// TestLoadUsesMinifluxOverrides 验证投资文章来源通过 Miniflux API 独立配置。
+// 输入：Miniflux 根地址、API Token 和投资文章分类。
+// 输出：配置保留清理后的连接参数，不依赖旧 WeChatRSS 地址。
+// 副作用：无。
+func TestLoadUsesMinifluxOverrides(t *testing.T) {
+	// 1. 提供完整的 Miniflux API 配置。
+	cfg, err := Load(newLookup(map[string]string{
+		"MINIFLUX_BASE_URL":    "http://127.0.0.1:5000/",
+		"MINIFLUX_MONITOR_URL": "http://8.138.123.59:5000/",
+		"MINIFLUX_API_TOKEN":   "test-token",
+		"MINIFLUX_CATEGORY":    "投资文章",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// 2. 断言文章客户端参数进入唯一配置结构。
+	if cfg.Clients.Miniflux.BaseURL != "http://127.0.0.1:5000/" ||
+		cfg.Clients.Miniflux.MonitorURL != "http://8.138.123.59:5000/" ||
+		cfg.Clients.Miniflux.APIToken != "test-token" || cfg.Clients.Miniflux.Category != "投资文章" {
+		t.Errorf("Clients.Miniflux = %#v", cfg.Clients.Miniflux)
 	}
 }
 

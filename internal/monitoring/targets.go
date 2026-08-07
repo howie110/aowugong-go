@@ -28,22 +28,18 @@ func BuildTargets(cfg config.Clients) []Target {
 	}
 
 	// 2. 为内部服务分别保留公网展示地址和本机探测地址。
-	wechatURL := strings.TrimSpace(cfg.WeChatRSSMonitorURL)
-	wechatProbeURL := ""
-	if strings.TrimSpace(cfg.ArticleRSSURL) != "" {
-		wechatProbeURL = endpointURL(cfg.ArticleRSSURL, "/api/admin/status")
+	minifluxURL := strings.TrimSpace(cfg.Miniflux.MonitorURL)
+	if minifluxURL == "" {
+		minifluxURL = strings.TrimSpace(cfg.Miniflux.BaseURL)
 	}
-	if wechatURL == "" {
-		wechatURL = wechatProbeURL
+	minifluxProbeURL := strings.TrimSpace(cfg.Miniflux.BaseURL)
+	if minifluxProbeURL == "" {
+		minifluxProbeURL = minifluxURL
 	}
-	if wechatProbeURL == "" {
-		wechatProbeURL = wechatURL
-	}
-	// WeChatRSS 旧抓取链路已停用，避免服务监控继续探测 5000 端口。
-	if false && wechatURL != "" {
+	if minifluxURL != "" {
 		targets = append(targets, Target{
-			Code: "wechat-rss", Name: "tmwgsicp/wechat-download-api", URL: wechatURL, ProbeURL: wechatProbeURL,
-			Description: textPointer("微信登录状态与 RSS 聚合服务"),
+			Code: "miniflux", Name: "miniflux/v2", URL: minifluxURL,
+			ProbeURL: endpointURL(minifluxProbeURL, "/healthcheck"), Description: textPointer("投资文章订阅与聚合服务"),
 		})
 	}
 	openILinkURL := strings.TrimSpace(cfg.OpenILink.MonitorURL)
@@ -162,37 +158,4 @@ func textPointer(value string) *string {
 		return nil
 	}
 	return &value
-}
-
-// ValidateWeChatRSSLoginPayload 校验 WeChatRSS 登录状态载荷。
-// 输入：payload 是管理接口 JSON 字典。
-// 输出：健康返回空字符串，异常返回可读说明。
-// 副作用：无。
-func ValidateWeChatRSSLoginPayload(payload map[string]any) string {
-	// 1. 只有两个登录字段为真且未过期才视为健康。
-	authenticated, _ := payload["authenticated"].(bool)
-	loggedIn, _ := payload["loggedIn"].(bool)
-	expired, _ := payload["isExpired"].(bool)
-	if authenticated && loggedIn && !expired {
-		return ""
-	}
-	status := strings.TrimSpace(toText(payload["status"]))
-	if status == "" {
-		status = "未登录或登录已过期"
-	}
-	account := strings.TrimSpace(toText(payload["account"]))
-	if account == "" {
-		account = strings.TrimSpace(toText(payload["nickname"]))
-	}
-	return strings.TrimSpace("WeChatRSS 登录异常：" + account + " " + status)
-}
-
-// toText 把外部 JSON 标量转换为文本。
-// 输入：value 是任意值。
-// 输出：字符串值原样返回，其他类型返回空字符串。
-// 副作用：无。
-func toText(value any) string {
-	// 1. 监控错误字段只接受字符串，避免展示 map 内存格式。
-	text, _ := value.(string)
-	return text
 }

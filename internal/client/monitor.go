@@ -63,40 +63,6 @@ func (c *MonitoringClient) ProbeURL(ctx context.Context, address string) ProbeRe
 	return ProbeResult{Healthy: true, HTTPStatus: &status, LatencyMS: latency}
 }
 
-// FetchJSON 使用 GET 读取监控业务接口的 JSON 字典。
-// 输入：ctx 是调用上下文，address 是目标 URL。
-// 输出：返回载荷、HTTP 状态、耗时和错误。
-// 副作用：调用外部 HTTP 服务。
-func (c *MonitoringClient) FetchJSON(ctx context.Context, address string) (map[string]any, *int, int, error) {
-	// 1. 构造并执行带 User-Agent 的 GET 请求。
-	startedAt := time.Now()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
-	if err != nil {
-		return nil, nil, 0, err
-	}
-	request.Header.Set("User-Agent", "aowugong-service-monitor/1.0")
-	response, err := c.http.Do(request)
-	latency := int(time.Since(startedAt).Milliseconds())
-	if err != nil {
-		return nil, nil, latency, err
-	}
-	defer response.Body.Close()
-	status := response.StatusCode
-	if status != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-		return nil, &status, latency, fmt.Errorf("HTTP %d", status)
-	}
-
-	// 2. 限制并解码 JSON 字典。
-	decoder := json.NewDecoder(io.LimitReader(response.Body, monitorResponseLimit))
-	decoder.UseNumber()
-	var payload map[string]any
-	if err := decoder.Decode(&payload); err != nil {
-		return nil, &status, latency, fmt.Errorf("返回非 JSON: %w", err)
-	}
-	return payload, &status, latency, nil
-}
-
 // ProbeOpenILink 使用空内容请求静默验证发送接口，不投递真实消息。
 // 输入：ctx 是调用上下文，address 是发送接口，appToken 是 Bridge App Token。
 // 输出：只有预期的 content is required 响应视为健康。

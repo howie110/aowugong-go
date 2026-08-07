@@ -134,28 +134,6 @@ func (s *Service) Summary(ctx context.Context) (Summary, error) {
 	}, nil
 }
 
-// EnsureWeChatRSSLoginOK 单独验证 WeChatRSS 登录状态。
-// 输入：ctx 是调用上下文。
-// 输出：未配置目标或健康时返回 nil，异常时返回可通知错误。
-// 副作用：调用 WeChatRSS 外部 HTTP API，不写数据库。
-func (s *Service) EnsureWeChatRSSLoginOK(ctx context.Context) error {
-	// 1. 从统一目标清单寻找 WeChatRSS。
-	for _, target := range BuildTargets(s.config) {
-		if target.Code != "wechat-rss" {
-			continue
-		}
-		result := s.checkTarget(ctx, target)
-		if result.Status != "up" {
-			if result.ErrorMessage != nil {
-				return fmt.Errorf("%s", *result.ErrorMessage)
-			}
-			return fmt.Errorf("WeChatRSS 登录状态异常")
-		}
-		return nil
-	}
-	return nil
-}
-
 // checkTarget 探测单个目标并返回标准结果。
 // 输入：ctx 是调用上下文，target 是目标定义。
 // 输出：返回 up/down 结果，不把业务异常向上抛出。
@@ -174,30 +152,12 @@ func (s *Service) checkTarget(ctx context.Context, target Target) Result {
 		Status: "down", CheckedAt: &checkedAt,
 	}
 
-	// 2. WeChatRSS 使用登录业务字段判断健康。
-	if target.Code == "wechat-rss" {
-		payload, httpStatus, latency, err := s.client.FetchJSON(checkCtx, probeURL)
-		base.HTTPStatus = httpStatus
-		base.LatencyMS = &latency
-		if err != nil {
-			message := "WeChatRSS 登录状态接口请求失败：" + err.Error()
-			base.ErrorMessage = &message
-			return base
-		}
-		if message := ValidateWeChatRSSLoginPayload(payload); message != "" {
-			base.ErrorMessage = &message
-			return base
-		}
-		base.Status = "up"
-		return base
-	}
-
-	// 3. OpeniLink 优先读本机 SQLite，缺少文件时才做空内容 HTTP 探测。
+	// 2. OpeniLink 优先读本机 SQLite，缺少文件时才做空内容 HTTP 探测。
 	if target.Code == "openilink-hub" {
 		return s.checkOpenILink(checkCtx, probeURL, base)
 	}
 
-	// 4. 普通服务按网络错误和 HTTP 5xx 判断健康。
+	// 3. 普通服务按网络错误和 HTTP 5xx 判断健康。
 	probe := s.client.ProbeURL(checkCtx, probeURL)
 	base.HTTPStatus = probe.HTTPStatus
 	base.LatencyMS = intValuePointer(probe.LatencyMS)

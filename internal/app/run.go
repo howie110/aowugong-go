@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/auth"
@@ -232,7 +233,7 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 		MaxBytes: cfg.Clients.PositionOCR.UploadMaxMB * 1024 * 1024, OCRProvider: cfg.Clients.PositionOCR.Provider,
 	})
 	stockAnalysisService := stockanalysis.NewService(stockanalysis.NewRepository(db))
-	if err := tasks.articleRepository.SyncDefaultSource(ctx, cfg.Clients.ArticleRSSURL); err != nil {
+	if err := tasks.articleRepository.SyncDefaultSource(ctx, minifluxSourceURL(cfg)); err != nil {
 		return nil, fmt.Errorf("初始化投资文章来源: %w", err)
 	}
 
@@ -266,14 +267,18 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 func newTaskServices(cfg config.Config, db *sql.DB) taskServices {
 	// 1. 构造普通业务、监控和文章服务，并保留文章来源仓储供服务器初始化。
 	articleRepository := articleanalysis.NewRepository(db)
+	articleSourceURL := minifluxSourceURL(cfg)
 	services := taskServices{
 		subscriptions:     subscription.NewService(subscription.NewRepository(db)),
 		monitoring:        monitoring.NewService(monitoring.NewRepository(db), client.NewMonitoringClient(&http.Client{Timeout: 20 * time.Second}), cfg.Clients),
 		articleRepository: articleRepository,
 		articles: articleanalysis.NewService(articleRepository, articleanalysis.ServiceOptions{
-			Model:    cfg.Clients.DeepSeek.Model,
-			FeedURL:  cfg.Clients.ArticleRSSURL,
-			RSS:      client.NewRSSClient(&http.Client{Timeout: 180 * time.Second}),
+			Model:   cfg.Clients.DeepSeek.Model,
+			FeedURL: articleSourceURL,
+			Articles: client.NewMinifluxClient(
+				cfg.Clients.Miniflux.BaseURL, cfg.Clients.Miniflux.APIToken, cfg.Clients.Miniflux.Category,
+				&http.Client{Timeout: 180 * time.Second},
+			),
 			Analyzer: client.NewDeepSeekClient(cfg.Clients.DeepSeek, &http.Client{Timeout: 60 * time.Second}),
 		}),
 		data: financedata.NewService(financedata.NewRepository(db), client.NewTushareClient(cfg.Clients.Tushare, nil), financedata.SyncOptions{
@@ -282,6 +287,20 @@ func newTaskServices(cfg config.Config, db *sql.DB) taskServices {
 		notification: notification.NewService(notification.NewRepository(db), client.NewOpenILinkClient(cfg.Clients.OpenILink, nil)),
 	}
 	return services
+}
+
+// minifluxSourceURL 返回允许启用投资文章来源的 Miniflux 根地址。
+// 输入：cfg 包含根地址、API Token 和目标分类。
+// 输出：配置完整时返回无末尾斜线的根地址，否则返回空字符串。
+// 副作用：无。
+func minifluxSourceURL(cfg config.Config) string {
+	// 1. 三项配置必须同时存在，避免创建无法抓取的启用来源。
+	baseURL := strings.TrimRight(strings.TrimSpace(cfg.Clients.Miniflux.BaseURL), "/")
+	if baseURL == "" || strings.TrimSpace(cfg.Clients.Miniflux.APIToken) == "" ||
+		strings.TrimSpace(cfg.Clients.Miniflux.Category) == "" {
+		return ""
+	}
+	return baseURL
 }
 
 // newJobRegistry 建立全部执行来源共用的任务注册表。

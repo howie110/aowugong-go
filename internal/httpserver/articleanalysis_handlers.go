@@ -202,10 +202,10 @@ func (h articleAnalysisHandlers) report(w http.ResponseWriter, request *http.Req
 	writeJSON(w, http.StatusOK, result)
 }
 
-// sync 手动抓取 RSS 并可继续执行模型分析。
+// sync 手动读取 Miniflux 并可继续执行模型分析。
 // 输入：fetch_limit、analyze 和 analysis_limit 是可选查询参数。
 // 输出：写入 SyncResult。
-// 副作用：调用 RSS、WeChatRSS、DeepSeek，写入 SQLite 和 HTTP 响应。
+// 副作用：调用 Miniflux、DeepSeek，写入 SQLite 和 HTTP 响应。
 func (h articleAnalysisHandlers) sync(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析批量上限和布尔开关。
 	fetchLimit, ok := boundedQueryInt(w, request, "fetch_limit", 30, 1, 100)

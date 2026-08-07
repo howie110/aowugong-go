@@ -99,13 +99,20 @@ type Storage struct {
 // Clients 描述当前可达业务使用的外部 HTTP 服务配置。
 type Clients struct {
 	WeRead                WeRead
+	Miniflux              Miniflux
 	DeepSeek              DeepSeek
 	Tushare               Tushare
 	OpenILink             OpenILink
-	ArticleRSSURL         string
-	WeChatRSSMonitorURL   string
 	ServiceMonitorTargets string
 	PositionOCR           PositionOCR
+}
+
+// Miniflux 描述投资文章聚合 API 配置。
+type Miniflux struct {
+	BaseURL    string
+	MonitorURL string
+	APIToken   string
+	Category   string
 }
 
 // WeRead 描述微信读书 Agent Gateway 配置。
@@ -196,6 +203,9 @@ func Load(lookup LookupEnv) (Config, error) {
 				GatewayURL:   "https://i.weread.qq.com/api/agent/gateway",
 				SkillVersion: "1.0.4",
 			},
+			Miniflux: Miniflux{
+				BaseURL: "http://127.0.0.1:5000", MonitorURL: "http://8.138.123.59:5000/", Category: "投资文章",
+			},
 			DeepSeek: DeepSeek{BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"},
 			Tushare:  Tushare{BaseURL: "https://api.tushare.pro"},
 			OpenILink: OpenILink{
@@ -203,7 +213,6 @@ func Load(lookup LookupEnv) (Config, error) {
 				MonitorURL: "http://8.138.123.59:9800/",
 				DBPath:     "/var/lib/openilink-hub/openilink.db",
 			},
-			WeChatRSSMonitorURL: "http://8.138.123.59:5000/api/admin/status",
 			PositionOCR: PositionOCR{
 				Provider:    "aliyun",
 				UploadMaxMB: 10,
@@ -244,6 +253,10 @@ func Load(lookup LookupEnv) (Config, error) {
 	loadString(lookup, "WEREAD_GATEWAY_URL", &cfg.Clients.WeRead.GatewayURL)
 	loadString(lookup, "WEREAD_API_KEY", &cfg.Clients.WeRead.APIKey)
 	loadString(lookup, "WEREAD_SKILL_VERSION", &cfg.Clients.WeRead.SkillVersion)
+	loadString(lookup, "MINIFLUX_BASE_URL", &cfg.Clients.Miniflux.BaseURL)
+	loadString(lookup, "MINIFLUX_MONITOR_URL", &cfg.Clients.Miniflux.MonitorURL)
+	loadString(lookup, "MINIFLUX_API_TOKEN", &cfg.Clients.Miniflux.APIToken)
+	loadString(lookup, "MINIFLUX_CATEGORY", &cfg.Clients.Miniflux.Category)
 	loadString(lookup, "DEEPSEEK_BASE_URL", &cfg.Clients.DeepSeek.BaseURL)
 	loadString(lookup, "DEEPSEEK_API_KEY", &cfg.Clients.DeepSeek.APIKey)
 	loadString(lookup, "DEEPSEEK_MODEL", &cfg.Clients.DeepSeek.Model)
@@ -254,8 +267,6 @@ func Load(lookup LookupEnv) (Config, error) {
 	loadString(lookup, "OPENILINK_APP_TOKEN", &cfg.Clients.OpenILink.AppToken)
 	loadString(lookup, "OPENILINK_DEFAULT_TO", &cfg.Clients.OpenILink.DefaultTo)
 	loadString(lookup, "OPENILINK_DB_PATH", &cfg.Clients.OpenILink.DBPath)
-	loadString(lookup, "INVESTMENT_ARTICLE_AGGREGATE_RSS_URL", &cfg.Clients.ArticleRSSURL)
-	loadString(lookup, "WECHAT_RSS_MONITOR_URL", &cfg.Clients.WeChatRSSMonitorURL)
 	loadString(lookup, "SERVICE_MONITOR_TARGETS", &cfg.Clients.ServiceMonitorTargets)
 	loadString(lookup, "POSITION_OCR_PROVIDER", &cfg.Clients.PositionOCR.Provider)
 	loadString(lookup, "ALIYUN_OCR_ACCESS_KEY_ID", &cfg.Clients.PositionOCR.AccessKeyID)

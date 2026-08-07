@@ -19,14 +19,14 @@ const (
 	scheduledFetchLimit         = 2000
 	scheduledAnalysisBatchLimit = 50
 	scheduledAnalysisMaxBatches = 10
-	scheduledRSSStaleAfter      = 72 * time.Hour
+	scheduledSourceStaleAfter   = 72 * time.Hour
 	pendingSignalGroupName      = "待归类"
 	pendingSignalGroupType      = "pending"
 )
 
-// RSSGateway 定义投资文章服务需要的 RSS 读取能力。
-type RSSGateway interface {
-	Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.RSSItem, error)
+// ArticleGateway 定义投资文章服务需要的外部文章读取能力。
+type ArticleGateway interface {
+	Fetch(ctx context.Context, sourceID int64, feedURL string, limit int) ([]client.ArticleItem, error)
 }
 
 // AnalysisGateway 定义投资文章服务需要的模型分析能力。
@@ -35,11 +35,11 @@ type AnalysisGateway interface {
 	SimpleChat(ctx context.Context, prompt string, maxTokens int) (string, error)
 }
 
-// ServiceOptions 描述投资文章服务的当前进程 RSS 和模型配置。
+// ServiceOptions 描述投资文章服务的当前进程 Miniflux 和模型配置。
 type ServiceOptions struct {
 	Model    string
 	FeedURL  string
-	RSS      RSSGateway
+	Articles ArticleGateway
 	Analyzer AnalysisGateway
 	Now      func() time.Time
 }
@@ -47,7 +47,7 @@ type ServiceOptions struct {
 // Sync 抓取全部启用来源，并按选项继续分析待处理文章。
 // 输入：ctx 控制处理，fetchLimit 是每来源上限，analyze 控制是否分析，analysisLimit 是分析上限。
 // 输出：返回来源、抓取、写入和分析统计；基础数据库失败时返回错误。
-// 副作用：读取 WeChatRSS/RSS，按需调用 DeepSeek，并写入 SQLite。
+// 副作用：读取 Miniflux，按需调用 DeepSeek，并写入 SQLite。
 func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analysisLimit int) (SyncResult, error) {
 	// 1. 读取启用来源并初始化稳定空数组结果。
 	sources, err := s.repository.sourceRecords(ctx)
@@ -62,19 +62,19 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 		fetchLimit = scheduledFetchLimit
 	}
 
-	// 2. 逐来源读取现有 RSS 数据并写入新文章，单来源错误写入统计。
+	// 2. 逐来源读取 Miniflux 数据并写入新文章，单来源错误写入统计。
 	for _, source := range sources {
-		if s.options.RSS == nil {
-			message := "RSS 客户端未配置"
+		if s.options.Articles == nil {
+			message := "Miniflux 客户端未配置"
 			_ = s.repository.UpdateSourceStatus(ctx, source.ID, "error", message)
 			result.FailedSources = append(result.FailedSources, map[string]string{"source": source.SourceName, "error": message})
 			continue
 		}
 		feedURL := source.FeedURL
-		if source.SourceType == "wechat_rss_aggregate" && s.options.FeedURL != "" {
+		if source.SourceType == "miniflux" && s.options.FeedURL != "" {
 			feedURL = s.options.FeedURL
 		}
-		items, err := s.options.RSS.Fetch(ctx, source.ID, feedURL, fetchLimit)
+		items, err := s.options.Articles.Fetch(ctx, source.ID, feedURL, fetchLimit)
 		if err != nil {
 			message := err.Error()
 			_ = s.repository.UpdateSourceStatus(ctx, source.ID, "error", message)
@@ -124,7 +124,7 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 // SyncScheduled 执行生产任务使用的完整抓取和分批分析流程。
 // 输入：ctx 控制处理，classifySignals 控制是否补齐六十天信号概念映射。
 // 输出：返回累计同步统计；来源失败、模型缺失或仍有待分析文章时返回错误。
-// 副作用：调用 WeChatRSS、RSS、DeepSeek，并写入 SQLite。
+// 副作用：调用 Miniflux、DeepSeek，并写入 SQLite。
 func (s *Service) SyncScheduled(ctx context.Context, classifySignals bool) (SyncResult, error) {
 	// 1. 抓取全部来源的当前文章，来源失败时保留明细并立即升级为任务错误。
 	result, err := s.Sync(ctx, scheduledFetchLimit, false, 0)
@@ -136,7 +136,7 @@ func (s *Service) SyncScheduled(ctx context.Context, classifySignals bool) (Sync
 	}
 
 	// 2. 读取抓取后 pending；模型未配置时保留数据并明确失败告警。
-	if err := s.validateScheduledRSSFreshness(result); err != nil {
+	if err := s.validateScheduledSourceFreshness(result); err != nil {
 		return result, err
 	}
 	counts, err := s.repository.counts(ctx)
@@ -185,13 +185,16 @@ func (s *Service) SyncScheduled(ctx context.Context, classifySignals bool) (Sync
 	return result, nil
 }
 
-// validateScheduledRSSFreshness 检查定时抓取的上游 RSS 是否长期没有新文章。
-// 输入：result 是本次 RSS 抓取统计，包含上游最新发布时间。
-// 输出：上游最新文章超过固定阈值时返回错误；正常或没有可判断时间时返回 nil。
+// validateScheduledSourceFreshness 检查定时读取的 Miniflux 上游是否长期没有新文章。
+// 输入：result 是本次 Miniflux 读取统计，包含上游最新发布时间。
+// 输出：空分类或最新文章超过固定阈值时返回错误；正常或无来源时返回 nil。
 // 副作用：无，不访问数据库、不发送通知。
-func (s *Service) validateScheduledRSSFreshness(result SyncResult) error {
-	// 1. 只有 RSS 成功返回文章并带发布时间时，才判断上游是否停更。
-	if result.FetchedCount == 0 || strings.TrimSpace(result.LatestFetchedAt) == "" {
+func (s *Service) validateScheduledSourceFreshness(result SyncResult) error {
+	// 1. 已启用来源却没有任何文章时直接失败，避免空分类被长期静默忽略。
+	if result.SourceCount > 0 && result.FetchedCount == 0 {
+		return fmt.Errorf("Miniflux 未返回任何投资文章，请检查订阅和分类")
+	}
+	if strings.TrimSpace(result.LatestFetchedAt) == "" {
 		return nil
 	}
 	latest, err := time.Parse("2006-01-02 15:04:05", result.LatestFetchedAt)
@@ -199,14 +202,14 @@ func (s *Service) validateScheduledRSSFreshness(result SyncResult) error {
 		return nil
 	}
 
-	// 2. 使用可注入时钟计算滞后时间，超过三天交给任务包装器失败通知。
+	// 2. 有发布时间时使用可注入时钟计算滞后，超过三天交给任务包装器失败通知。
 	now := time.Now
 	if s.options.Now != nil {
 		now = s.options.Now
 	}
 	lag := now().UTC().Sub(latest.UTC())
-	if lag > scheduledRSSStaleAfter {
-		return fmt.Errorf("WeChatRSS 上游最新文章过旧: 最新=%s, 已滞后=%s, 请检查微信登录或公众号抓取", result.LatestFetchedAt, formatDurationHours(lag))
+	if lag > scheduledSourceStaleAfter {
+		return fmt.Errorf("Miniflux 上游最新文章过旧: 最新=%s, 已滞后=%s, 请检查订阅刷新状态", result.LatestFetchedAt, formatDurationHours(lag))
 	}
 	return nil
 }
@@ -332,11 +335,11 @@ func parseAnalysisJSON(content string) (AnalysisResult, error) {
 	return result, nil
 }
 
-// feedEntryFromClient 把通用 RSS 客户端模型转换为文章仓储模型。
+// feedEntryFromClient 把通用外部文章模型转换为文章仓储模型。
 // 输入：item 是客户端规范化文章。
 // 输出：返回 repository 使用的 FeedEntry。
 // 副作用：无。
-func feedEntryFromClient(item client.RSSItem) FeedEntry {
+func feedEntryFromClient(item client.ArticleItem) FeedEntry {
 	// 1. 一一映射字段，业务包继续拥有存储模型。
 	return FeedEntry{
 		ArticleKey: item.ArticleKey, ExternalID: item.ExternalID, Title: item.Title,
@@ -401,7 +404,7 @@ func (s *Service) FetchSummary(ctx context.Context) (PageSummary, error) {
 	// 2. 组装抓取页状态卡片。
 	return PageSummary{
 		Title:       "投资文章抓取",
-		Description: "管理信息源，抓取 RSS 文章，并触发 DeepSeek 结构化分析。",
+		Description: "管理 Miniflux 信息源，读取文章并触发 DeepSeek 结构化分析。",
 		Metrics: []PageMetric{
 			{Label: "来源", Value: strconv.Itoa(counts.SourceCount), Detail: "启用的信息源", Status: "normal"},
 			{Label: "文章", Value: strconv.Itoa(counts.ArticleCount), Detail: "已入库文章", Status: "normal"},
