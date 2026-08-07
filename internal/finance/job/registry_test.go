@@ -131,7 +131,7 @@ func TestRegisterAllAddsEightProductionJobs(t *testing.T) {
 	}
 	wanted := map[string]string{
 		"test_crontab": "0 9 * * *", "update_tushare_daily_data": "",
-		"sync_investment_articles": "0 8,20 * * *", "check_service_monitors": "0 22 * * *",
+		"sync_investment_articles": "", "check_service_monitors": "0 22 * * *",
 		"check_subscription_expiry_notify": "30 9 * * *", "openilink_reply_reminder": "0 10 * * *",
 		"backup_sqlite":                    "30 3 * * *",
 		"rebuild_investment_signal_groups": "",

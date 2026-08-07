@@ -96,7 +96,7 @@ cd ..
 | 时间 | 任务 | 说明 |
 |---|---|---|
 | 09:00 | `test_crontab` | 每日任务链路测试 |
-| 08:00、20:00 | `sync_investment_articles` | 同步并分析投资文章 |
+| 仅手动 | `sync_investment_articles` | 同步并分析投资文章；等待新文章源后恢复定时 |
 | 22:00 | `check_service_monitors` | 服务连通性检查 |
 | 09:30 | `check_subscription_expiry_notify` | 订阅到期提醒 |
 | 10:00 | `openilink_reply_reminder` | OpeniLink 回复提醒 |

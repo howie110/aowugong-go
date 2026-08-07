@@ -141,7 +141,7 @@ func (s *DashboardService) Overview(ctx context.Context) (Overview, error) {
 		Description: "集中查看投资研究、内容服务、定时任务和系统运维状态。",
 		Metrics: []Metric{
 			{Label: "Web 服务", Value: displayPort(s.options.HTTPAddress), Detail: "Go + React", Status: "normal"},
-			{Label: "文章同步", Value: "08:00 / 20:00", Detail: "RSS + DeepSeek", Status: "normal"},
+			{Label: "文章同步", Value: "仅手动", Detail: "等待新文章源", Status: "warning"},
 			{Label: "服务监控", Value: "22:00", Detail: "项目连通性检测", Status: "normal"},
 			{Label: "通知通道", Value: notifyValue, Detail: "OpeniLink 微信 Bot", Status: notifyStatus},
 		},
@@ -218,7 +218,7 @@ func (s *DashboardService) JobsSummary() JobsPage {
 		Jobs: []Item{
 			{Name: "test_crontab", Schedule: "0 9 * * *", Description: "每日任务链路测试", Command: "scheduler.Run(test_crontab)", Status: jobStatus},
 			{Name: "update_tushare_daily_data", Schedule: "仅手动", Description: "按需更新 Tushare 日线数据", Command: "scheduler.Run(update_tushare_daily_data)", Status: "manual"},
-			{Name: "sync_investment_articles", Schedule: "0 8,20 * * *", Description: "同步并分析投资文章", Command: "scheduler.Run(sync_investment_articles)", Status: jobStatus},
+			{Name: "sync_investment_articles", Schedule: "仅手动", Description: "同步并分析投资文章", Command: "scheduler.Run(sync_investment_articles)", Status: "manual"},
 			{Name: "rebuild_investment_signal_groups", Schedule: "仅手动", Description: "全局重建投资信号概念组", Command: "scheduler.Run(rebuild_investment_signal_groups)", Status: "manual"},
 			{Name: "check_service_monitors", Schedule: "0 22 * * *", Description: "检查服务连通性", Command: "scheduler.Run(check_service_monitors)", Status: jobStatus},
 			{Name: "check_subscription_expiry_notify", Schedule: "30 9 * * *", Description: "检查订阅到期并提醒", Command: "scheduler.Run(check_subscription_expiry_notify)", Status: jobStatus},
