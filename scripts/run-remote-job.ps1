@@ -12,7 +12,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# 1. 只允许固定格式任务名，并通过 SSH 使用服务器现有环境和 SQLite 文件。
+# 1. 只允许固定格式任务名，并通过 SSH 使用服务器现有环境和 PostgreSQL。
 $remoteCommand = "set -a && . '$AppRoot/shared/.env' && set +a && '$AppRoot/current/aowugong' job '$JobName'"
 & ssh "$User@$Server" $remoteCommand
 if ($LASTEXITCODE -ne 0) {

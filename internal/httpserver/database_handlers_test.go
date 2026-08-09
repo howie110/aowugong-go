@@ -2,6 +2,8 @@ package httpserver
 
 import (
 	"context"
+	"encoding/csv"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +15,50 @@ import (
 	"github.com/howiedata/aowugong-go/internal/rbac"
 	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
+
+type databaseRouteStub struct{}
+
+// Summary 返回数据库路由测试使用的固定 PostgreSQL 概况。
+// 输入：ctx 是请求上下文。
+// 输出：返回一张用户表的概况。
+// 副作用：无。
+func (databaseRouteStub) Summary(ctx context.Context) (databaseview.Summary, error) {
+	return databaseview.Summary{
+		Engine: "PostgreSQL", JournalMode: "WAL", TableCount: 1,
+		Tables: []databaseview.TableSummary{{Name: "aowugong_fastapi_users", RowCount: 1}},
+	}, nil
+}
+
+// Rows 返回数据库路由测试使用的脱敏用户数据。
+// 输入：ctx 是请求上下文，其余参数描述表、搜索和分页。
+// 输出：返回一条密码已隐藏的用户记录。
+// 副作用：无。
+func (databaseRouteStub) Rows(
+	ctx context.Context, table, search string, page, pageSize int,
+) (databaseview.RowsPage, error) {
+	return databaseview.RowsPage{
+		Table: table, Page: page, PageSize: pageSize, Total: 1,
+		Rows: []map[string]any{{"username": "db-admin", "password": "已隐藏"}},
+	}, nil
+}
+
+// ExportCSV 写入数据库路由测试使用的脱敏用户 CSV。
+// 输入：ctx 是请求上下文，table 和 search 描述导出范围，output 接收 CSV。
+// 输出：成功返回 nil；写入失败时返回错误。
+// 副作用：向 output 写入 CSV 内容。
+func (databaseRouteStub) ExportCSV(
+	ctx context.Context, table, search string, output io.Writer,
+) error {
+	writer := csv.NewWriter(output)
+	if err := writer.Write([]string{"username", "password"}); err != nil {
+		return err
+	}
+	if err := writer.Write([]string{"db-admin", "已隐藏"}); err != nil {
+		return err
+	}
+	writer.Flush()
+	return writer.Error()
+}
 
 // TestDatabaseRoutesRequireAdminPermissionAndReturnRedactedRows 验证数据库页面仅管理员可读。
 // 输入：管理员和投资者、隔离 SQLite 用户表。
@@ -28,7 +74,7 @@ func TestDatabaseRoutesRequireAdminPermissionAndReturnRedactedRows(t *testing.T)
 	}
 	authService := auth.NewService(auth.NewRepository(db), auth.NewTokenManager("database-http-secret", 72*time.Hour))
 	handler := NewRouter(Dependencies{
-		Auth: authService, RBAC: rbacService, Database: databaseview.NewService(db),
+		Auth: authService, RBAC: rbacService, Database: databaseRouteStub{},
 	})
 
 	// 2. 创建管理员和投资者并取得令牌。

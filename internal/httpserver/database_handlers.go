@@ -1,8 +1,10 @@
 package httpserver
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,7 +16,17 @@ import (
 )
 
 type databaseHandlers struct {
-	service *databaseview.Service
+	service databaseReadService
+}
+
+// databaseReadService 定义数据库只读页面需要的最小查询能力。
+// 输入：各方法接收请求上下文、表名、搜索条件和分页参数。
+// 输出：返回数据库概况、分页数据或 CSV 导出错误。
+// 副作用：只读 PostgreSQL；ExportCSV 还会向输出流写入内容。
+type databaseReadService interface {
+	Summary(context.Context) (databaseview.Summary, error)
+	Rows(context.Context, string, string, int, int) (databaseview.RowsPage, error)
+	ExportCSV(context.Context, string, string, io.Writer) error
 }
 
 type databaseExportWriter struct {
@@ -40,7 +52,7 @@ func registerDatabaseRoutes(
 	router chi.Router,
 	authService *auth.Service,
 	rbacService *rbac.Service,
-	service *databaseview.Service,
+	service databaseReadService,
 ) {
 	// 1. 全部数据库接口统一要求登录和数据库页面权限。
 	handlers := databaseHandlers{service: service}
@@ -53,10 +65,10 @@ func registerDatabaseRoutes(
 	})
 }
 
-// summary 返回 SQLite 文件和应用表概况。
+// summary 返回 PostgreSQL 数据库和应用表概况。
 // 输入：request 提供查询上下文。
 // 输出：成功写入数据库概况 JSON，失败写入统一错误。
-// 副作用：只读 SQLite 并写入 HTTP 响应。
+// 副作用：只读 PostgreSQL 并写入 HTTP 响应。
 func (h databaseHandlers) summary(w http.ResponseWriter, request *http.Request) {
 	// 1. 调用只读服务并统一隐藏底层错误细节。
 	summary, err := h.service.Summary(request.Context())
@@ -67,10 +79,10 @@ func (h databaseHandlers) summary(w http.ResponseWriter, request *http.Request) 
 	writeJSON(w, http.StatusOK, summary)
 }
 
-// rows 返回指定 SQLite 表的一页数据。
+// rows 返回指定 PostgreSQL 表的一页数据。
 // 输入：路径提供表名，查询参数提供 page、page_size 和 search。
 // 输出：成功写入分页 JSON，参数或表错误写入统一错误。
-// 副作用：只读 SQLite 并写入 HTTP 响应。
+// 副作用：只读 PostgreSQL 并写入 HTTP 响应。
 func (h databaseHandlers) rows(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析有上限的分页参数。
 	page, err := parseDatabasePositiveInt(request.URL.Query().Get("page"), 1, 1, 1000000)
@@ -105,10 +117,10 @@ func (h databaseHandlers) rows(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-// export 导出指定 SQLite 表的脱敏 CSV。
+// export 导出指定 PostgreSQL 表的脱敏 CSV。
 // 输入：路径提供表名，search 可限制导出内容。
 // 输出：成功写入 CSV 文件，表、规模或查询失败写入统一错误。
-// 副作用：只读 SQLite，并流式写入 HTTP 响应。
+// 副作用：只读 PostgreSQL，并流式写入 HTTP 响应。
 func (h databaseHandlers) export(w http.ResponseWriter, request *http.Request) {
 	// 1. 调用只读导出入口并在写响应头前处理全部错误。
 	table := chi.URLParam(request, "table")

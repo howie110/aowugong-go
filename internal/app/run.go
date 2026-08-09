@@ -22,6 +22,7 @@ import (
 	"github.com/howiedata/aowugong-go/internal/finance/position"
 	financeservice "github.com/howiedata/aowugong-go/internal/finance/service"
 	"github.com/howiedata/aowugong-go/internal/finance/stockanalysis"
+	"github.com/howiedata/aowugong-go/internal/githubbackup"
 	"github.com/howiedata/aowugong-go/internal/httpserver"
 	"github.com/howiedata/aowugong-go/internal/mahjong"
 	"github.com/howiedata/aowugong-go/internal/monitoring"
@@ -29,6 +30,7 @@ import (
 	"github.com/howiedata/aowugong-go/internal/rbac"
 	"github.com/howiedata/aowugong-go/internal/scheduler"
 	"github.com/howiedata/aowugong-go/internal/subscription"
+	"github.com/howiedata/aowugong-go/internal/vaultwardenbackup"
 	"github.com/howiedata/aowugong-go/internal/weread"
 	"github.com/howiedata/aowugong-go/internal/work"
 )
@@ -54,14 +56,16 @@ type taskServices struct {
 	articles          *articleanalysis.Service
 	data              *financedata.Service
 	notification      *notification.Service
+	githubBackup      *githubbackup.Service
+	vaultwardenBackup *vaultwardenbackup.Service
 }
 
 // Run 启动数据库迁移、内嵌调度器与 HTTP 服务，并在上下文取消时优雅关闭。
 // 输入：ctx 控制服务生命周期，cfg 提供全部运行配置。
 // 输出：正常关闭返回 nil，初始化、监听或关闭失败时返回带业务上下文的错误。
-// 副作用：迁移并访问 SQLite、启动 HTTP/Cron，任务触发时访问外部服务和发送通知。
+// 副作用：迁移并访问 PostgreSQL、启动 HTTP/Cron，任务触发时访问外部服务和发送通知。
 func Run(ctx context.Context, cfg config.Config) error {
-	// 1. 组装所有显式依赖并在退出时关闭 SQLite 连接池。
+	// 1. 组装所有显式依赖并在退出时关闭 PostgreSQL 连接池。
 	runtime, err := buildRuntime(ctx, cfg)
 	if err != nil {
 		return err
@@ -115,7 +119,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 // RunJob 通过与自动和页面执行相同的注册表运行单个 CLI 任务。
 // 输入：ctx 控制执行，cfg 提供依赖配置，name 是已注册任务名。
 // 输出：返回统一执行结果；初始化或任务失败时返回错误。
-// 副作用：访问既有 SQLite 表结构并执行目标任务，失败时可能发送微信通知；不执行数据库迁移。
+// 副作用：访问既有 PostgreSQL 表结构并执行目标任务，失败时可能发送微信通知；不执行数据库迁移。
 func RunJob(ctx context.Context, cfg config.Config, name string) (scheduler.Result, error) {
 	// 1. 组装只含任务依赖的运行时，不启动 HTTP、Cron 或数据库迁移。
 	runtime, err := buildJobRuntime(ctx, cfg)
@@ -128,13 +132,13 @@ func RunJob(ctx context.Context, cfg config.Config, name string) (scheduler.Resu
 	return runtime.registry.Run(ctx, name, scheduler.SourceCLI)
 }
 
-// buildJobRuntime 打开既有 SQLite 并组装服务器补跑所需的最小任务运行时。
+// buildJobRuntime 打开既有 PostgreSQL 并组装服务器补跑所需的最小任务运行时。
 // 输入：ctx 控制连接，cfg 提供数据库、外部客户端和备份配置。
 // 输出：返回数据库与统一任务注册表；连接或注册失败时返回错误。
-// 副作用：打开 SQLite 文件；不迁移表结构、不写默认数据、不启动 HTTP 或 Cron。
+// 副作用：连接 PostgreSQL；不迁移表结构、不写默认数据、不启动 HTTP 或 Cron。
 func buildJobRuntime(ctx context.Context, cfg config.Config) (*jobRuntime, error) {
-	// 1. 仅连接由服务器部署流程维护好结构的 SQLite。
-	db, err := database.OpenSQLite(ctx, cfg.Database)
+	// 1. 仅连接由服务器部署流程维护好结构的 PostgreSQL。
+	db, err := database.OpenPostgres(ctx, cfg.Database)
 	if err != nil {
 		return nil, fmt.Errorf("打开任务数据库: %w", err)
 	}
@@ -158,7 +162,7 @@ func buildJobRuntime(ctx context.Context, cfg config.Config) (*jobRuntime, error
 // buildRuntime 打开数据库、迁移表结构并显式构造全部服务。
 // 输入：ctx 控制初始化，cfg 提供路径、密钥、外部地址和运行开关。
 // 输出：返回 HTTP、任务和数据库运行时；失败时自动关闭已打开数据库。
-// 副作用：迁移 SQLite、同步权限、默认账户和默认文章来源。
+// 副作用：迁移 PostgreSQL、同步权限、默认账户和默认文章来源。
 func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 	// 1. 开发上游模式只服务本地前端并代理线上 API，不创建本地数据库。
 	if cfg.Development.UpstreamURL != "" {
@@ -182,8 +186,8 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 		}
 	}
 
-	// 3. 打开 SQLite 小型连接池，失败时确保释放已建立连接。
-	db, err := database.OpenSQLite(ctx, cfg.Database)
+	// 3. 打开 PostgreSQL 小型连接池，失败时确保释放已建立连接。
+	db, err := database.OpenPostgres(ctx, cfg.Database)
 	if err != nil {
 		return nil, fmt.Errorf("打开数据库: %w", err)
 	}
@@ -196,7 +200,7 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 
 	// 4. 服务器默认应用版本迁移，CLI 任务入口显式跳过 DDL。
 	if !cfg.Database.SkipMigrations {
-		if err := database.MigrateSQLite(ctx, db, migrationsDirectory); err != nil {
+		if err := database.MigratePostgres(ctx, db, migrationsDirectory); err != nil {
 			return nil, fmt.Errorf("迁移数据库: %w", err)
 		}
 	}
@@ -220,7 +224,8 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 	// 6. 构造 finance 页面、仓位、分析、文章、行情和统一通知服务。
 	financeService := financeservice.NewDashboardService(db, financeservice.DashboardOptions{
 		HTTPAddress: cfg.HTTP.Address, OpenILinkConfigured: cfg.Clients.OpenILink.AppToken != "",
-		SchedulerEnabled: cfg.Scheduler.Enabled, RealTradeEnabled: cfg.Finance.EnableRealTrade,
+		SchedulerEnabled: cfg.Scheduler.Enabled, GitHubBackupEnabled: cfg.GitHubBackup.Enabled,
+		VaultwardenBackupEnabled: cfg.VaultwardenBackup.Enabled, RealTradeEnabled: cfg.Finance.EnableRealTrade,
 		QMTConfigured: cfg.Finance.QMTAccount != "", BinanceConfigured: cfg.Finance.BinanceAPIKey != "",
 		OKXConfigured: cfg.Finance.OKXAPIKey != "",
 	})
@@ -261,7 +266,7 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 }
 
 // newTaskServices 构造自动调度、页面手动执行和 CLI 补跑共用的业务服务。
-// 输入：cfg 提供外部接口参数，db 是应用 SQLite 连接池。
+// 输入：cfg 提供外部接口参数，db 是应用 PostgreSQL 连接池。
 // 输出：返回订阅、监控、文章、行情和通知服务集合。
 // 副作用：无，只构造依赖；不会访问数据库或外部接口。
 func newTaskServices(cfg config.Config, db *sql.DB) taskServices {
@@ -285,6 +290,28 @@ func newTaskServices(cfg config.Config, db *sql.DB) taskServices {
 			LookbackDays: 60, Delay: time.Second,
 		}),
 		notification: notification.NewService(notification.NewRepository(db), client.NewOpenILinkClient(cfg.Clients.OpenILink, nil)),
+	}
+	if cfg.GitHubBackup.Enabled {
+		services.githubBackup = githubbackup.NewService(
+			githubbackup.NewClient(cfg.GitHubBackup.Token, &http.Client{Timeout: 30 * time.Second}),
+			cfg.GitHubBackup.RequiredRepositories,
+			githubbackup.NewGitStore(cfg.GitHubBackup.Token),
+			githubbackup.Options{
+				Directory: cfg.GitHubBackup.Directory, RetentionRefs: cfg.GitHubBackup.RetentionRefs,
+			},
+		)
+	}
+	if cfg.VaultwardenBackup.Enabled {
+		services.vaultwardenBackup = vaultwardenbackup.NewService(
+			client.NewEmailClient(cfg.Clients.Email),
+			vaultwardenbackup.Options{
+				Directory:                cfg.VaultwardenBackup.Directory,
+				RecoveryScriptsDirectory: cfg.VaultwardenBackup.RecoveryScriptsDirectory,
+				AgeRecipient:             cfg.VaultwardenBackup.AgeRecipient,
+				EmailTo:                  cfg.VaultwardenBackup.EmailTo,
+				MaxAttachmentBytes:       int64(cfg.VaultwardenBackup.MaxAttachmentMB) * 1024 * 1024,
+			},
+		)
 	}
 	return services
 }
@@ -322,7 +349,10 @@ func newJobRegistry(cfg config.Config, db *sql.DB, services taskServices) (*sche
 	if err := financejob.RegisterAll(registry, financejob.Dependencies{
 		DB: db, Data: services.data, Articles: services.articles,
 		Monitoring: services.monitoring, Subscriptions: services.subscriptions, Notification: services.notification,
-		BackupDir: backupDir, BackupRetention: backupRetention,
+		GitHubBackup:      services.githubBackup,
+		VaultwardenBackup: services.vaultwardenBackup,
+		BackupDir:         backupDir, BackupRetention: backupRetention,
+		Backup: database.NewPostgresBackuper(cfg.Database.URL).Backup,
 	}); err != nil {
 		return nil, fmt.Errorf("注册生产任务: %w", err)
 	}

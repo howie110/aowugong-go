@@ -13,16 +13,18 @@ const unknownLatest = "未知"
 
 // DashboardOptions 描述 finance 摘要所需的运行时开关，不包含任何密钥明文。
 type DashboardOptions struct {
-	HTTPAddress         string
-	OpenILinkConfigured bool
-	SchedulerEnabled    bool
-	RealTradeEnabled    bool
-	QMTConfigured       bool
-	BinanceConfigured   bool
-	OKXConfigured       bool
+	HTTPAddress              string
+	OpenILinkConfigured      bool
+	SchedulerEnabled         bool
+	GitHubBackupEnabled      bool
+	VaultwardenBackupEnabled bool
+	RealTradeEnabled         bool
+	QMTConfigured            bool
+	BinanceConfigured        bool
+	OKXConfigured            bool
 }
 
-// DashboardService 汇总 SQLite 数据进度和当前 Go 运行时状态。
+// DashboardService 汇总 PostgreSQL 数据进度和当前 Go 运行时状态。
 type DashboardService struct {
 	db      *sql.DB
 	options DashboardOptions
@@ -115,7 +117,7 @@ var progressQueries = []progressQuery{
 }
 
 // NewDashboardService 创建 finance 摘要服务。
-// 输入：db 是 SQLite 连接，options 是不含密钥的运行时状态。
+// 输入：db 是 PostgreSQL 连接，options 是不含密钥的运行时状态。
 // 输出：返回可并发复用的摘要服务。
 // 副作用：无，不访问数据库和外部接口。
 func NewDashboardService(db *sql.DB, options DashboardOptions) *DashboardService {
@@ -124,9 +126,9 @@ func NewDashboardService(db *sql.DB, options DashboardOptions) *DashboardService
 }
 
 // Overview 汇总控制台指标、模块和两项核心数据进度。
-// 输入：ctx 控制 SQLite 查询生命周期。
+// 输入：ctx 控制 PostgreSQL 查询生命周期。
 // 输出：返回控制台完整响应；查询失败时返回带业务上下文的错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 PostgreSQL。
 func (s *DashboardService) Overview(ctx context.Context) (Overview, error) {
 	// 1. 查询全部数据进度并截取控制台关心的两项。
 	progress, err := s.loadProgress(ctx)
@@ -176,10 +178,10 @@ func (s *DashboardService) BacktestSummary() PageSummary {
 	}
 }
 
-// DataSummary 读取核心 SQLite 表的最新业务日期。
-// 输入：ctx 控制 SQLite 查询生命周期。
+// DataSummary 读取核心 PostgreSQL 表的最新业务日期。
+// 输入：ctx 控制 PostgreSQL 查询生命周期。
 // 输出：返回五张核心表的进度和当前数据源；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 PostgreSQL。
 func (s *DashboardService) DataSummary(ctx context.Context) (DataPage, error) {
 	// 1. 使用固定白名单 SQL 读取全部核心表进度。
 	tables, err := s.loadProgress(ctx)
@@ -187,14 +189,14 @@ func (s *DashboardService) DataSummary(ctx context.Context) (DataPage, error) {
 		return DataPage{}, fmt.Errorf("读取行情数据进度: %w", err)
 	}
 
-	// 2. 返回 SQLite 与 Tushare 的最终运行时说明。
+	// 2. 返回 PostgreSQL 与 Tushare 的最终运行时说明。
 	return DataPage{
 		Title:       "数据",
-		Description: "SQLite 保存服务器业务数据，本地页面通过线上 API 读取同一数据源。",
+		Description: "PostgreSQL 保存服务器业务数据，本地页面通过线上 API 读取同一数据源。",
 		Tables:      tables,
 		Sources: []Item{
 			{Name: "Tushare", Description: "股票、ETF、交易日历"},
-			{Name: "SQLite", Description: "服务器单文件持久化，启用 WAL 和在线快照"},
+			{Name: "PostgreSQL", Description: "服务器集中持久化，支持远程连接和一致性备份"},
 		},
 	}, nil
 }
@@ -211,22 +213,31 @@ func (s *DashboardService) JobsSummary() JobsPage {
 	}
 	failNotify, _ := configuredState(s.options.OpenILinkConfigured)
 
-	// 2. 返回与任务注册表保持一致的任务清单。
+	// 2. 建立固定任务，并按运行配置追加可选备份任务。
+	jobs := []Item{
+		{Name: "test_crontab", Schedule: "0 9 * * *", Description: "每日任务链路测试", Command: "scheduler.Run(test_crontab)", Status: jobStatus},
+		{Name: "update_tushare_daily_data", Schedule: "仅手动", Description: "按需更新 Tushare 日线数据", Command: "scheduler.Run(update_tushare_daily_data)", Status: "manual"},
+		{Name: "sync_investment_articles", Schedule: "仅手动", Description: "同步并分析投资文章", Command: "scheduler.Run(sync_investment_articles)", Status: "manual"},
+		{Name: "rebuild_investment_signal_groups", Schedule: "仅手动", Description: "全局重建投资信号概念组", Command: "scheduler.Run(rebuild_investment_signal_groups)", Status: "manual"},
+		{Name: "check_service_monitors", Schedule: "0 22 * * *", Description: "检查服务连通性", Command: "scheduler.Run(check_service_monitors)", Status: jobStatus},
+		{Name: "check_subscription_expiry_notify", Schedule: "30 9 * * *", Description: "检查订阅到期并提醒", Command: "scheduler.Run(check_subscription_expiry_notify)", Status: jobStatus},
+		{Name: "openilink_reply_reminder", Schedule: "0 10 * * *", Description: "检查 OpeniLink 待回复消息", Command: "scheduler.Run(openilink_reply_reminder)", Status: jobStatus},
+		{Name: "backup_postgres", Schedule: "30 3 * * *", Description: "创建 PostgreSQL 一致性备份", Command: "scheduler.Run(backup_postgres)", Status: jobStatus},
+	}
+	if s.options.GitHubBackupEnabled {
+		jobs = append(jobs, Item{Name: "backup_github_code", Schedule: "0 4 * * 0", Description: "备份 GitHub 代码仓库", Command: "scheduler.Run(backup_github_code)", Status: jobStatus})
+	}
+	if s.options.VaultwardenBackupEnabled {
+		jobs = append(jobs, Item{Name: "email_vaultwarden_backup", Schedule: "0 5 * * 0", Description: "邮件发送 Vaultwarden 加密备份", Command: "scheduler.Run(email_vaultwarden_backup)", Status: jobStatus})
+	}
+
+	// 3. 返回与任务注册表保持一致的任务清单和通知状态。
 	return JobsPage{
 		Title:       "定时任务",
 		Description: "任务由 Go 进程内调度器按 Asia/Shanghai 时区统一执行。",
-		Jobs: []Item{
-			{Name: "test_crontab", Schedule: "0 9 * * *", Description: "每日任务链路测试", Command: "scheduler.Run(test_crontab)", Status: jobStatus},
-			{Name: "update_tushare_daily_data", Schedule: "仅手动", Description: "按需更新 Tushare 日线数据", Command: "scheduler.Run(update_tushare_daily_data)", Status: "manual"},
-			{Name: "sync_investment_articles", Schedule: "仅手动", Description: "同步并分析投资文章", Command: "scheduler.Run(sync_investment_articles)", Status: "manual"},
-			{Name: "rebuild_investment_signal_groups", Schedule: "仅手动", Description: "全局重建投资信号概念组", Command: "scheduler.Run(rebuild_investment_signal_groups)", Status: "manual"},
-			{Name: "check_service_monitors", Schedule: "0 22 * * *", Description: "检查服务连通性", Command: "scheduler.Run(check_service_monitors)", Status: jobStatus},
-			{Name: "check_subscription_expiry_notify", Schedule: "30 9 * * *", Description: "检查订阅到期并提醒", Command: "scheduler.Run(check_subscription_expiry_notify)", Status: jobStatus},
-			{Name: "openilink_reply_reminder", Schedule: "0 10 * * *", Description: "检查 OpeniLink 待回复消息", Command: "scheduler.Run(openilink_reply_reminder)", Status: jobStatus},
-			{Name: "backup_sqlite", Schedule: "30 3 * * *", Description: "创建 SQLite 一致性快照", Command: "scheduler.Run(backup_sqlite)", Status: jobStatus},
-		},
-		Runner:     "internal/scheduler.Registry.Run",
-		FailNotify: failNotify + "微信",
+		Jobs:        jobs,
+		Runner:      "internal/scheduler.Registry.Run",
+		FailNotify:  failNotify + "微信",
 	}
 }
 
@@ -281,7 +292,7 @@ func (s *DashboardService) NotificationsSummary() NotificationsPage {
 // loadProgress 查询五张白名单表的最新日期。
 // 输入：ctx 控制数据库操作。
 // 输出：按页面固定顺序返回表进度；任一查询失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 PostgreSQL。
 func (s *DashboardService) loadProgress(ctx context.Context) ([]Item, error) {
 	// 1. 逐条执行源码内固定的查询，避免动态表名进入 SQL。
 	items := make([]Item, 0, len(progressQueries))

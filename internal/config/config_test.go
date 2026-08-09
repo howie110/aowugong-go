@@ -10,7 +10,7 @@ import (
 
 // TestLoadUsesDevelopmentDefaults 验证开发环境的默认运行配置。
 // 输入：空环境查询函数。
-// 输出：返回 2345、72 小时令牌和 SQLite 默认参数。
+// 输出：返回 2345、72 小时令牌和 PostgreSQL 默认参数。
 // 副作用：无。
 func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 	// 1. 使用空环境加载默认配置。
@@ -27,35 +27,49 @@ func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 		t.Errorf("HTTP.Address = %q, want 0.0.0.0:2345", cfg.HTTP.Address)
 	}
 
-	// 3. 断言令牌有效期和默认 SQLite 连接参数。
+	// 3. 断言令牌有效期和默认 PostgreSQL 连接参数。
 	if cfg.Auth.TokenLifetime != 72*time.Hour {
 		t.Errorf("TokenLifetime = %s, want %s", cfg.Auth.TokenLifetime, 72*time.Hour)
 	}
-	if cfg.Database.Path != filepath.Clean("storage/data/aowugong.db") {
-		t.Errorf("Database.Path = %q, want storage/data/aowugong.db", cfg.Database.Path)
+	if !strings.HasPrefix(cfg.Database.URL, "postgres://aowugong@127.0.0.1:5432/aowugong") {
+		t.Errorf("Database.URL = %q", cfg.Database.URL)
 	}
-	if cfg.Database.MaxOpenConns != 4 || cfg.Database.MaxIdleConns != 2 || cfg.Database.BusyTimeout != 5*time.Second {
-		t.Errorf("Database = pool %d/%d timeout %s, want 4/2 and 5s",
-			cfg.Database.MaxOpenConns, cfg.Database.MaxIdleConns, cfg.Database.BusyTimeout)
+	if cfg.Database.MaxOpenConns != 8 || cfg.Database.MaxIdleConns != 4 || cfg.Database.ConnMaxLifetime != 30*time.Minute {
+		t.Errorf("Database = pool %d/%d lifetime %s, want 8/4 and 30m",
+			cfg.Database.MaxOpenConns, cfg.Database.MaxIdleConns, cfg.Database.ConnMaxLifetime)
+	}
+	if cfg.GitHubBackup.Enabled || cfg.GitHubBackup.RetentionRefs != 4 ||
+		cfg.GitHubBackup.Directory != filepath.Clean("storage/backup/github") {
+		t.Errorf("GitHubBackup defaults = %#v", cfg.GitHubBackup)
+	}
+	if strings.Join(cfg.GitHubBackup.RequiredRepositories, ",") != "KES-IT/KES-SCM,KES-IT/KES-BIS" {
+		t.Errorf("GitHubBackup.RequiredRepositories = %v", cfg.GitHubBackup.RequiredRepositories)
+	}
+	if cfg.VaultwardenBackup.Enabled || cfg.VaultwardenBackup.MaxAttachmentMB != 45 ||
+		cfg.VaultwardenBackup.RecoveryScriptsDirectory != filepath.Clean("scripts") ||
+		cfg.Clients.Email.Host != "smtp.qq.com" || cfg.Clients.Email.Port != 465 {
+		t.Errorf("VaultwardenBackup defaults = %#v email=%#v", cfg.VaultwardenBackup, cfg.Clients.Email)
 	}
 }
 
-// TestEnvironmentExampleUsesSQLiteRuntimeSettings 验证环境示例以 SQLite 作为运行时数据库。
+// TestEnvironmentExampleUsesPostgresRuntimeSettings 验证环境示例以 PostgreSQL 作为运行时数据库。
 // 输入：仓库 configs/.env.example。
-// 输出：示例包含 SQLite、一次性 MySQL 来源和 Miniflux API 字段，不再包含旧 RSS 配置。
+// 输出：示例包含 PostgreSQL、一次性 SQLite 来源和 Miniflux API 字段，不再包含旧 RSS 配置。
 // 副作用：读取配置模板文件。
-func TestEnvironmentExampleUsesSQLiteRuntimeSettings(t *testing.T) {
+func TestEnvironmentExampleUsesPostgresRuntimeSettings(t *testing.T) {
 	// 1. 读取仓库中的环境变量示例。
 	content, err := os.ReadFile(filepath.Join("..", "..", "configs", ".env.example"))
 	if err != nil {
 		t.Fatalf("os.ReadFile() error = %v", err)
 	}
 
-	// 2. 断言示例包含 SQLite、一次性 MySQL 迁移来源和 Miniflux API。
+	// 2. 断言示例包含 PostgreSQL、一次性 SQLite 来源和 Miniflux API。
 	for _, key := range []string{
-		"AOWUGONG_SQLITE_PATH=", "AOWUGONG_SQLITE_BUSY_TIMEOUT_MS=",
-		"AOWUGONG_MYSQL_HOST=", "AOWUGONG_MYSQL_PORT=", "AOWUGONG_MYSQL_DATABASE=",
+		"AOWUGONG_DATABASE_URL=", "AOWUGONG_DATABASE_MAX_OPEN_CONNS=",
+		"AOWUGONG_DATABASE_CONN_MAX_LIFETIME_MINUTES=", "AOWUGONG_SQLITE_SOURCE_PATH=",
 		"MINIFLUX_BASE_URL=", "MINIFLUX_MONITOR_URL=", "MINIFLUX_API_TOKEN=", "MINIFLUX_CATEGORY=",
+		"GITHUB_BACKUP_ENABLED=", "GITHUB_BACKUP_TOKEN=", "GITHUB_BACKUP_REQUIRED_REPOSITORIES=KES-IT/KES-SCM,KES-IT/KES-BIS",
+		"VAULTWARDEN_BACKUP_EMAIL_ENABLED=", "VAULTWARDEN_BACKUP_RECOVERY_SCRIPTS_DIR=", "VAULTWARDEN_BACKUP_AGE_RECIPIENT=", "SMTP_EMAIL=", "SMTP_PASSWORD=",
 	} {
 		if !strings.Contains(string(content), key) {
 			t.Errorf(".env.example missing %s", key)
@@ -70,38 +84,112 @@ func TestEnvironmentExampleUsesSQLiteRuntimeSettings(t *testing.T) {
 	}
 }
 
-// TestLoadUsesSQLiteAndMigrationOverrides 验证运行库和一次性迁移来源可分别覆盖。
-// 输入：完整 SQLite 和 MySQL 环境变量映射。
+// TestLoadRequiresCompleteVaultwardenEmailBackupConfig 验证启用密码库邮件备份时必须提供公钥和 SMTP 配置。
+// 输入：只开启 Vaultwarden 邮件备份。
+// 输出：配置加载返回缺少必要字段的错误。
+// 副作用：无。
+func TestLoadRequiresCompleteVaultwardenEmailBackupConfig(t *testing.T) {
+	// 1. 开启任务但不提供敏感配置并断言加载失败。
+	_, err := Load(newLookup(map[string]string{"VAULTWARDEN_BACKUP_EMAIL_ENABLED": "true"}))
+	if err == nil || !strings.Contains(err.Error(), "Vaultwarden") {
+		t.Fatalf("Load() error = %v, want incomplete Vaultwarden backup config", err)
+	}
+}
+
+// TestLoadAcceptsVaultwardenEmailBackupConfig 验证完整邮件备份配置可被规范化加载。
+// 输入：备份目录、age 公钥、收件人及 QQ SMTP 配置。
+// 输出：返回启用且字段完整的配置。
+// 副作用：无。
+func TestLoadAcceptsVaultwardenEmailBackupConfig(t *testing.T) {
+	// 1. 提供完整配置并执行加载。
+	cfg, err := Load(newLookup(map[string]string{
+		"VAULTWARDEN_BACKUP_EMAIL_ENABLED":        "true",
+		"VAULTWARDEN_BACKUP_DIR":                  "tmp/../vaultwarden",
+		"VAULTWARDEN_BACKUP_RECOVERY_SCRIPTS_DIR": "tmp/../recovery-scripts",
+		"VAULTWARDEN_BACKUP_AGE_RECIPIENT":        "age1test",
+		"VAULTWARDEN_BACKUP_EMAIL_TO":             "825360699@qq.com",
+		"VAULTWARDEN_BACKUP_MAX_ATTACHMENT_MB":    "40",
+		"SMTP_HOST":                               "smtp.qq.com", "SMTP_PORT": "465",
+		"SMTP_EMAIL": "sender@qq.com", "SMTP_PASSWORD": "authorization-code",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// 2. 核对开关、路径、附件上限和 SMTP 字段。
+	if !cfg.VaultwardenBackup.Enabled || cfg.VaultwardenBackup.Directory != filepath.Clean("tmp/../vaultwarden") ||
+		cfg.VaultwardenBackup.RecoveryScriptsDirectory != filepath.Clean("tmp/../recovery-scripts") ||
+		cfg.VaultwardenBackup.MaxAttachmentMB != 40 || cfg.Clients.Email.Sender != "sender@qq.com" {
+		t.Errorf("VaultwardenBackup config = %#v email=%#v", cfg.VaultwardenBackup, cfg.Clients.Email)
+	}
+}
+
+// TestLoadRequiresTokenWhenGitHubBackupEnabled 验证启用代码备份时必须提供令牌。
+// 输入：只开启 GITHUB_BACKUP_ENABLED。
+// 输出：配置加载返回令牌缺失错误。
+// 副作用：无。
+func TestLoadRequiresTokenWhenGitHubBackupEnabled(t *testing.T) {
+	// 1. 在没有令牌时开启备份并断言配置拒绝启动。
+	_, err := Load(newLookup(map[string]string{"GITHUB_BACKUP_ENABLED": "true"}))
+	if err == nil || !strings.Contains(err.Error(), "GITHUB_BACKUP_TOKEN") {
+		t.Fatalf("Load() error = %v, want missing GitHub token", err)
+	}
+}
+
+// TestLoadAcceptsGitHubBackupAllowlist 验证代码备份白名单、目录和保留批次可覆盖。
+// 输入：完整 GitHub 备份环境变量。
+// 输出：返回已启用且去重的两个仓库配置。
+// 副作用：无。
+func TestLoadAcceptsGitHubBackupAllowlist(t *testing.T) {
+	// 1. 提供令牌、重复白名单、自定义目录和保留批次。
+	cfg, err := Load(newLookup(map[string]string{
+		"GITHUB_BACKUP_ENABLED":               "true",
+		"GITHUB_BACKUP_TOKEN":                 "test-token",
+		"GITHUB_BACKUP_REQUIRED_REPOSITORIES": "KES-IT/KES-SCM, KES-IT/KES-BIS,KES-IT/KES-SCM",
+		"GITHUB_BACKUP_DIR":                   "tmp/../backup/github",
+		"GITHUB_BACKUP_RETENTION_REFS":        "6",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// 2. 核对白名单去重和路径清理结果。
+	if !cfg.GitHubBackup.Enabled || cfg.GitHubBackup.Token != "test-token" || cfg.GitHubBackup.RetentionRefs != 6 {
+		t.Errorf("GitHubBackup = %#v", cfg.GitHubBackup)
+	}
+	if cfg.GitHubBackup.Directory != filepath.Clean("tmp/../backup/github") ||
+		strings.Join(cfg.GitHubBackup.RequiredRepositories, ",") != "KES-IT/KES-SCM,KES-IT/KES-BIS" {
+		t.Errorf("GitHubBackup normalized = %#v", cfg.GitHubBackup)
+	}
+}
+
+// TestLoadUsesPostgresAndMigrationOverrides 验证运行库和一次性迁移来源可分别覆盖。
+// 输入：完整 PostgreSQL 和 SQLite 来源环境变量映射。
 // 输出：配置分别保存运行路径、连接池和迁移来源。
 // 副作用：无。
-func TestLoadUsesSQLiteAndMigrationOverrides(t *testing.T) {
-	// 1. 提供 SQLite 运行参数和旧 MySQL 来源配置。
+func TestLoadUsesPostgresAndMigrationOverrides(t *testing.T) {
+	// 1. 提供 PostgreSQL 运行参数和 SQLite 来源配置。
 	cfg, err := Load(newLookup(map[string]string{
-		"AOWUGONG_SQLITE_PATH":            "tmp/test.db",
-		"AOWUGONG_SQLITE_MAX_OPEN_CONNS":  "6",
-		"AOWUGONG_SQLITE_MAX_IDLE_CONNS":  "1",
-		"AOWUGONG_SQLITE_BUSY_TIMEOUT_MS": "8000",
-		"AOWUGONG_SQLITE_SKIP_MIGRATIONS": "true",
-		"AOWUGONG_MYSQL_HOST":             "127.0.0.1",
-		"AOWUGONG_MYSQL_PORT":             "13306",
-		"AOWUGONG_MYSQL_DATABASE":         "aowugong",
-		"AOWUGONG_MYSQL_USER":             "aowugong_worker",
-		"AOWUGONG_MYSQL_PASSWORD":         "test-password",
+		"AOWUGONG_DATABASE_URL":                       "postgres://worker:secret@127.0.0.1:5432/aowugong?sslmode=disable",
+		"AOWUGONG_DATABASE_MAX_OPEN_CONNS":            "6",
+		"AOWUGONG_DATABASE_MAX_IDLE_CONNS":            "1",
+		"AOWUGONG_DATABASE_CONN_MAX_LIFETIME_MINUTES": "45",
+		"AOWUGONG_DATABASE_SKIP_MIGRATIONS":           "true",
+		"AOWUGONG_SQLITE_SOURCE_PATH":                 "tmp/test.db",
 	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 
 	// 2. 断言运行库与迁移来源没有混用。
-	if cfg.Database.Path != filepath.Clean("tmp/test.db") {
-		t.Errorf("Database.Path = %q", cfg.Database.Path)
+	if cfg.SQLiteSourcePath != filepath.Clean("tmp/test.db") {
+		t.Errorf("SQLiteSourcePath = %q", cfg.SQLiteSourcePath)
 	}
-	if cfg.Database.MaxOpenConns != 6 || cfg.Database.MaxIdleConns != 1 || cfg.Database.BusyTimeout != 8*time.Second {
+	if cfg.Database.MaxOpenConns != 6 || cfg.Database.MaxIdleConns != 1 || cfg.Database.ConnMaxLifetime != 45*time.Minute {
 		t.Errorf("Database = %#v", cfg.Database)
 	}
-	if cfg.Migration.MySQL.Host != "127.0.0.1" || cfg.Migration.MySQL.Port != 13306 ||
-		cfg.Migration.MySQL.User != "aowugong_worker" || cfg.Migration.MySQL.Password != "test-password" {
-		t.Errorf("Migration.MySQL = %#v", cfg.Migration.MySQL)
+	if !strings.Contains(cfg.Database.URL, "worker:secret@127.0.0.1") {
+		t.Errorf("Database.URL = %q", cfg.Database.URL)
 	}
 	if !cfg.Database.SkipMigrations {
 		t.Error("Database.SkipMigrations = false, want true")

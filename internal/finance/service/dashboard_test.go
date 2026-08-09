@@ -48,6 +48,34 @@ func TestDashboardServiceBuildsRuntimeSummaries(t *testing.T) {
 	}
 }
 
+// TestJobsSummaryIncludesEnabledBackupTasks 验证任务页只显示已启用的可选备份任务。
+// 输入：同时启用 GitHub 和 Vaultwarden 备份的摘要服务。
+// 输出：任务清单增加两个周任务。
+// 副作用：无。
+func TestJobsSummaryIncludesEnabledBackupTasks(t *testing.T) {
+	// 1. 构造启用两项备份的服务并读取任务摘要。
+	service := NewDashboardService(nil, DashboardOptions{
+		SchedulerEnabled: true, GitHubBackupEnabled: true, VaultwardenBackupEnabled: true,
+	})
+	jobs := service.JobsSummary()
+
+	// 2. 核对任务数量和两个可选任务名称。
+	if len(jobs.Jobs) != 10 {
+		t.Fatalf("jobs count = %d, want 10", len(jobs.Jobs))
+	}
+	wanted := map[string]bool{"backup_github_code": false, "email_vaultwarden_backup": false}
+	for _, item := range jobs.Jobs {
+		if _, ok := wanted[item.Name]; ok {
+			wanted[item.Name] = true
+		}
+	}
+	for name, found := range wanted {
+		if !found {
+			t.Errorf("jobs missing %s", name)
+		}
+	}
+}
+
 // openDashboardTestDB 创建 finance 摘要测试使用的最小 SQLite 数据库。
 // 输入：t 管理测试生命周期，ctx 控制数据库操作。
 // 输出：返回已创建核心数据表和样例日期的数据库连接。

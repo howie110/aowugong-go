@@ -10,36 +10,29 @@ import (
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/config"
-	"github.com/howiedata/aowugong-go/internal/database"
-	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
 // TestRunShutsDownOnContextCancellation 验证 Run 会在上下文取消后优雅退出。
-// 输入：隔离 SQLite 配置和可取消测试上下文。
+// 输入：开发 API 代理配置和可取消测试上下文。
 // 输出：HTTP 服务启动后在十秒内无错误退出。
-// 副作用：创建临时数据库并短暂监听本机端口。
+// 副作用：短暂监听本机端口。
 func TestRunShutsDownOnContextCancellation(t *testing.T) {
-	// 1. 创建当前测试独享的 SQLite 配置。
-	databaseConfig := testdatabase.Prepare(t)
-
-	// 2. 启动运行时并等待 HTTP 监听器就绪。
+	// 1. 使用无需数据库的开发代理模式启动运行时并等待 HTTP 监听器就绪。
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
 	address := reserveAddress(t)
-	migrationsDirectory := testdatabase.MigrationsDirectory(t)
 	go func() {
-		// 3. 将运行结果交给测试协程。
+		// 2. 将运行结果交给测试协程。
 		done <- Run(ctx, config.Config{
-			Environment:   "test",
-			MigrationsDir: migrationsDirectory,
-			HTTP:          config.HTTP{Address: address},
-			Database:      databaseConfig,
+			Environment: "test",
+			HTTP:        config.HTTP{Address: address, StaticDir: t.TempDir()},
+			Development: config.Development{UpstreamURL: "http://127.0.0.1:1"},
 		})
 	}()
 	waitForServer(t, address, done)
 
-	// 4. 取消上下文并断言服务正常退出。
+	// 3. 取消上下文并断言服务正常退出。
 	cancel()
 	select {
 	case err := <-done:
@@ -71,37 +64,26 @@ func TestRunRejectsMissingProductionMigrations(t *testing.T) {
 	}
 }
 
-// TestRunJobSkipsSchemaMigrations 验证 CLI 补跑只使用既有 SQLite 表结构。
-// 输入：已迁移的隔离 SQLite 与故意不存在的生产迁移目录。
-// 输出：任务正常完成，不因迁移目录缺失失败。
-// 副作用：创建隔离数据库，并写入一条 test_crontab 执行记录。
+// TestRunJobSkipsSchemaMigrations 验证 CLI 补跑不会解析 PostgreSQL 迁移目录。
+// 输入：不可达 PostgreSQL 与故意不存在的生产迁移目录。
+// 输出：返回连接错误而不是迁移目录错误。
+// 副作用：尝试连接本机不可达端口。
 func TestRunJobSkipsSchemaMigrations(t *testing.T) {
-	// 1. 先由测试管理账号建立完整表结构，模拟已部署的生产库。
-	databaseConfig := testdatabase.Prepare(t)
-	db, err := database.OpenSQLite(context.Background(), databaseConfig)
-	if err != nil {
-		t.Fatalf("database.OpenSQLite() error = %v", err)
-	}
-	if err := database.MigrateSQLite(context.Background(), db, testdatabase.MigrationsDirectory(t)); err != nil {
-		_ = db.Close()
-		t.Fatalf("database.MigrateSQLite() error = %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("db.Close() error = %v", err)
-	}
-
-	// 2. 使用缺失迁移目录运行 CLI 任务，证明补跑路径不会执行 DDL。
-	result, err := RunJob(context.Background(), config.Config{
+	// 1. 使用缺失迁移目录运行 CLI 任务，证明补跑路径先直接连接既有数据库。
+	_, err := RunJob(context.Background(), config.Config{
 		Environment:   "production",
 		MigrationsDir: filepath.Join(t.TempDir(), "missing"),
-		Database:      databaseConfig,
-		Storage:       config.Storage{BackupDir: t.TempDir(), BackupRetention: 7},
+		Database: config.Database{
+			URL:          "postgres://invalid@127.0.0.1:1/invalid?sslmode=disable&connect_timeout=1",
+			MaxOpenConns: 1, MaxIdleConns: 0, ConnMaxLifetime: time.Minute,
+		},
+		Storage: config.Storage{BackupDir: t.TempDir(), BackupRetention: 7},
 	}, "test_crontab")
-	if err != nil {
-		t.Fatalf("RunJob() error = %v", err)
+	if err == nil {
+		t.Fatal("RunJob() error = nil, want PostgreSQL connection error")
 	}
-	if result.Status != "success" {
-		t.Errorf("RunJob() status = %q, want success", result.Status)
+	if strings.Contains(err.Error(), "迁移目录") {
+		t.Fatalf("RunJob() error = %v, should skip migrations", err)
 	}
 }
 

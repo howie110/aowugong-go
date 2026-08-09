@@ -55,11 +55,12 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME}"
           package="aowugong-go-${version}-linux-amd64"
-          mkdir -p "dist/${package}/web"
+          mkdir -p "dist/${package}/web" "dist/${package}/migrations"
           go build -trimpath -ldflags="-s -w" -o "dist/${package}/aowugong" ./cmd/aowugong
           go build -trimpath -ldflags="-s -w" -o "dist/${package}/aowugong-migrate" ./cmd/migrate
           cp -R web/dist "dist/${package}/web/dist"
-          cp -R migrations configs init scripts "dist/${package}/"
+          cp -R migrations/postgres "dist/${package}/migrations/postgres"
+          cp -R configs init scripts "dist/${package}/"
           cp README.md "dist/${package}/README.md"
           printf '%s\n' "${version}" > "dist/${package}/VERSION"
           chmod +x "dist/${package}/aowugong" "dist/${package}/aowugong-migrate" "dist/${package}/scripts/"*.sh

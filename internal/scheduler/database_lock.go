@@ -11,20 +11,22 @@ import (
 	"time"
 )
 
-const sqliteJobLockPrefix = "aowugong:job:"
+const databaseJobLockPrefix = "aowugong:job:"
 
-// acquireSQLiteLock 尝试获取带自动过期时间的跨进程任务锁。
-// 输入：ctx 控制写入，db 是应用 SQLite，jobName 是业务互斥键，ttl 是最大占用时间。
+// acquireDatabaseLock 尝试获取带自动过期时间的跨进程任务锁。
+// 输入：ctx 控制写入，db 是应用 PostgreSQL，jobName 是业务互斥键，ttl 是最大占用时间。
 // 输出：成功返回幂等释放函数；已有未过期锁时返回 ErrAlreadyRunning。
-// 副作用：写入并在释放时删除 SQLite job_execution_lock。
-func acquireSQLiteLock(ctx context.Context, db *sql.DB, jobName string, ttl time.Duration) (func() error, error) {
+// 副作用：写入并在释放时删除 PostgreSQL job_execution_lock。
+func acquireDatabaseLock(
+	ctx context.Context, db *sql.DB, jobName string, ttl time.Duration,
+) (func() error, error) {
 	// 1. 校验锁名和期限，并创建不可猜测的本次执行令牌。
-	lockName := sqliteJobLockPrefix + strings.TrimSpace(jobName)
-	if lockName == sqliteJobLockPrefix || len(lockName) > 200 {
-		return nil, fmt.Errorf("SQLite 任务锁名称无效: %q", jobName)
+	lockName := databaseJobLockPrefix + strings.TrimSpace(jobName)
+	if lockName == databaseJobLockPrefix || len(lockName) > 200 {
+		return nil, fmt.Errorf("数据库任务锁名称无效: %q", jobName)
 	}
 	if ttl <= 0 {
-		return nil, fmt.Errorf("任务 %s 的 SQLite 锁期限无效", jobName)
+		return nil, fmt.Errorf("任务 %s 的数据库锁期限无效", jobName)
 	}
 	ownerToken, err := newLockToken()
 	if err != nil {
@@ -42,13 +44,13 @@ func acquireSQLiteLock(ctx context.Context, db *sql.DB, jobName string, ttl time
 			acquired_at = excluded.acquired_at,
 			expires_at = excluded.expires_at
 		WHERE job_execution_lock.expires_at <= excluded.acquired_at
-	`, lockName, ownerToken, now.Format(time.RFC3339Nano), expiresAt.Format(time.RFC3339Nano))
+	`, lockName, ownerToken, now, expiresAt)
 	if err != nil {
-		return nil, fmt.Errorf("获取任务 %s 的 SQLite 锁: %w", jobName, err)
+		return nil, fmt.Errorf("获取任务 %s 的数据库锁: %w", jobName, err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return nil, fmt.Errorf("读取任务 %s 的 SQLite 锁结果: %w", jobName, err)
+		return nil, fmt.Errorf("读取任务 %s 的数据库锁结果: %w", jobName, err)
 	}
 	if affected == 0 {
 		return nil, fmt.Errorf("任务 %s: %w", jobName, ErrAlreadyRunning)
@@ -65,14 +67,14 @@ func acquireSQLiteLock(ctx context.Context, db *sql.DB, jobName string, ttl time
 				"DELETE FROM job_execution_lock WHERE lock_name = ? AND owner_token = ?",
 				lockName, ownerToken)
 			if err != nil {
-				releaseErr = fmt.Errorf("释放任务 %s 的 SQLite 锁: %w", jobName, err)
+				releaseErr = fmt.Errorf("释放任务 %s 的数据库锁: %w", jobName, err)
 				return
 			}
 			affected, err := result.RowsAffected()
 			if err != nil {
-				releaseErr = fmt.Errorf("读取任务 %s 的 SQLite 解锁结果: %w", jobName, err)
+				releaseErr = fmt.Errorf("读取任务 %s 的数据库解锁结果: %w", jobName, err)
 			} else if affected != 1 {
-				releaseErr = fmt.Errorf("释放任务 %s 的 SQLite 锁未生效", jobName)
+				releaseErr = fmt.Errorf("释放任务 %s 的数据库锁未生效", jobName)
 			}
 		})
 		return releaseErr

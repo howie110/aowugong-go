@@ -1,265 +1,189 @@
 # Aowugong Go
 
-`aowugong-go` 是 Aowugong 工作台的 Go 模块化单体。Go 进程提供 HTTP API、React 静态资源、RBAC、定时任务和微信通知；生产业务数据保存在单个 SQLite 文件中。
+`aowugong-go` 是 Aowugong 工作台的 Go 模块化单体。Go 进程提供 HTTP API、React 静态资源、RBAC、定时任务和微信通知，业务数据统一保存在 PostgreSQL。
 
 ## 技术栈
 
-- 后端：Go、`net/http`、chi、`database/sql`、`modernc.org/sqlite`、Goose、`log/slog`
+- 后端：Go、`net/http`、chi、`database/sql`、pgx、Goose、`log/slog`
 - 前端：React、TypeScript、Vite、shadcn/ui、Tailwind CSS
-- 任务：`robfig/cron/v3`，固定时区 `Asia/Shanghai`
-- 认证：bcrypt、JWT，登录有效期 72 小时
+- 数据库：PostgreSQL 15+，连接池默认 `8/4`，时区 `Asia/Shanghai`
+- 调度：`robfig/cron/v3`，任务统一经过并发锁、超时、panic 恢复、日志、结果入库和失败微信通知
 - 外部服务：Miniflux、DeepSeek、Tushare、OpeniLink Hub、微信读书、阿里云 OCR
-- 生产：Linux amd64 发布产物、systemd，无需 Go、Node、Python、MySQL 或 Docker
+- 生产：Linux amd64 发布产物、systemd；服务器无需 Go、Node、Python、MySQL 或 Docker
 
 ## 目录
 
 ```text
-cmd/aowugong/             HTTP 服务和统一任务 CLI
-cmd/migrate/              MySQL 到 SQLite 一次性迁移工具
+cmd/aowugong/             正式服务和统一任务 CLI
+cmd/migrate/              SQLite 到 PostgreSQL 一次性迁移工具
 internal/app/             依赖组装、启动和优雅停止
 internal/config/          环境变量和配置校验
-internal/database/        SQLite 连接、Goose 迁移和安全快照
-internal/databaseview/    管理员只读数据库查询
-internal/httpserver/      API、认证中间件、开发代理和 React 静态资源
-internal/scheduler/       任务注册、Cron、执行包装和 SQLite 锁
-internal/client/          外部 HTTP/API 客户端
-internal/finance/         数据、回测、仓位、文章分析和任务
-internal/{auth,rbac,work,weread,mahjong,subscription,monitoring}/
-internal/testdatabase/    隔离 SQLite 测试夹具
+internal/database/        PostgreSQL 连接、迁移和 pg_dump 备份
+internal/databaseview/    管理员只读数据库页面
+internal/httpserver/      路由、中间件和 React 静态资源
+internal/scheduler/       任务注册、Cron、执行包装和数据库锁
+internal/finance/         行情、仓位、文章分析、回测和任务
+internal/testdatabase/    隔离 SQLite 测试夹具，不进入生产运行路径
 web/                      React 前端
-migrations/sqlite/        版本化 SQLite SQL
+migrations/postgres/      正式 PostgreSQL 版本化迁移
+migrations/sqlite/        仅供旧数据迁移和隔离测试
 configs/.env.example      唯一配置模板
-init/systemd/             systemd 服务模板
-scripts/                  构建、发布、部署、切换和回滚
-storage/                  本地运行数据，生产使用 shared/storage
+init/systemd/             正式和 canary systemd 模板
+scripts/                  本地运行、构建、发布、远程任务和回滚
+storage/                  本地运行目录；生产使用 shared/storage
 ```
 
-依赖方向固定为 `handler -> service -> repository/client`。页面手动任务、Cron 和 CLI 都调用同一个 service 与 `scheduler.Registry.Run`。
+业务依赖固定为 `handler -> service -> repository/client`。定时任务、页面手动执行和 CLI 补跑共用同一 service 与 `scheduler.Registry.Run`；回测引擎不访问数据库和外部接口。
 
-## SQLite
+## PostgreSQL
 
-生产文件固定为：
+正式服务使用：
 
-```text
-/opt/aowugong-go/shared/storage/data/aowugong.db
+```env
+AOWUGONG_DATABASE_URL=postgres://aowugong:密码@127.0.0.1:5432/aowugong?sslmode=disable
+AOWUGONG_DATABASE_MAX_OPEN_CONNS=8
+AOWUGONG_DATABASE_MAX_IDLE_CONNS=4
+AOWUGONG_DATABASE_CONN_MAX_LIFETIME_MINUTES=30
+AOWUGONG_DATABASE_SKIP_MIGRATIONS=false
 ```
 
-每条连接启用：
+启动时自动执行 `migrations/postgres`。连接自动设置上海时区，并把仓储中的标准 `?` 参数占位符统一转换成 PostgreSQL `$1...`。
 
-```text
-journal_mode=WAL
-foreign_keys=ON
-busy_timeout=5000
-synchronous=NORMAL
+每日 `03:30` 使用 `pg_dump --format=custom` 创建一致性备份，并用 `pg_restore --list` 校验后原子发布；默认保留最近 7 份。恢复示例：
+
+```bash
+createdb -U postgres aowugong_restore
+pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugong-时间.dump
 ```
 
-连接池默认最多 4 条连接。任务注册表使用 `job_execution_lock` 防止跨进程重复执行；写入仍由 SQLite 串行化。
+## 本地运行
 
-管理员可访问 `/database`：
-
-- 查看数据库大小、表、字段、行数和分页数据
-- 搜索当前表
-- 流式导出当前筛选的 CSV，单次最多 100,000 行
-- 密码、令牌和密钥字段始终隐藏
-- 不接受任意 SQL，不提供新增、修改或删除
-
-## Miniflux
-
-投资文章由 aowugong 通过 Miniflux API 的 `投资文章` 分类读取。Miniflux 使用独立 PostgreSQL 数据库，aowugong 主库仍为 SQLite，两者不混用。
-
-```text
-Miniflux:  http://8.138.123.59:5000
-PostgreSQL: 127.0.0.1:5432，仅服务器本机监听
-```
-
-Miniflux 登录信息保存在服务器 `/root/miniflux-access.txt`，aowugong API Token 保存在 `/etc/miniflux/aowugong-api-token`，文件权限均为 `0600`。生产环境通过 `MINIFLUX_*` 注入连接参数，不在仓库保存密码或 Token。
-
-境外订阅使用服务器 Xray 本机代理：HTTP `127.0.0.1:6152`、SOCKS `127.0.0.1:6153`，两个端口均不对公网监听。Miniflux 通过 `HTTP_CLIENT_PROXY` 配置代理，只有开启“通过代理抓取”的订阅会使用它。节点配置在本地 `storage/private/vpn/` 管理，生产副本位于 `/usr/local/etc/xray/config.json`，明文节点凭据不进入公开仓库。
-
-## 本地开发
-
-先构建前端：
+本地默认只启动前端和 Go 代理，业务请求转发到线上 `2345`，因此看到的是线上 PostgreSQL 数据，不创建本地业务数据库，也不会启动定时任务：
 
 ```powershell
-cd web
-npm ci
-npm test
-npm run build
-cd ..
+./scripts/run-local.ps1
 ```
 
-本地 `2345` 使用当前前端，`/api` 直接代理线上 Go：
+访问 `http://127.0.0.1:2345`。停止本地进程：
 
 ```powershell
-.\scripts\run-local.ps1 -GoCommand C:\howiedata\tools\go1.26.5\bin\go.exe
+./scripts/stop-local.ps1
 ```
 
-访问 `http://127.0.0.1:2345`。本地不会创建 SQLite 副本；页面读取和业务操作使用线上同一份数据。生产环境禁止设置 `AOWUGONG_DEV_UPSTREAM_URL`。
-
-补跑线上任务：
+需要补跑或修改线上数据时，通过 SSH 在服务器加载正式环境并调用统一 CLI：
 
 ```powershell
-.\scripts\run-remote-job.ps1 -JobName sync_investment_articles
+./scripts/run-remote-job.ps1 sync_investment_articles
 ```
-
-脚本通过 SSH 在服务器加载正式环境后调用统一任务入口，不保存 SSH 密码。SQLite 不能通过网络文件系统直接挂载；需要直接核查或修复时，通过 SSH 在服务器执行，并在变更前创建快照。
 
 ## 定时任务
+
+调度时区固定为 `Asia/Shanghai`。
 
 | 时间 | 任务 | 说明 |
 |---|---|---|
 | 09:00 | `test_crontab` | 每日任务链路测试 |
-| 仅手动 | `sync_investment_articles` | 同步并分析 Miniflux 投资文章；订阅导入验收后恢复定时 |
 | 22:00 | `check_service_monitors` | 服务连通性检查 |
 | 09:30 | `check_subscription_expiry_notify` | 订阅到期提醒 |
-| 10:00 | `openilink_reply_reminder` | OpeniLink 回复提醒 |
-| 03:30 | `backup_sqlite` | SQLite 一致性快照 |
+| 10:00 | `openilink_reply_reminder` | OpeniLink 待回复提醒 |
+| 03:30 | `backup_postgres` | PostgreSQL 一致性备份 |
+| 周日 04:00 | `backup_github_code` | 启用后备份账号自有仓库及两个固定组织仓库 |
+| 周日 05:00 | `email_vaultwarden_backup` | 加密最新 Vaultwarden 备份并发送到异地邮箱 |
 
-仅手动任务：
+以下任务保留为手动或 CLI 执行：`update_tushare_daily_data`、`sync_investment_articles`、`rebuild_investment_signal_groups`。
 
-| 任务 | 说明 |
-|---|---|
-| `update_tushare_daily_data` | 按需恢复 Tushare 个股日线同步 |
-| `rebuild_investment_signal_groups` | 全局重建投资信号概念词典 |
-
-统一任务包装器负责进程内和跨进程防并发、超时、panic 恢复、耗时日志、结果入库和失败微信通知。失败通知保持“任务、时间、状态、信息”四段格式。
-
-`backup_sqlite` 使用 `VACUUM INTO` 创建一致性快照，执行 `PRAGMA quick_check` 后原子发布，默认保留最近 7 份。
-
-## 数据迁移
-
-一次性迁移工具读取旧 MySQL，创建并重写 SQLite：
-
-```powershell
-go run ./cmd/migrate --confirm
+```bash
+/opt/aowugong-go/current/aowugong job backup_postgres
+/opt/aowugong-go/current/aowugong job backup_github_code
+/opt/aowugong-go/current/aowugong job email_vaultwarden_backup
 ```
 
-需要配置 `AOWUGONG_MYSQL_HOST`、`AOWUGONG_MYSQL_PORT`、`AOWUGONG_MYSQL_DATABASE`、`AOWUGONG_MYSQL_USER` 和 `AOWUGONG_MYSQL_PASSWORD`。MySQL 仅是迁移来源，不是正式运行依赖。
+任务失败通知固定包含“任务、时间、状态、信息”，并统一通过 OpeniLink Hub 发送。
 
-迁移规则：
+GitHub 代码备份默认关闭，通过 GitHub API 自动发现认证账号拥有的全部公有和私有仓库，再额外包含 `GITHUB_BACKUP_REQUIRED_REPOSITORIES` 中的组织仓库，当前固定为 `KES-IT/KES-SCM` 和 `KES-IT/KES-BIS`，不会枚举其他组织项目。每个项目保存为裸 Git 仓库，更新前的分支和标签保留在内部历史引用中；仓库失去权限或不再被发现时只记录状态，不删除最后副本。备份默认写入 `AOWUGONG_BACKUP_DIR/github`。
 
-- 迁移当前全部业务表、权限、文章、仓位、任务和通知数据
-- 保留空 `tushare_daily` 表，但不迁移历史个股日线
-- 迁移后逐表核对行数、关键字段首尾完整样本和日期范围
-- 提交前执行 `PRAGMA integrity_check` 和 `PRAGMA foreign_key_check`
-- 任一核对失败即回滚 SQLite 数据事务
+Vaultwarden 每日 `03:45` 创建 PostgreSQL、附件、Send 和签名密钥备份，默认保留 14 份；启用 `VAULTWARDEN_BACKUP_EMAIL_ENABLED` 后，Go 任务每周日 `05:00` 读取最新备份，使用 `age` 公钥加密，再把加密文件、`使用说明.md` 和全新服务器重建脚本打入单个恢复 ZIP 后发送邮件，临时文件发送后立即删除。服务器只保存公钥，解密私钥只保存在本地 `storage/private/backup/vaultwarden-age-key.txt`。
 
-canary 和正式停写迁移都会把 JSON 核验报告保存到 `/opt/aowugong-go/shared/storage/backup`，文件权限为 `0600`。
+从邮件恢复 Vaultwarden：
 
-MySQL 旧数据和 FastAPI 服务配置保留用于回滚。完成页面和数据验收、确认没有其他项目使用 MySQL 后，可以停止 MySQL，但不删除旧数据。
+```powershell
+# 1. 解压邮件中的 recovery.zip，再在本地解密其中的 .tar.gz.age。
+storage/private/backup/age.exe --decrypt -i storage/private/backup/vaultwarden-age-key.txt `
+  -o vaultwarden-backup.tar.gz vaultwarden-时间.tar.gz.age
+```
+
+```bash
+# 2. 在全新服务器安装 Docker Engine 和 PostgreSQL 15 后，上传明文备份和恢复包内的 scripts。
+PUBLIC_IP=新服务器公网IP bash scripts/install-vaultwarden.sh
+BACKUP_ARCHIVE=/root/vaultwarden-backup.tar.gz CONFIRM_DISASTER_RESTORE=YES \
+  bash scripts/restore-vaultwarden-disaster.sh
+```
+
+解密只在本地执行，私钥不得上传服务器。灾难恢复默认面向空白新服务器；目标已有 Vaultwarden 时必须先停止并人工确认。
 
 ## 配置
 
-从 `configs/.env.example` 创建真实 `.env`，不得提交密钥。
+复制并填写 `configs/.env.example`。生产必须配置：
 
-| 配置 | 说明 |
-|---|---|
-| `AOWUGONG_ENV` | `development` 或 `production` |
-| `AOWUGONG_HTTP_ADDRESS` | HTTP 监听地址，生产正式端口为 `0.0.0.0:2345` |
-| `AOWUGONG_SQLITE_PATH` | SQLite 文件路径 |
-| `AOWUGONG_SQLITE_*` | 连接池、锁等待和迁移开关 |
-| `AOWUGONG_DEV_UPSTREAM_URL` | 本地页面复用线上 API，生产必须为空 |
-| `AOWUGONG_MIGRATIONS_DIR` | SQLite 迁移目录 |
-| `AOWUGONG_JWT_SECRET` | 生产 JWT 密钥 |
-| `AOWUGONG_ENCRYPTION_KEY` | 生产加密密钥 |
-| `AOWUGONG_BACKUP_*` | SQLite 快照目录和保留数 |
-| `AOWUGONG_SCHEDULER_ENABLED` | 是否启动内嵌 Cron |
-| `MINIFLUX_BASE_URL` | Miniflux 内部 API 根地址 |
-| `MINIFLUX_MONITOR_URL` | 服务监控页面展示的公网入口 |
-| `MINIFLUX_API_TOKEN` | aowugong 专用 API Token |
-| `MINIFLUX_CATEGORY` | 投资文章分类名称，默认 `投资文章` |
-| `FINANCE_ENABLE_REAL_TRADE` | 真实交易总开关，默认 `false` |
-| `AOWUGONG_MYSQL_*` | 仅一次性迁移旧数据时使用 |
+- `AOWUGONG_DATABASE_URL`
+- `AOWUGONG_JWT_SECRET`
+- `AOWUGONG_ENCRYPTION_KEY`
+- 实际启用客户端所需的 Token 或密钥
 
-其余 DeepSeek、Tushare、OpeniLink、微信读书和 OCR 配置见 `.env.example`。
+启用代码备份时还需配置 `GITHUB_BACKUP_ENABLED=true` 和具备账号全部仓库及两个固定组织仓库只读权限的 `GITHUB_BACKUP_TOKEN`。Token 只通过 Git 子进程环境使用，不写入仓库远端地址、清单或日志。
+
+`FINANCE_ENABLE_REAL_TRADE` 默认 `false`。`AOWUGONG_SQLITE_SOURCE_PATH` 只供一次迁移工具读取，正式服务不使用。
 
 ## 验证
 
 ```powershell
-$env:GOCACHE="$PWD\.cache\go-build"
-go test -buildvcs=false ./...
-go test -buildvcs=false -race ./...
-go vet -buildvcs=false ./...
-
+go test ./...
+go test -race ./...
+go vet ./...
 cd web
+npm ci
 npm test
 npm run build
 ```
 
-测试使用临时 SQLite 文件，不访问生产数据。
+测试使用临时 SQLite 夹具验证仓储契约；正式 `aowugong` 二进制不包含 SQLite 驱动。PostgreSQL 基线迁移和数据迁移还应在临时 PostgreSQL 数据库中执行一次。
 
-## 构建发布
+## 构建与发布
 
 本地构建 Linux amd64 发布包：
 
 ```powershell
-.\scripts\build-release.ps1 -Version v1.0.0
+./scripts/build-release.ps1 -Version v1.0.0
 ```
 
-发布包包含：
+Git tag 会触发 GitHub Actions，执行前后端测试、Race、Vet 和构建，再发布包含二进制、`web/dist`、PostgreSQL migrations、配置模板和脚本的压缩包。
 
-```text
-aowugong
-aowugong-migrate
-web/dist
-migrations/sqlite
-configs
-init
-scripts
-README.md
-VERSION
-```
-
-版本 tag 的 GitHub Actions 执行前端测试/构建、Go test/race/vet、Linux amd64 编译并发布压缩包和 SHA-256 文件。
-
-## 部署切换
-
-首次 SQLite 并行部署：
+服务器安装正式版本：
 
 ```bash
-DEPLOY_MODE=canary MIGRATE_FROM_MYSQL=true APP_PORT=2346 SCHEDULER_ENABLED=false \
-  ./scripts/bootstrap-release.sh v1.0.0
+sudo DEPLOY_MODE=main /opt/aowugong-go/current/scripts/deploy-release.sh v1.0.0
 ```
 
-部署器只下载发布产物。`canary` 使用独立的 `aowugong-go-canary` 服务和环境文件，不修改当前 `aowugong-go` 2345；首次切换必须显式设置 `MIGRATE_FROM_MYSQL=true`，迁移和核对成功后才启动 2346。
+并行验收使用 `DEPLOY_MODE=canary` 和 `2346`，调度器会强制关闭。正式发布原子切换 `current`，并把上一版保存为 `previous`。
 
-页面和数据验收通过后正式切换：
+回滚发布产物：
 
 ```bash
-sudo /opt/aowugong-go/canary/scripts/cutover.sh
+sudo /opt/aowugong-go/current/scripts/rollback.sh
 ```
 
-切换脚本检查 2346，停止旧 Go、FastAPI、旧 crontab 和 canary 写入，再从 MySQL 完整迁移一次，补齐并行验收期间的新数据；随后提升 canary、启用内嵌调度并检查 2345。失败会恢复原环境、链接、服务和 crontab。
+回滚只切换应用产物，不自动回滚 PostgreSQL schema 或业务数据。发布前应先确认 migration 向后兼容，并保留当日 `pg_dump` 备份。
 
-完成首次 SQLite 切换后的普通版本发布：
+## 一次性数据迁移
+
+在维护窗口停止正式 Go 服务后，使用只读 SQLite 来源重建 PostgreSQL 业务表：
 
 ```bash
-DEPLOY_MODE=main APP_PORT=2345 SCHEDULER_ENABLED=true \
-  ./scripts/bootstrap-release.sh v1.0.1
+set -a
+. /opt/aowugong-go/shared/.env
+set +a
+AOWUGONG_SQLITE_SOURCE_PATH=/安全路径/aowugong.db \
+  /opt/aowugong-go/current/aowugong-migrate --confirm
 ```
 
-发布和切换不会修改 Miniflux 5000、PostgreSQL、OpeniLink Hub 9800、SSH、防火墙或安全组。
-
-## 回滚
-
-回滚到上一 SQLite 发布版本：
-
-```bash
-sudo /opt/aowugong-go/current/scripts/rollback.sh release
-```
-
-首次切换后恢复原 MySQL Go：
-
-```bash
-sudo CUTOVER_ENV_BACKUP=/opt/aowugong-go/shared/storage/backup/sqlite-cutover-时间戳.env \
-  /opt/aowugong-go/current/scripts/rollback.sh mysql-go
-```
-
-恢复 FastAPI：
-
-```bash
-sudo CRONTAB_BACKUP=/opt/aowugong-go/shared/storage/backup/sqlite-cutover-时间戳.fastapi-crontab \
-  /opt/aowugong-go/current/scripts/rollback.sh fastapi
-```
-
-恢复 MySQL Go 或 FastAPI 前必须确保旧 MySQL 已启动。回滚只适合切换后短时间应急；SQLite 已产生新写入后，回到旧库前必须先核对并补回差异数据。
+迁移工具会执行 SQLite `quick_check`、PostgreSQL migrations、单事务复制、序列校准，并逐表核对行数及主键范围。核对成功后，正式服务只读取 PostgreSQL；旧 SQLite 仅保留一份离线归档，确认无误后可删除。

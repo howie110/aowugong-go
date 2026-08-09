@@ -5,15 +5,18 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
+
+	appdatabase "github.com/howiedata/aowugong-go/internal/database"
 )
 
-// Repository 负责 SQLite 中的角色、权限和关联关系。
+// Repository 负责 PostgreSQL 中的角色、权限和关联关系。
 type Repository struct {
 	db *sql.DB
 }
 
 // NewRepository 创建 RBAC 仓储。
-// 输入：db 是已完成迁移的 SQLite 连接池。
+// 输入：db 是已完成迁移的 PostgreSQL 连接池。
 // 输出：返回 RBAC 仓储。
 // 副作用：无。
 func NewRepository(db *sql.DB) *Repository {
@@ -24,7 +27,7 @@ func NewRepository(db *sql.DB) *Repository {
 // SyncDefaults 幂等同步系统角色、页面权限及默认绑定。
 // 输入：ctx 是调用上下文，permissions 和 roles 是代码基线。
 // 输出：成功返回 nil。
-// 副作用：在单个事务中写入 SQLite。
+// 副作用：在单个事务中写入 PostgreSQL。
 func (r *Repository) SyncDefaults(ctx context.Context, permissions []Permission, roles []Role) error {
 	// 1. 开启事务，避免角色和权限处于半同步状态。
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -36,12 +39,13 @@ func (r *Repository) SyncDefaults(ctx context.Context, permissions []Permission,
 	// 2. 按 code 更新或创建全部系统权限。
 	for _, permission := range permissions {
 		_, err := tx.ExecContext(ctx,
-			"INSERT INTO aowugong_permissions (code, name, `group`, description) "+
+			"INSERT INTO aowugong_permissions (code, name, \"group\", description) "+
 				"VALUES (?, ?, ?, ?) "+
 				"ON CONFLICT(code) DO UPDATE SET "+
-				"name = excluded.name, `group` = excluded.`group`, description = excluded.description, "+
-				"updated_at = datetime('now', '+8 hours')",
-			permission.Code, permission.Name, permission.Group, permission.Description)
+				"name = excluded.name, \"group\" = excluded.\"group\", description = excluded.description, "+
+				"updated_at = ?",
+			permission.Code, permission.Name, permission.Group, permission.Description,
+			appdatabase.TimestampText(time.Now()))
 		if err != nil {
 			return fmt.Errorf("同步权限 %s: %w", permission.Code, err)
 		}
@@ -57,8 +61,9 @@ func (r *Repository) SyncDefaults(ctx context.Context, permissions []Permission,
 				description = excluded.description,
 				is_active = excluded.is_active,
 				is_system = excluded.is_system,
-				updated_at = datetime('now', '+8 hours')
-		`, role.Code, role.Name, role.Description, role.IsActive, role.IsSystem)
+				updated_at = ?
+		`, role.Code, role.Name, role.Description, boolInteger(role.IsActive), boolInteger(role.IsSystem),
+			appdatabase.TimestampText(time.Now()))
 		if err != nil {
 			return fmt.Errorf("同步角色 %s: %w", role.Code, err)
 		}
@@ -97,10 +102,22 @@ func (r *Repository) SyncDefaults(ctx context.Context, permissions []Permission,
 	return nil
 }
 
+// boolInteger 把 Go 布尔值转换为历史数据库字段使用的 0 或 1。
+// 输入：value 是业务布尔值。
+// 输出：true 返回 1，false 返回 0。
+// 副作用：无。
+func boolInteger(value bool) int {
+	// 1. 保持 PostgreSQL 与迁移前整数布尔字段的数据契约。
+	if value {
+		return 1
+	}
+	return 0
+}
+
 // AssignRole 幂等地给用户分配一个启用角色。
 // 输入：ctx 是调用上下文，userID 是用户主键，roleCode 是角色编码。
 // 输出：用户或角色不存在时返回对应业务错误。
-// 副作用：写入 SQLite 用户角色关联。
+// 副作用：写入 PostgreSQL 用户角色关联。
 func (r *Repository) AssignRole(ctx context.Context, userID int64, roleCode string) error {
 	// 1. 确认用户存在，避免把外键错误暴露给服务层。
 	var userExists int
@@ -113,8 +130,9 @@ func (r *Repository) AssignRole(ctx context.Context, userID int64, roleCode stri
 
 	// 2. 查找启用角色并幂等写入关联。
 	result, err := r.db.ExecContext(ctx, `
-		INSERT OR IGNORE INTO aowugong_user_roles (user_id, role_id)
+		INSERT INTO aowugong_user_roles (user_id, role_id)
 		SELECT ?, id FROM aowugong_roles WHERE code = ? AND is_active = 1
+		ON CONFLICT(user_id, role_id) DO NOTHING
 	`, userID, roleCode)
 	if err != nil {
 		return fmt.Errorf("给用户分配角色: %w", err)
@@ -144,7 +162,7 @@ func (r *Repository) AssignRole(ctx context.Context, userID int64, roleCode stri
 // PermissionsForUser 返回用户通过启用角色获得的全部权限。
 // 输入：ctx 是调用上下文，userID 是用户主键。
 // 输出：返回按 code 排序的权限；用户不存在时返回 ErrUserNotFound。
-// 副作用：读取 SQLite。
+// 副作用：读取 PostgreSQL。
 func (r *Repository) PermissionsForUser(ctx context.Context, userID int64) ([]string, error) {
 	// 1. 确认用户存在并读取超级用户标记。
 	var isSuperuser bool
@@ -189,7 +207,7 @@ func (r *Repository) PermissionsForUser(ctx context.Context, userID int64) ([]st
 // HasRole 判断用户是否拥有指定启用角色。
 // 输入：ctx 是调用上下文，userID 是用户主键，roleCode 是角色编码。
 // 输出：用户拥有角色或是超级用户时返回 true。
-// 副作用：读取 SQLite。
+// 副作用：读取 PostgreSQL。
 func (r *Repository) HasRole(ctx context.Context, userID int64, roleCode string) (bool, error) {
 	// 1. 超级用户直接视为拥有系统角色，并同时确认用户存在。
 	var isSuperuser bool
@@ -218,7 +236,7 @@ func (r *Repository) HasRole(ctx context.Context, userID int64, roleCode string)
 // ListRoles 返回全部启用角色。
 // 输入：ctx 是调用上下文。
 // 输出：返回按主键排序的角色。
-// 副作用：读取 SQLite。
+// 副作用：读取 PostgreSQL。
 func (r *Repository) ListRoles(ctx context.Context) ([]Role, error) {
 	// 1. 查询权限页面可分配的启用角色。
 	rows, err := r.db.QueryContext(ctx, `
@@ -250,7 +268,7 @@ func (r *Repository) ListRoles(ctx context.Context) ([]Role, error) {
 // ListUsers 返回用户及其已分配角色。
 // 输入：ctx 是调用上下文。
 // 输出：返回按用户名排序的权限管理用户列表。
-// 副作用：读取 SQLite。
+// 副作用：读取 PostgreSQL。
 func (r *Repository) ListUsers(ctx context.Context) ([]UserRoles, error) {
 	// 1. 查询用户基础字段，角色由后续有界查询补齐。
 	rows, err := r.db.QueryContext(ctx, `
@@ -293,9 +311,9 @@ func (r *Repository) ListUsers(ctx context.Context) ([]UserRoles, error) {
 }
 
 // scanStrings 扫描单列字符串查询结果。
-// 输入：ctx 是调用上下文，db 是 SQLite 连接，query 和 args 是参数化查询。
+// 输入：ctx 是调用上下文，db 是 PostgreSQL 连接，query 和 args 是参数化查询。
 // 输出：返回字符串列表。
-// 副作用：读取 SQLite。
+// 副作用：读取 PostgreSQL。
 func scanStrings(ctx context.Context, db *sql.DB, query string, args ...any) ([]string, error) {
 	// 1. 执行查询并确保释放游标。
 	rows, err := db.QueryContext(ctx, query, args...)

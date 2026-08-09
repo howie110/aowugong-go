@@ -10,11 +10,11 @@ import (
 	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
 
-// TestRegistryPreventsCrossRegistryRunsWithSQLiteLock 验证本地 CLI 与服务器调度器不能并发执行同名任务。
+// TestRegistryPreventsCrossRegistryRunsWithDatabaseLock 验证本地 CLI 与服务器调度器不能并发执行同名任务。
 // 输入：连接同一隔离 SQLite schema 的两个独立任务注册表。
 // 输出：首个任务持锁时第二个注册表返回 ErrAlreadyRunning，释放后首个成功。
 // 副作用：创建隔离 SQLite、写入任务执行记录并使用跨连接任务锁。
-func TestRegistryPreventsCrossRegistryRunsWithSQLiteLock(t *testing.T) {
+func TestRegistryPreventsCrossRegistryRunsWithDatabaseLock(t *testing.T) {
 	// 1. 创建两个没有共享进程内状态的注册表。
 	db := testdatabase.Open(t)
 	logger := slog.New(slog.NewTextHandler(discardWriter{}, nil))

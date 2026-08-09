@@ -23,7 +23,7 @@ var (
 
 // NormalizeAnalysis 清洗模型结果并确保每个标的只有一个最终方向。
 // 输入：value 是模型 JSON 解码后的结构。
-// 输出：返回可直接写入 SQLite 的规范化结果。
+// 输出：返回可直接写入 PostgreSQL 的规范化结果。
 // 副作用：无。
 func NormalizeAnalysis(value AnalysisResult) AnalysisResult {
 	// 1. 规范化摘要和短期市场枚举。

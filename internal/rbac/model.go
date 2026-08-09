@@ -70,7 +70,7 @@ var DefaultPermissions = []Permission{
 	{Code: PermissionMonitoring, Name: "监控管理", Group: "system", Description: "查看服务连通性监控和最近检测结果。"},
 	{Code: PermissionWork, Name: "工作导航", Group: "work", Description: "查看常用系统、工具和资料导航。"},
 	{Code: PermissionPermissions, Name: "权限管理", Group: "system", Description: "查看权限管理页面，并给用户加入角色。"},
-	{Code: PermissionDatabase, Name: "数据库", Group: "system", Description: "只读查看 SQLite 表结构、数据和脱敏导出。"},
+	{Code: PermissionDatabase, Name: "数据库", Group: "system", Description: "只读查看 PostgreSQL 表结构、数据和脱敏导出。"},
 }
 
 // DefaultRoles 是由代码维护的系统角色基线。

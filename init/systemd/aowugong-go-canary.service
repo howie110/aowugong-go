@@ -1,5 +1,5 @@
 [Unit]
-Description=Aowugong Go SQLite canary
+Description=Aowugong Go PostgreSQL canary
 After=network-online.target local-fs.target
 Wants=network-online.target
 
@@ -8,7 +8,7 @@ Type=simple
 User=@RUN_USER@
 Group=@RUN_GROUP@
 WorkingDirectory=@APP_ROOT@/canary
-EnvironmentFile=@APP_ROOT@/shared/.env.sqlite-canary
+EnvironmentFile=@APP_ROOT@/shared/.env.canary
 Environment=TZ=Asia/Shanghai
 ExecStart=@APP_ROOT@/canary/aowugong
 Restart=on-failure

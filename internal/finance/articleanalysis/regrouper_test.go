@@ -257,9 +257,9 @@ func TestRepositoryReplaceSignalGroupsAtomicallyRebuildsDictionary(t *testing.T)
 	mock.ExpectBegin()
 	mock.ExpectExec("DELETE FROM investment_signal_alias").WillReturnResult(sqlmock.NewResult(0, 12))
 	mock.ExpectExec("DELETE FROM investment_signal_group").WillReturnResult(sqlmock.NewResult(0, 5))
-	mock.ExpectExec("INSERT INTO investment_signal_group").
+	mock.ExpectQuery("INSERT INTO investment_signal_group").
 		WithArgs("证券行业", "sector", "deepseek_rebuild", "test-model").
-		WillReturnResult(sqlmock.NewResult(21, 1))
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(21))
 	mock.ExpectExec("INSERT INTO investment_signal_alias").
 		WithArgs(int64(21), "券商", "券商", 0.96, "deepseek_rebuild", "test-model").
 		WillReturnResult(sqlmock.NewResult(31, 1))

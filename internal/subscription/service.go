@@ -20,7 +20,7 @@ type Service struct {
 }
 
 // NewService 创建订阅服务。
-// 输入：repository 是订阅 SQLite 仓储。
+// 输入：repository 是订阅 PostgreSQL 仓储。
 // 输出：返回使用 Asia/Shanghai 日期口径的服务。
 // 副作用：无。
 func NewService(repository *Repository) *Service {
@@ -35,7 +35,7 @@ func NewService(repository *Repository) *Service {
 // List 返回订阅记录并实时补充状态和离到期天数。
 // 输入：ctx 是调用上下文。
 // 输出：返回按到期日排序的记录。
-// 副作用：空表时写入默认记录，随后读取 SQLite。
+// 副作用：空表时写入默认记录，随后读取 PostgreSQL。
 func (s *Service) List(ctx context.Context) ([]Record, error) {
 	// 1. 保持旧项目空表初始化行为。
 	if err := s.repository.SeedDefaults(ctx); err != nil {
@@ -62,7 +62,7 @@ func (s *Service) List(ctx context.Context) ([]Record, error) {
 // Create 清洗并新增订阅记录。
 // 输入：ctx 是调用上下文，request 是页面字段，createdBy 是当前用户名。
 // 输出：返回带派生状态的新记录。
-// 副作用：写入并读取 SQLite。
+// 副作用：写入并读取 PostgreSQL。
 func (s *Service) Create(ctx context.Context, request WriteRequest, createdBy string) (Record, error) {
 	// 1. 清洗文本、金额和日期。
 	normalized, err := s.normalizeRequest(request)
@@ -81,7 +81,7 @@ func (s *Service) Create(ctx context.Context, request WriteRequest, createdBy st
 // Update 清洗并全量更新订阅记录。
 // 输入：ctx 是调用上下文，recordID 是主键，request 是页面字段。
 // 输出：返回带派生状态的更新记录。
-// 副作用：写入并读取 SQLite。
+// 副作用：写入并读取 PostgreSQL。
 func (s *Service) Update(ctx context.Context, recordID int64, request WriteRequest) (Record, error) {
 	// 1. 校验主键并清洗全部可编辑字段。
 	if recordID <= 0 {
@@ -103,7 +103,7 @@ func (s *Service) Update(ctx context.Context, recordID int64, request WriteReque
 // Delete 删除指定订阅记录。
 // 输入：ctx 是调用上下文，recordID 是主键。
 // 输出：成功删除返回 true。
-// 副作用：写入 SQLite。
+// 副作用：写入 PostgreSQL。
 func (s *Service) Delete(ctx context.Context, recordID int64) (bool, error) {
 	// 1. 拒绝无效主键并调用唯一删除入口。
 	if recordID <= 0 {
@@ -119,7 +119,7 @@ func (s *Service) Delete(ctx context.Context, recordID int64) (bool, error) {
 // Summary 生成订阅页面摘要。
 // 输入：ctx 是调用上下文。
 // 输出：返回总数、有效数、近期到期数和费用合计。
-// 副作用：读取 SQLite，空表时写入默认记录。
+// 副作用：读取 PostgreSQL，空表时写入默认记录。
 func (s *Service) Summary(ctx context.Context) (Summary, error) {
 	// 1. 复用列表口径统计状态和费用。
 	records, err := s.List(ctx)
@@ -166,7 +166,7 @@ func (s *Service) Summary(ctx context.Context) (Summary, error) {
 // ListExpiring 返回正好在指定天数后到期的有效订阅。
 // 输入：ctx 是调用上下文，reminderDays 是提前提醒天数。
 // 输出：返回匹配记录。
-// 副作用：读取 SQLite，空表时写入默认记录。
+// 副作用：读取 PostgreSQL，空表时写入默认记录。
 func (s *Service) ListExpiring(ctx context.Context, reminderDays int) ([]Record, error) {
 	// 1. 复用列表中的实时状态和天数计算。
 	records, err := s.List(ctx)

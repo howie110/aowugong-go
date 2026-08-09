@@ -88,8 +88,8 @@ func TestFinanceSummaryRoutesRequirePermissionAndReturnCurrentData(t *testing.T)
 			t.Errorf("GET %s status = %d, body = %s", path, recorder.Code, recorder.Body.String())
 		}
 	}
-	if body := adminRecorder.Body.String(); !containsAll(body, `"name":"SQLite"`, `"title":"数据"`) {
-		t.Errorf("admin body = %s, want SQLite data summary", body)
+	if body := adminRecorder.Body.String(); !containsAll(body, `"name":"PostgreSQL"`, `"title":"数据"`) {
+		t.Errorf("admin body = %s, want PostgreSQL data summary", body)
 	}
 	manualRequest := httptest.NewRequest(http.MethodPost, "/api/v1/finance/jobs/test_job/run", nil)
 	manualRequest.Header.Set("Authorization", "Bearer "+adminToken)

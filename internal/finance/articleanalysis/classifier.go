@@ -53,7 +53,7 @@ type signalClassificationBatchResult struct {
 // classifySignalAliases 使用 DeepSeek 批量归类指定范围内的未知信号名称。
 // 输入：ctx 控制数据库和模型调用，days 是至少一天的文章范围。
 // 输出：返回本次新增别名数量；查询、分类或写入失败时返回错误。
-// 副作用：调用 DeepSeek，并写入 SQLite 概念组和别名表。
+// 副作用：调用 DeepSeek，并写入 PostgreSQL 概念组和别名表。
 func (s *Service) classifySignalAliases(ctx context.Context, days int) (int, error) {
 	// 1. 读取统计范围、已有概念词典并提取未知名称。
 	if days < 1 {

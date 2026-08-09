@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
+
+	appdatabase "github.com/howiedata/aowugong-go/internal/database"
 )
 
 var defaultAccounts = []struct {
@@ -17,13 +20,13 @@ var defaultAccounts = []struct {
 	{BrokerName: "东莞证券", AccountSuffix: "7521", AccountAlias: "东莞证券-吴素尤"},
 }
 
-// Repository 负责仓位相关 SQLite 读写。
+// Repository 负责仓位相关 PostgreSQL 读写。
 type Repository struct {
 	db *sql.DB
 }
 
-// NewRepository 创建仓位 SQLite 仓储。
-// 输入：db 是已经执行版本化迁移的 SQLite 连接。
+// NewRepository 创建仓位 PostgreSQL 仓储。
+// 输入：db 是已经执行版本化迁移的 PostgreSQL 连接。
 // 输出：返回仓位仓储。
 // 副作用：无，不访问数据库。
 func NewRepository(db *sql.DB) *Repository {
@@ -43,11 +46,13 @@ func (r *Repository) SyncDefaultAccounts(ctx context.Context) error {
 			VALUES (?, ?, ?, 1)
 			ON CONFLICT(broker_name, account_suffix) DO UPDATE SET
 				updated_at = CASE
-					WHEN account_alias IS NOT excluded.account_alias OR is_active <> 1
-					THEN datetime('now', '+8 hours') ELSE updated_at END,
+					WHEN finance_broker_account.account_alias <> excluded.account_alias
+						OR finance_broker_account.is_active <> 1
+					THEN ? ELSE finance_broker_account.updated_at END,
 				account_alias = excluded.account_alias,
 				is_active = 1
-		`, account.BrokerName, account.AccountSuffix, account.AccountAlias)
+		`, account.BrokerName, account.AccountSuffix, account.AccountAlias,
+			appdatabase.TimestampText(time.Now()))
 		if err != nil {
 			return fmt.Errorf("同步默认账户 %s: %w", account.AccountSuffix, err)
 		}
@@ -58,7 +63,7 @@ func (r *Repository) SyncDefaultAccounts(ctx context.Context) error {
 // AccountAlias 按券商和账户后四位读取唯一别名。
 // 输入：ctx 控制数据库操作，brokerName 和 accountSuffix 标识账户。
 // 输出：精确匹配或后四位唯一匹配时返回别名；不存在时返回空字符串。
-// 副作用：只读 SQLite。
+// 副作用：只读 PostgreSQL。
 func (r *Repository) AccountAlias(ctx context.Context, brokerName, accountSuffix string) (string, error) {
 	// 1. 优先按券商和后四位精确查询。
 	var alias string
@@ -152,9 +157,9 @@ func (r *Repository) Upsert(ctx context.Context, snapshot Snapshot, rawOCR map[s
 			warnings_json = excluded.warnings_json,
 			parse_status = 'parsed',
 			created_by = excluded.created_by,
-			updated_at = datetime('now', '+8 hours')
+			updated_at = ?
 		RETURNING id
-	`, arguments...).Scan(&snapshot.ID)
+	`, append(arguments, appdatabase.TimestampText(time.Now()))...).Scan(&snapshot.ID)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("写入账户资产快照: %w", err)
 	}
@@ -180,7 +185,7 @@ func (r *Repository) Upsert(ctx context.Context, snapshot Snapshot, rawOCR map[s
 // Recent 读取最近账户资产快照。
 // 输入：ctx 控制查询，limit 是 1 到 200 的记录上限。
 // 输出：按日期倒序、账户正序返回快照；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 PostgreSQL。
 func (r *Repository) Recent(ctx context.Context, limit int) ([]Snapshot, error) {
 	// 1. 约束查询范围，防止页面无条件读取全部历史数据。
 	if limit < 1 {
@@ -216,7 +221,7 @@ func (r *Repository) Recent(ctx context.Context, limit int) ([]Snapshot, error) 
 // ByID 按主键读取单个资产快照。
 // 输入：ctx 控制查询，id 是快照主键。
 // 输出：返回快照；不存在或查询失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 PostgreSQL。
 func (r *Repository) ByID(ctx context.Context, id int64) (Snapshot, error) {
 	// 1. 执行主键范围查询并复用统一扫描逻辑。
 	snapshot, err := scanSnapshot(r.db.QueryRowContext(ctx, snapshotSelect+" WHERE id = ?", id))
@@ -229,7 +234,7 @@ func (r *Repository) ByID(ctx context.Context, id int64) (Snapshot, error) {
 // HoldingsByDate 读取指定日期的全部持仓明细。
 // 输入：ctx 控制查询，snapshotDate 是 ISO 日期。
 // 输出：按市值倒序返回持仓；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 PostgreSQL。
 func (r *Repository) HoldingsByDate(ctx context.Context, snapshotDate string) ([]Holding, error) {
 	// 1. 使用日期范围约束查询并读取可空数值。
 	rows, err := r.db.QueryContext(ctx, `

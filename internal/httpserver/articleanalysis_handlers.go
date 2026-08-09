@@ -48,7 +48,7 @@ func registerArticleAnalysisRoutes(router chi.Router, authService *auth.Service,
 // summary 返回投资文章分析页面摘要。
 // 输入：request 已通过认证和文章分析权限校验。
 // 输出：写入 PageSummary JSON。
-// 副作用：读取 SQLite 并写入 HTTP 响应。
+// 副作用：读取 PostgreSQL 并写入 HTTP 响应。
 func (h articleAnalysisHandlers) summary(w http.ResponseWriter, request *http.Request) {
 	// 1. 读取统一摘要并转换服务错误。
 	result, err := h.service.AnalysisSummary(request.Context())
@@ -62,7 +62,7 @@ func (h articleAnalysisHandlers) summary(w http.ResponseWriter, request *http.Re
 // fetchSummary 返回投资文章抓取页面摘要。
 // 输入：request 已通过认证和文章抓取权限校验。
 // 输出：写入 PageSummary JSON。
-// 副作用：读取 SQLite 并写入 HTTP 响应。
+// 副作用：读取 PostgreSQL 并写入 HTTP 响应。
 func (h articleAnalysisHandlers) fetchSummary(w http.ResponseWriter, request *http.Request) {
 	// 1. 读取统一摘要并转换服务错误。
 	result, err := h.service.FetchSummary(request.Context())
@@ -76,7 +76,7 @@ func (h articleAnalysisHandlers) fetchSummary(w http.ResponseWriter, request *ht
 // sources 返回当前文章信息源及抓取状态。
 // 输入：request 已通过认证和文章抓取权限校验。
 // 输出：写入 Source 数组。
-// 副作用：读取 SQLite 并写入 HTTP 响应。
+// 副作用：读取 PostgreSQL 并写入 HTTP 响应。
 func (h articleAnalysisHandlers) sources(w http.ResponseWriter, request *http.Request) {
 	// 1. 返回包含未配置来源的完整列表。
 	result, err := h.service.Sources(request.Context())
@@ -90,7 +90,7 @@ func (h articleAnalysisHandlers) sources(w http.ResponseWriter, request *http.Re
 // articles 返回指定天数内的已分析文章。
 // 输入：查询参数 days 范围 1 到 365，limit 范围 1 到 5000。
 // 输出：写入 ArticleItem 数组。
-// 副作用：读取 SQLite 并写入 HTTP 响应。
+// 副作用：读取 PostgreSQL 并写入 HTTP 响应。
 func (h articleAnalysisHandlers) articles(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析并约束查询范围。
 	days, ok := boundedQueryInt(w, request, "days", 60, 1, 365)
@@ -114,7 +114,7 @@ func (h articleAnalysisHandlers) articles(w http.ResponseWriter, request *http.R
 // detail 返回单篇文章和完整分析。
 // 输入：路径参数 articleID 是正整数。
 // 输出：写入 ArticleDetail，不存在时返回 404。
-// 副作用：读取 SQLite 并写入 HTTP 响应。
+// 副作用：读取 PostgreSQL 并写入 HTTP 响应。
 func (h articleAnalysisHandlers) detail(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析文章主键并查询详情。
 	articleID, ok := positivePathID(w, chi.URLParam(request, "articleID"))
@@ -136,7 +136,7 @@ func (h articleAnalysisHandlers) detail(w http.ResponseWriter, request *http.Req
 // feedback 保存管理员的提示词修正意见。
 // 输入：路径参数 articleID 和 JSON prompt_feedback。
 // 输出：写入更新后的 ArticleDetail。
-// 副作用：读取角色、写入 SQLite 和 HTTP 响应。
+// 副作用：读取角色、写入 PostgreSQL 和 HTTP 响应。
 func (h articleAnalysisHandlers) feedback(w http.ResponseWriter, request *http.Request) {
 	// 1. 读取当前用户并明确校验 admin 角色。
 	user, ok := currentUser(request)
@@ -181,7 +181,7 @@ func (h articleAnalysisHandlers) feedback(w http.ResponseWriter, request *http.R
 // report 返回 60 天信号榜和 3 天市场判断分布。
 // 输入：target_days 范围 1 到 365，market_days 范围 1 到 30。
 // 输出：写入 Report JSON。
-// 副作用：读取 SQLite 并写入 HTTP 响应。
+// 副作用：读取 PostgreSQL 并写入 HTTP 响应。
 func (h articleAnalysisHandlers) report(w http.ResponseWriter, request *http.Request) {
 	// 1. 独立解析两个统计范围。
 	targetDays, ok := boundedQueryInt(w, request, "target_days", 60, 1, 365)
@@ -205,7 +205,7 @@ func (h articleAnalysisHandlers) report(w http.ResponseWriter, request *http.Req
 // sync 手动读取 Miniflux 并可继续执行模型分析。
 // 输入：fetch_limit、analyze 和 analysis_limit 是可选查询参数。
 // 输出：写入 SyncResult。
-// 副作用：调用 Miniflux、DeepSeek，写入 SQLite 和 HTTP 响应。
+// 副作用：调用 Miniflux、DeepSeek，写入 PostgreSQL 和 HTTP 响应。
 func (h articleAnalysisHandlers) sync(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析批量上限和布尔开关。
 	fetchLimit, ok := boundedQueryInt(w, request, "fetch_limit", 30, 1, 100)
@@ -238,7 +238,7 @@ func (h articleAnalysisHandlers) sync(w http.ResponseWriter, request *http.Reque
 // analyze 手动分析一批待处理文章。
 // 输入：limit 范围 1 到 50。
 // 输出：写入 AnalysisBatchResult。
-// 副作用：调用 DeepSeek、写入 SQLite 和 HTTP 响应。
+// 副作用：调用 DeepSeek、写入 PostgreSQL 和 HTTP 响应。
 func (h articleAnalysisHandlers) analyze(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析批量上限并调用统一分析入口。
 	limit, ok := boundedQueryInt(w, request, "limit", 10, 1, 50)

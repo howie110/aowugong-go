@@ -7,13 +7,13 @@ import (
 	"strings"
 )
 
-// Repository 负责应用 SQLite 中的监控结果持久化。
+// Repository 负责应用 PostgreSQL 中的监控结果持久化。
 type Repository struct {
 	db *sql.DB
 }
 
 // NewRepository 创建服务监控仓储。
-// 输入：db 是应用 SQLite 连接池。
+// 输入：db 是应用 PostgreSQL 连接池。
 // 输出：返回监控仓储。
 // 副作用：无。
 func NewRepository(db *sql.DB) *Repository {
@@ -24,7 +24,7 @@ func NewRepository(db *sql.DB) *Repository {
 // Insert 写入一条服务监控结果。
 // 输入：ctx 是调用上下文，result 是标准探测结果。
 // 输出：成功返回 nil。
-// 副作用：追加写入 SQLite。
+// 副作用：追加写入 PostgreSQL。
 func (r *Repository) Insert(ctx context.Context, result Result) error {
 	// 1. 使用参数化 SQL 保存可空状态、耗时和错误字段。
 	_, err := r.db.ExecContext(ctx, `
@@ -43,7 +43,7 @@ func (r *Repository) Insert(ctx context.Context, result Result) error {
 // Latest 返回指定目标各自最近一次监控结果。
 // 输入：ctx 是调用上下文，codes 是当前目标编码。
 // 输出：返回按 target_code 索引的结果。
-// 副作用：读取 SQLite。
+// 副作用：读取 PostgreSQL。
 func (r *Repository) Latest(ctx context.Context, codes []string) (map[string]Result, error) {
 	// 1. 空目标直接返回空映射。
 	if len(codes) == 0 {

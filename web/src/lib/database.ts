@@ -46,7 +46,7 @@ async function requestDatabase<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-// fetchDatabaseSummary 读取 SQLite 和应用表概况。
+// fetchDatabaseSummary 读取 PostgreSQL 和应用表概况。
 // 输入：无。
 // 输出：返回数据库概况。
 // 副作用：发送只读 HTTP 请求。

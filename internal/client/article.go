@@ -39,7 +39,7 @@ func buildArticleKey(sourceID int64, identities ...string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// parseFeedTime 解析外部文章时间并输出 SQLite DATETIME 可写入的上海时间文本。
+// parseFeedTime 解析外部文章时间并输出 PostgreSQL DATETIME 可写入的上海时间文本。
 // 输入：value 是外部 API 时间文本。
 // 输出：识别成功返回 YYYY-MM-DD HH:MM:SS，否则返回空字符串。
 // 副作用：无。

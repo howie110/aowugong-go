@@ -8,11 +8,11 @@ import (
 	"runtime"
 )
 
-const migrationDirectoryName = "migrations/sqlite"
+const migrationDirectoryName = "migrations/postgres"
 
 // resolveMigrationsDirectory 按运行环境解析应使用的迁移目录。
 // 输入：environment 是运行环境，configuredDirectory 是可选目录，executablePath 是可执行文件路径。
-// 输出：返回可用 SQLite 迁移目录；生产目录缺失或环境无效时返回错误。
+// 输出：返回可用 PostgreSQL 迁移目录；生产目录缺失或环境无效时返回错误。
 // 副作用：只读取候选目录元数据。
 func resolveMigrationsDirectory(environment, configuredDirectory, executablePath string) (string, error) {
 	// 1. 显式配置始终覆盖自动解析结果。

@@ -8,24 +8,24 @@ import (
 	"time"
 )
 
-// Repository 负责 finance 行情表的 SQLite 查询与事务写入。
+// Repository 负责 finance 行情表的 PostgreSQL 查询与事务写入。
 type Repository struct {
 	db *sql.DB
 }
 
 // NewRepository 创建行情数据仓储。
-// 输入：db 是已完成迁移的 SQLite 连接。
+// 输入：db 是已完成迁移的 PostgreSQL 连接。
 // 输出：返回可并发复用的仓储。
 // 副作用：无，不执行 SQL。
 func NewRepository(db *sql.DB) *Repository {
-	// 1. 保存 SQLite 依赖供受限查询和事务写入复用。
+	// 1. 保存 PostgreSQL 依赖供受限查询和事务写入复用。
 	return &Repository{db: db}
 }
 
 // ReplaceDailyDate 在单个事务中替换一个交易日的全部股票日线。
 // 输入：ctx 控制事务，tradeDate 是目标日期，rows 是该日完整上游数据。
 // 输出：成功返回 nil；日期、数据或 SQL 无效时返回错误。
-// 副作用：删除并重写 SQLite tushare_daily 指定日期的数据。
+// 副作用：删除并重写 PostgreSQL tushare_daily 指定日期的数据。
 func (r *Repository) ReplaceDailyDate(ctx context.Context, tradeDate string, rows []Daily) error {
 	// 1. 在删除旧数据前校验完整批次，防止空响应清空已有行情。
 	tradeDate = strings.TrimSpace(tradeDate)
@@ -80,7 +80,7 @@ func (r *Repository) ReplaceDailyDate(ctx context.Context, tradeDate string, row
 // DailyByCode 按股票代码和闭区间日期读取升序日线。
 // 输入：ctx 控制查询，tsCode 是代码，startDate 和 endDate 是范围。
 // 输出：返回范围内日线；参数或查询失败时返回错误。
-// 副作用：只读 SQLite，禁止无条件全表查询。
+// 副作用：只读 PostgreSQL，禁止无条件全表查询。
 func (r *Repository) DailyByCode(ctx context.Context, tsCode, startDate, endDate string) ([]Daily, error) {
 	// 1. 校验大表查询必须包含代码和有效日期范围。
 	tsCode = strings.TrimSpace(tsCode)
@@ -118,7 +118,7 @@ func (r *Repository) DailyByCode(ctx context.Context, tsCode, startDate, endDate
 // MissingOpenDates 查询日期范围内尚无股票日线的开市日。
 // 输入：ctx 控制查询，startDate 和 endDate 是闭区间。
 // 输出：返回升序缺失日期；参数或查询失败时返回错误。
-// 副作用：只读 SQLite 的交易日历和日线日期索引。
+// 副作用：只读 PostgreSQL 的交易日历和日线日期索引。
 func (r *Repository) MissingOpenDates(ctx context.Context, startDate, endDate string) ([]string, error) {
 	// 1. 校验同步窗口，禁止无边界扫描交易日历或日线大表。
 	startDate = strings.TrimSpace(startDate)
@@ -154,7 +154,7 @@ func (r *Repository) MissingOpenDates(ctx context.Context, startDate, endDate st
 // LatestDailyDate 读取本地股票日线的最新交易日。
 // 输入：ctx 控制查询。
 // 输出：有数据时返回日期，无数据时返回空字符串。
-// 副作用：只读 SQLite 的交易日索引。
+// 副作用：只读 PostgreSQL 的交易日索引。
 func (r *Repository) LatestDailyDate(ctx context.Context) (string, error) {
 	// 1. 使用索引聚合查询最新日期并兼容空表。
 	var value sql.NullString

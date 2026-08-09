@@ -40,7 +40,7 @@ func registerMahjongRoutes(router chi.Router, authService *auth.Service, rbacSer
 // summary 返回控制台使用的麻将摘要。
 // 输入：request 已通过认证和麻将权限校验。
 // 输出：写入摘要 JSON。
-// 副作用：读取 SQLite 和写入 HTTP 响应。
+// 副作用：读取 PostgreSQL 和写入 HTTP 响应。
 func (h mahjongHandlers) summary(w http.ResponseWriter, request *http.Request) {
 	// 1. 复用麻将服务的统一统计口径。
 	summary, err := h.service.PageSummary(request.Context())
@@ -54,7 +54,7 @@ func (h mahjongHandlers) summary(w http.ResponseWriter, request *http.Request) {
 // report 返回麻将完整统计报告。
 // 输入：查询参数 limit 和 table_fee 可选。
 // 输出：写入 Report。
-// 副作用：读取 SQLite 和写入 HTTP 响应。
+// 副作用：读取 PostgreSQL 和写入 HTTP 响应。
 func (h mahjongHandlers) report(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析并约束可选查询参数。
 	limit := 1000
@@ -87,7 +87,7 @@ func (h mahjongHandlers) report(w http.ResponseWriter, request *http.Request) {
 // recent 返回最近麻将战绩。
 // 输入：查询参数 limit 可选。
 // 输出：写入 Record 数组。
-// 副作用：读取 SQLite 和写入 HTTP 响应。
+// 副作用：读取 PostgreSQL 和写入 HTTP 响应。
 func (h mahjongHandlers) recent(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析最近记录上限。
 	limit := 30
@@ -112,7 +112,7 @@ func (h mahjongHandlers) recent(w http.ResponseWriter, request *http.Request) {
 // save 保存页面录入的单日麻将战绩。
 // 输入：请求体包含 played_date 和 result_amount。
 // 输出：写入 WriteResponse。
-// 副作用：写入 SQLite 和 HTTP 响应。
+// 副作用：写入 PostgreSQL 和 HTTP 响应。
 func (h mahjongHandlers) save(w http.ResponseWriter, request *http.Request) {
 	// 1. 解码 JSON 并读取当前用户名。
 	var payload mahjong.WriteRequest
@@ -142,7 +142,7 @@ func (h mahjongHandlers) save(w http.ResponseWriter, request *http.Request) {
 // importExcel 导入麻将历史 Excel 文件。
 // 输入：multipart/form-data 的 file 字段必须是 .xlsx。
 // 输出：写入 ImportResponse。
-// 副作用：读取上传文件、写入 SQLite 和 HTTP 响应。
+// 副作用：读取上传文件、写入 PostgreSQL 和 HTTP 响应。
 func (h mahjongHandlers) importExcel(w http.ResponseWriter, request *http.Request) {
 	// 1. 限制请求体并读取 multipart 文件。
 	request.Body = http.MaxBytesReader(w, request.Body, maxMahjongUploadBytes)

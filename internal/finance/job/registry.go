@@ -8,12 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/howiedata/aowugong-go/internal/database"
 	"github.com/howiedata/aowugong-go/internal/finance/articleanalysis"
 	financedata "github.com/howiedata/aowugong-go/internal/finance/data"
+	"github.com/howiedata/aowugong-go/internal/githubbackup"
 	"github.com/howiedata/aowugong-go/internal/monitoring"
 	"github.com/howiedata/aowugong-go/internal/scheduler"
 	"github.com/howiedata/aowugong-go/internal/subscription"
+	"github.com/howiedata/aowugong-go/internal/vaultwardenbackup"
 )
 
 const subscriptionReminderDays = 10
@@ -44,21 +45,33 @@ type NotificationSender interface {
 	Text(ctx context.Context, titleParts []string, body, to string) error
 }
 
-// BackupFunc 定义可测试的 SQLite 快照函数。
-type BackupFunc func(ctx context.Context, db *sql.DB, directory string, retention int, now time.Time) (string, error)
+// GitHubCodeBackuper 定义固定白名单仓库的代码冷备份入口。
+type GitHubCodeBackuper interface {
+	Backup(ctx context.Context) (githubbackup.Result, error)
+}
+
+// VaultwardenBackupMailer 定义加密并邮件发送最新密码库备份的入口。
+type VaultwardenBackupMailer interface {
+	SendLatest(ctx context.Context) (vaultwardenbackup.Result, error)
+}
+
+// BackupFunc 定义可测试的 PostgreSQL 备份函数。
+type BackupFunc func(ctx context.Context, directory string, retention int, now time.Time) (string, error)
 
 // Dependencies 汇总全部任务所需的显式业务依赖与备份配置。
 type Dependencies struct {
-	DB              *sql.DB
-	Data            DataUpdater
-	Articles        ArticleSyncer
-	Monitoring      Monitor
-	Subscriptions   SubscriptionLister
-	Notification    NotificationSender
-	BackupDir       string
-	BackupRetention int
-	Now             func() time.Time
-	Backup          BackupFunc
+	DB                *sql.DB
+	Data              DataUpdater
+	Articles          ArticleSyncer
+	Monitoring        Monitor
+	Subscriptions     SubscriptionLister
+	Notification      NotificationSender
+	GitHubBackup      GitHubCodeBackuper
+	VaultwardenBackup VaultwardenBackupMailer
+	BackupDir         string
+	BackupRetention   int
+	Now               func() time.Time
+	Backup            BackupFunc
 }
 
 type tasks struct {
@@ -75,14 +88,11 @@ func RegisterAll(registry *scheduler.Registry, dependencies Dependencies) error 
 		dependencies.Monitoring == nil || dependencies.Subscriptions == nil || dependencies.Notification == nil {
 		return fmt.Errorf("任务注册依赖不完整")
 	}
-	if dependencies.BackupDir == "" || dependencies.BackupRetention < 1 {
-		return fmt.Errorf("SQLite 备份目录和保留数量无效")
+	if dependencies.BackupDir == "" || dependencies.BackupRetention < 1 || dependencies.Backup == nil {
+		return fmt.Errorf("PostgreSQL 备份配置无效")
 	}
 	if dependencies.Now == nil {
 		dependencies.Now = time.Now
-	}
-	if dependencies.Backup == nil {
-		dependencies.Backup = database.NewSQLiteBackuper().Backup
 	}
 	taskSet := &tasks{dependencies: dependencies}
 
@@ -95,7 +105,19 @@ func RegisterAll(registry *scheduler.Registry, dependencies Dependencies) error 
 		{Name: "check_service_monitors", Description: "检查服务连通性", Schedule: "0 22 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkServiceMonitors},
 		{Name: "check_subscription_expiry_notify", Description: "检查订阅到期并提醒", Schedule: "30 9 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkSubscriptionExpiryNotify},
 		{Name: "openilink_reply_reminder", Description: "提醒回复 OpeniLink Bot", Schedule: "0 10 * * *", Timeout: 5 * time.Minute, Run: taskSet.openILinkReplyReminder},
-		{Name: "backup_sqlite", Description: "创建 SQLite 一致性快照", Schedule: "30 3 * * *", Timeout: 2 * time.Hour, Run: taskSet.backupSQLite},
+		{Name: "backup_postgres", Description: "创建 PostgreSQL 一致性备份", Schedule: "30 3 * * *", Timeout: 2 * time.Hour, Run: taskSet.backupPostgres},
+	}
+	if dependencies.GitHubBackup != nil {
+		definitions = append(definitions, scheduler.Definition{
+			Name: "backup_github_code", Description: "备份账号自有及固定组织 GitHub 仓库",
+			Schedule: "0 4 * * 0", Timeout: 3 * time.Hour, Run: taskSet.backupGitHubCode,
+		})
+	}
+	if dependencies.VaultwardenBackup != nil {
+		definitions = append(definitions, scheduler.Definition{
+			Name: "email_vaultwarden_backup", Description: "加密并邮件发送最新 Vaultwarden 备份",
+			Schedule: "0 5 * * 0", Timeout: 30 * time.Minute, Run: taskSet.emailVaultwardenBackup,
+		})
 	}
 	for _, definition := range definitions {
 		if err := registry.Register(definition); err != nil {
@@ -120,7 +142,7 @@ func (t *tasks) testCrontab(ctx context.Context) (string, error) {
 // updateTushareDailyData 补齐缺失开市日的股票日线。
 // 输入：ctx 是任务超时上下文。
 // 输出：返回缺失日期、同步日期和行数摘要；失败时返回错误。
-// 副作用：调用 Tushare HTTP 并写入 SQLite tushare_daily。
+// 副作用：调用 Tushare HTTP 并写入 PostgreSQL tushare_daily。
 func (t *tasks) updateTushareDailyData(ctx context.Context) (string, error) {
 	// 1. 调用唯一日线同步服务并格式化任务摘要。
 	result, err := t.dependencies.Data.UpdateDaily(ctx)
@@ -134,7 +156,7 @@ func (t *tasks) updateTushareDailyData(ctx context.Context) (string, error) {
 // syncInvestmentArticles 同步 Miniflux 并分析当前批次待处理文章。
 // 输入：ctx 是任务超时上下文。
 // 输出：返回抓取、写入和分析摘要；来源或模型失败时返回错误。
-// 副作用：调用 Miniflux、DeepSeek 并写入 SQLite。
+// 副作用：调用 Miniflux、DeepSeek 并写入 PostgreSQL。
 func (t *tasks) syncInvestmentArticles(ctx context.Context) (string, error) {
 	// 1. 页面手动执行优先快速返回，自动和 CLI 执行同时完成信号归类。
 	classifySignals := scheduler.SourceFromContext(ctx) != scheduler.SourceManual
@@ -153,7 +175,7 @@ func (t *tasks) syncInvestmentArticles(ctx context.Context) (string, error) {
 // rebuildInvestmentSignalGroups 全局收敛六十天投资信号并替换概念词典。
 // 输入：ctx 是任务超时上下文。
 // 输出：返回新概念组、别名和待归类数量；模型或事务失败时返回错误。
-// 副作用：调用 DeepSeek，并在单个事务内重建 SQLite 信号概念词典。
+// 副作用：调用 DeepSeek，并在单个事务内重建 PostgreSQL 信号概念词典。
 func (t *tasks) rebuildInvestmentSignalGroups(ctx context.Context) (string, error) {
 	// 1. 调用文章服务唯一全局重组入口并明确应用已校验结果。
 	result, err := t.dependencies.Articles.RebuildSignalGroups(ctx, articleanalysis.DefaultTargetDays, true)
@@ -170,7 +192,7 @@ func (t *tasks) rebuildInvestmentSignalGroups(ctx context.Context) (string, erro
 // checkServiceMonitors 探测当前全部服务并持久化结果。
 // 输入：ctx 是任务超时上下文。
 // 输出：全部正常时返回计数摘要，存在 down 时返回错误。
-// 副作用：调用监控目标并写入 SQLite service_monitor_result。
+// 副作用：调用监控目标并写入 PostgreSQL service_monitor_result。
 func (t *tasks) checkServiceMonitors(ctx context.Context) (string, error) {
 	// 1. 调用统一监控服务并按 down 数决定任务状态。
 	result, err := t.dependencies.Monitoring.CheckAll(ctx)
@@ -187,7 +209,7 @@ func (t *tasks) checkServiceMonitors(ctx context.Context) (string, error) {
 // checkSubscriptionExpiryNotify 检查正好十天后到期的订阅并发送微信提醒。
 // 输入：ctx 是任务超时上下文。
 // 输出：返回检查或提醒数量；查询和发送失败时返回错误。
-// 副作用：读取 SQLite，命中记录时调用统一通知服务发送微信并写日志。
+// 副作用：读取 PostgreSQL，命中记录时调用统一通知服务发送微信并写日志。
 func (t *tasks) checkSubscriptionExpiryNotify(ctx context.Context) (string, error) {
 	// 1. 复用订阅服务的业务日期和精确到期筛选。
 	records, err := t.dependencies.Subscriptions.ListExpiring(ctx, subscriptionReminderDays)
@@ -209,7 +231,7 @@ func (t *tasks) checkSubscriptionExpiryNotify(ctx context.Context) (string, erro
 // openILinkReplyReminder 发送每日 OpeniLink 回复保活提醒。
 // 输入：ctx 是任务超时上下文。
 // 输出：发送成功返回摘要，失败时返回错误。
-// 副作用：调用统一通知服务发送微信并写 SQLite 日志。
+// 副作用：调用统一通知服务发送微信并写 PostgreSQL 日志。
 func (t *tasks) openILinkReplyReminder(ctx context.Context) (string, error) {
 	// 1. 发送固定短提醒以维持微信消息窗口。
 	body := "OpeniLink 每日保活提醒：请回复机器人任意一句，保持微信通知通道可用。"
@@ -219,18 +241,61 @@ func (t *tasks) openILinkReplyReminder(ctx context.Context) (string, error) {
 	return "OpeniLink 回复提醒已发送", nil
 }
 
-// backupSQLite 创建应用数据库一致性快照并执行保留策略。
+// backupPostgres 创建应用数据库一致性备份并执行保留策略。
 // 输入：ctx 是任务超时上下文。
 // 输出：返回新快照路径；创建、验证或清理失败时返回错误。
-// 副作用：读取 SQLite 一致视图，创建文件并删除超额旧备份。
-func (t *tasks) backupSQLite(ctx context.Context) (string, error) {
+// 副作用：调用 pg_dump 读取 PostgreSQL 一致视图，创建文件并删除超额旧备份。
+func (t *tasks) backupPostgres(ctx context.Context) (string, error) {
 	// 1. 调用数据库包唯一备份入口并返回产物路径。
-	path, err := t.dependencies.Backup(ctx, t.dependencies.DB, t.dependencies.BackupDir,
+	path, err := t.dependencies.Backup(ctx, t.dependencies.BackupDir,
 		t.dependencies.BackupRetention, t.dependencies.Now())
 	if err != nil {
-		return "", fmt.Errorf("备份 SQLite: %w", err)
+		return "", fmt.Errorf("备份 PostgreSQL: %w", err)
 	}
-	return "SQLite 备份=" + path, nil
+	return "PostgreSQL 备份=" + path, nil
+}
+
+// backupGitHubCode 更新固定白名单裸仓库并发送一次成功摘要。
+// 输入：ctx 是任务超时上下文。
+// 输出：返回发现、新增、更新、失联和失败数量；Git 或通知失败时返回错误。
+// 副作用：调用 GitHub、写入代码备份目录，成功时通过统一通知服务发送微信。
+func (t *tasks) backupGitHubCode(ctx context.Context) (string, error) {
+	// 1. 调用唯一代码备份服务并保留部分完成的计数摘要。
+	result, err := t.dependencies.GitHubBackup.Backup(ctx)
+	message := fmt.Sprintf("仓库=%d，新增=%d，更新=%d，失联=%d，失败=%d",
+		result.DiscoveredCount, result.CreatedCount, result.UpdatedCount,
+		result.UnavailableCount, result.FailedCount)
+	if err != nil {
+		return message, fmt.Errorf("备份 GitHub 代码: %w", err)
+	}
+
+	// 2. 成功时发送一条四段式微信摘要，失败通知由任务统一包装器负责。
+	body := strings.Join([]string{
+		"- 任务：backup_github_code",
+		"- 时间：" + t.dependencies.Now().Format("2006-01-02 15:04:05"),
+		"- 状态：执行成功",
+		"- 信息：" + message,
+	}, "\n")
+	if err := t.dependencies.Notification.Text(ctx,
+		[]string{"AOWUGONG", "GITHUB", "BACKUP"}, body, ""); err != nil {
+		return message, fmt.Errorf("发送 GitHub 代码备份成功通知: %w", err)
+	}
+	return message, nil
+}
+
+// emailVaultwardenBackup 加密最新 Vaultwarden 备份并发送到异地邮箱。
+// 输入：ctx 是任务超时上下文。
+// 输出：返回源文件、大小和收件人摘要；加密或邮件发送失败时返回错误。
+// 副作用：读取服务器备份、创建临时加密文件并调用 SMTP 发送附件。
+func (t *tasks) emailVaultwardenBackup(ctx context.Context) (string, error) {
+	// 1. 调用唯一备份邮件服务并把结果整理为任务执行摘要。
+	result, err := t.dependencies.VaultwardenBackup.SendLatest(ctx)
+	message := fmt.Sprintf("文件=%s，大小=%d，收件人=%s",
+		result.SourcePath, result.Size, result.EmailTo)
+	if err != nil {
+		return message, fmt.Errorf("发送 Vaultwarden 加密备份: %w", err)
+	}
+	return message, nil
 }
 
 // buildSubscriptionBody 组装订阅到期微信提醒正文。

@@ -22,7 +22,7 @@ func TestServiceSummarizesAndReadsRows(t *testing.T) {
 		VALUES('alice','alice@example.com','secret-a'),('bob','bob@example.com','secret-b')`); err != nil {
 		t.Fatalf("insert users: %v", err)
 	}
-	service := NewService(db)
+	service := newService(db, "sqlite")
 
 	// 2. 数据库概况必须包含用户表和准确行数。
 	summary, err := service.Summary(ctx)
@@ -67,7 +67,7 @@ func TestServiceRejectsUnknownTableAndLiteralSearchWildcards(t *testing.T) {
 		VALUES('percent','success','manual','完成 100%')`); err != nil {
 		t.Fatalf("insert job execution: %v", err)
 	}
-	service := NewService(db)
+	service := newService(db, "sqlite")
 
 	// 2. 表名注入必须在执行 SQL 前被拒绝。
 	if _, err := service.Rows(ctx, `job_execution"; DROP TABLE job_execution; --`, "", 1, 20); !errors.Is(err, ErrTableNotFound) {
@@ -103,7 +103,7 @@ func TestServiceExportsRedactedCSV(t *testing.T) {
 		t.Fatalf("set formula-like text: %v", err)
 	}
 	var content bytes.Buffer
-	err := NewService(db).ExportCSV(ctx, "aowugong_fastapi_users", "", &content)
+	err := newService(db, "sqlite").ExportCSV(ctx, "aowugong_fastapi_users", "", &content)
 	if err != nil {
 		t.Fatalf("ExportCSV() error = %v", err)
 	}

@@ -57,12 +57,12 @@ func TestRepositorySaveSignalGroupsWritesGroupAndAliasesInOneTransaction(t *test
 	defer db.Close()
 	mock.ExpectBegin()
 	mock.ExpectQuery("INSERT INTO investment_signal_group").
-		WithArgs("证券行业", "sector", "deepseek", "test-model").
+		WithArgs("证券行业", "sector", "deepseek", "test-model", sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
-	mock.ExpectExec("INSERT OR IGNORE INTO investment_signal_alias").
+	mock.ExpectExec("INSERT INTO investment_signal_alias").
 		WithArgs(int64(7), "券商", "券商", 0.98, "deepseek", "test-model").
 		WillReturnResult(sqlmock.NewResult(11, 1))
-	mock.ExpectExec("INSERT OR IGNORE INTO investment_signal_alias").
+	mock.ExpectExec("INSERT INTO investment_signal_alias").
 		WithArgs(int64(7), "中信证券", "中信证券", 0.95, "deepseek", "test-model").
 		WillReturnResult(sqlmock.NewResult(12, 1))
 	mock.ExpectCommit()

@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/howiedata/aowugong-go/internal/auth"
-	"github.com/howiedata/aowugong-go/internal/databaseview"
 	"github.com/howiedata/aowugong-go/internal/finance/articleanalysis"
 	"github.com/howiedata/aowugong-go/internal/finance/position"
 	financeservice "github.com/howiedata/aowugong-go/internal/finance/service"
@@ -36,7 +35,7 @@ type Dependencies struct {
 	StockAnalysis   *stockanalysis.Service
 	ArticleAnalysis *articleanalysis.Service
 	Jobs            *scheduler.Registry
-	Database        *databaseview.Service
+	Database        databaseReadService
 }
 
 type router struct {

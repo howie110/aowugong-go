@@ -123,7 +123,7 @@ func NewRegistry(db *sql.DB, notifier Notifier, logger *slog.Logger, options ...
 	return registry
 }
 
-// WithoutDatabaseLock 关闭跨进程 SQLite 任务锁。
+// WithoutDatabaseLock 关闭跨进程 PostgreSQL 任务锁。
 // 输入：无。
 // 输出：返回只供 SQL mock 测试使用的注册表选项。
 // 副作用：应用后任务仅保留当前进程内互斥，不得用于正式运行时。
@@ -190,7 +190,7 @@ func (r *Registry) Definitions() []Definition {
 // Run 通过统一包装器执行一个已注册任务。
 // 输入：ctx 控制调用，name 是任务名，source 是 scheduler/manual/cli。
 // 输出：返回执行状态；并发、超时、panic 或业务失败时返回错误。
-// 副作用：执行任务、写 SQLite、记录日志，失败时发送微信通知。
+// 副作用：执行任务、写 PostgreSQL、记录日志，失败时发送微信通知。
 func (r *Registry) Run(ctx context.Context, name string, source Source) (Result, error) {
 	// 1. 查找定义并原子获取同名任务执行权。
 	definition, err := r.acquire(name)
@@ -207,7 +207,7 @@ func (r *Registry) Run(ctx context.Context, name string, source Source) (Result,
 	}
 	unlockDatabase := func() error { return nil }
 	if r.databaseLock {
-		unlockDatabase, err = acquireSQLiteLock(ctx, r.db, definition.ConcurrencyKey, definition.Timeout)
+		unlockDatabase, err = acquireDatabaseLock(ctx, r.db, definition.ConcurrencyKey, definition.Timeout)
 		if err != nil {
 			r.release(definition.ConcurrencyKey)
 			return Result{}, err
@@ -323,18 +323,15 @@ func execute(ctx context.Context, job JobFunc) (message string, err error) {
 // startExecution 写入任务开始记录并返回主键。
 // 输入：ctx 控制写入，name、source 和 startedAt 描述执行。
 // 输出：返回自增主键；写入失败时返回错误。
-// 副作用：向 SQLite job_execution 新增 running 记录。
+// 副作用：向 PostgreSQL job_execution 新增 running 记录。
 func (r *Registry) startExecution(ctx context.Context, name string, source Source, startedAt time.Time) (int64, error) {
 	// 1. 写入统一开始状态并读取主键。
-	result, err := r.db.ExecContext(ctx, `INSERT INTO job_execution(
+	var id int64
+	err := r.db.QueryRowContext(ctx, `INSERT INTO job_execution(
 		job_id, status, started_at, source, created_at
-	) VALUES(?,?,?,?,?)`, name, "running", startedAt, string(source), startedAt)
+	) VALUES(?,?,?,?,?) RETURNING id`, name, "running", startedAt, string(source), startedAt).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("记录任务 %s 开始: %w", name, err)
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("读取任务 %s 执行编号: %w", name, err)
 	}
 	return id, nil
 }
@@ -342,7 +339,7 @@ func (r *Registry) startExecution(ctx context.Context, name string, source Sourc
 // finishExecution 更新任务最终状态、耗时、消息和错误。
 // 输入：ctx 控制写入，result 是执行结果，runErr 是业务错误。
 // 输出：成功返回 nil，更新失败返回错误。
-// 副作用：更新 SQLite job_execution 指定记录。
+// 副作用：更新 PostgreSQL job_execution 指定记录。
 func (r *Registry) finishExecution(ctx context.Context, result Result, runErr error) error {
 	// 1. 将可选错误转换为 SQL NULL 并更新唯一执行记录。
 	var errorMessage any

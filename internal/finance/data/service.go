@@ -31,7 +31,7 @@ type SyncResult struct {
 	SyncedDates  []string `json:"synced_dates"`
 }
 
-// Service 负责识别缺失开市日、拉取 Tushare 并事务写入 SQLite。
+// Service 负责识别缺失开市日、拉取 Tushare 并事务写入 PostgreSQL。
 type Service struct {
 	repository *Repository
 	source     DailySource
@@ -40,7 +40,7 @@ type Service struct {
 }
 
 // NewService 创建行情同步服务。
-// 输入：repository 提供 SQLite，source 提供 Tushare，options 提供窗口、间隔和时钟。
+// 输入：repository 提供 PostgreSQL，source 提供 Tushare，options 提供窗口、间隔和时钟。
 // 输出：返回使用 Asia/Shanghai 日期口径的服务。
 // 副作用：无，不查询数据库或外部接口。
 func NewService(repository *Repository, source DailySource, options SyncOptions) *Service {
@@ -59,9 +59,9 @@ func NewService(repository *Repository, source DailySource, options SyncOptions)
 }
 
 // UpdateDaily 补充窗口内全部缺失开市日的股票日线。
-// 输入：ctx 控制 SQLite 查询、Tushare 请求和请求间隔。
+// 输入：ctx 控制 PostgreSQL 查询、Tushare 请求和请求间隔。
 // 输出：返回同步窗口、日期和行数摘要；任一日期失败时返回错误。
-// 副作用：调用 Tushare HTTP 并按交易日事务重写 SQLite tushare_daily。
+// 副作用：调用 Tushare HTTP 并按交易日事务重写 PostgreSQL tushare_daily。
 func (s *Service) UpdateDaily(ctx context.Context) (SyncResult, error) {
 	// 1. 计算上海日期窗口，停跑超过窗口时从本地最新日期继续追补。
 	today := s.options.Now().In(s.location)

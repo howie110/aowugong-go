@@ -29,7 +29,7 @@ func registerAuthRoutes(router chi.Router, service *auth.Service) {
 // login 按 OAuth2 密码表单校验用户并返回令牌。
 // 输入：request 包含 application/x-www-form-urlencoded 的 username 和 password。
 // 输出：成功写入 TokenResponse。
-// 副作用：读取 SQLite 并写入 HTTP 响应。
+// 副作用：读取 PostgreSQL 并写入 HTTP 响应。
 func (h authHandlers) login(w http.ResponseWriter, request *http.Request) {
 	// 1. 限制并解析 URL 编码登录表单。
 	request.Body = http.MaxBytesReader(w, request.Body, 1<<20)
@@ -53,7 +53,7 @@ func (h authHandlers) login(w http.ResponseWriter, request *http.Request) {
 // register 创建公开注册用户并返回令牌。
 // 输入：request 包含 JSON username 和 password。
 // 输出：成功写入 TokenResponse。
-// 副作用：写入 SQLite 和 HTTP 响应。
+// 副作用：写入 PostgreSQL 和 HTTP 响应。
 func (h authHandlers) register(w http.ResponseWriter, request *http.Request) {
 	// 1. 解码大小受限的 JSON 注册请求。
 	var payload struct {
@@ -77,7 +77,7 @@ func (h authHandlers) register(w http.ResponseWriter, request *http.Request) {
 // profile 返回当前认证用户的角色和权限资料。
 // 输入：request 必须已通过 authenticate 中间件。
 // 输出：成功写入 Profile。
-// 副作用：读取 SQLite 和写入 HTTP 响应。
+// 副作用：读取 PostgreSQL 和写入 HTTP 响应。
 func (h authHandlers) profile(w http.ResponseWriter, request *http.Request) {
 	// 1. 读取认证中间件提供的用户主键。
 	user, ok := currentUser(request)

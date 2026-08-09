@@ -30,7 +30,7 @@ if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
 }
 
 try {
-    # 2. 强制本地 2345 使用线上 API，关闭调度和真实交易，不创建本地 SQLite。
+    # 2. 强制本地 2345 使用线上 API，关闭调度和真实交易，不直连生产 PostgreSQL。
     foreach ($key in @(
         "AOWUGONG_ENV",
         "AOWUGONG_HTTP_ADDRESS",

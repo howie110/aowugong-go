@@ -21,7 +21,7 @@ type Service struct {
 }
 
 // NewService 创建麻将服务。
-// 输入：repository 是麻将 SQLite 仓储。
+// 输入：repository 是麻将 PostgreSQL 仓储。
 // 输出：返回可供 HTTP 和任务复用的服务。
 // 副作用：无。
 func NewService(repository *Repository) *Service {
@@ -32,7 +32,7 @@ func NewService(repository *Repository) *Service {
 // Save 保存页面录入的单日麻将战绩。
 // 输入：ctx 是调用上下文，request 是日期和金额，createdBy 是当前用户名。
 // 输出：返回 inserted、updated 或 unchanged 及最终记录。
-// 副作用：写入并读取 SQLite。
+// 副作用：写入并读取 PostgreSQL。
 func (s *Service) Save(ctx context.Context, request WriteRequest, createdBy string) (WriteResponse, error) {
 	// 1. 校验日期并按统一金额规则转换为分。
 	record, err := parseWriteRequest(request)
@@ -60,7 +60,7 @@ func (s *Service) Save(ctx context.Context, request WriteRequest, createdBy stri
 // ImportExcel 解析第一个工作表并按日期批量覆盖战绩。
 // 输入：ctx 是调用上下文，content 是 xlsx 内容，filename 和 createdBy 是来源信息。
 // 输出：返回解析、插入、更新和跳过数量。
-// 副作用：读取 Excel 内存内容并写入 SQLite。
+// 副作用：读取 Excel 内存内容并写入 PostgreSQL。
 func (s *Service) ImportExcel(ctx context.Context, content []byte, filename, createdBy string) (ImportResponse, error) {
 	// 1. 解析 Excel 前两列并校验日期唯一性。
 	records, err := parseExcel(content)
@@ -90,7 +90,7 @@ func (s *Service) ImportExcel(ctx context.Context, content []byte, filename, cre
 // Report 读取有界记录并生成完整麻将报告。
 // 输入：ctx 是调用上下文，limit 是记录上限，tableFee 是每场费用文本。
 // 输出：返回摘要、频率、趋势、周期和最近记录。
-// 副作用：读取 SQLite。
+// 副作用：读取 PostgreSQL。
 func (s *Service) Report(ctx context.Context, limit int, tableFee string) (Report, error) {
 	// 1. 约束查询上限并解析场费。
 	if limit < 1 {
@@ -129,7 +129,7 @@ func (s *Service) Report(ctx context.Context, limit int, tableFee string) (Repor
 // PageSummary 返回控制台使用的轻量麻将摘要。
 // 输入：ctx 是调用上下文。
 // 输出：返回标题、说明和四张指标卡。
-// 副作用：读取 SQLite。
+// 副作用：读取 PostgreSQL。
 func (s *Service) PageSummary(ctx context.Context) (map[string]any, error) {
 	// 1. 复用完整报告保证统计口径一致。
 	report, err := s.Report(ctx, 1000, "9")
@@ -152,7 +152,7 @@ func (s *Service) PageSummary(ctx context.Context) (map[string]any, error) {
 // Recent 返回最近麻将战绩。
 // 输入：ctx 是调用上下文，limit 是 1 到 200 的上限。
 // 输出：返回日期倒序记录。
-// 副作用：读取 SQLite。
+// 副作用：读取 PostgreSQL。
 func (s *Service) Recent(ctx context.Context, limit int) ([]Record, error) {
 	// 1. 约束列表上限并转换公开记录。
 	if limit < 1 {

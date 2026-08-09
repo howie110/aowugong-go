@@ -14,8 +14,8 @@ func TestParseCommandSupportsServerAndUnifiedJobCLI(t *testing.T) {
 	}
 
 	// 2. 核对 job 子命令保留任务名。
-	job, err := parseCommand([]string{"aowugong", "job", "backup_sqlite"})
-	if err != nil || job.mode != modeJob || job.jobName != "backup_sqlite" {
+	job, err := parseCommand([]string{"aowugong", "job", "backup_postgres"})
+	if err != nil || job.mode != modeJob || job.jobName != "backup_postgres" {
 		t.Errorf("job command = %+v error = %v", job, err)
 	}
 

@@ -239,7 +239,7 @@ export function DatabasePage() {
 
 /** DatabaseMetrics 展示数据库引擎、表数、行数和文件体积。 */
 function DatabaseMetrics({ summary, isLoading }: { summary: DatabaseSummary | null; isLoading: boolean }) {
-  // 1. 使用稳定四列指标展示 SQLite 运行状态。
+  // 1. 使用稳定四列指标展示 PostgreSQL 运行状态。
   const metrics = [
     {
       label: "数据库",

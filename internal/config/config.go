@@ -12,14 +12,11 @@ import (
 const (
 	defaultEnvironment        = "development"
 	defaultHTTPAddress        = "0.0.0.0:2345"
+	defaultPostgresURL        = "postgres://aowugong@127.0.0.1:5432/aowugong?sslmode=disable"
+	defaultPostgresMaxOpen    = 8
+	defaultPostgresMaxIdle    = 4
+	defaultPostgresLifetime   = 30 * time.Minute
 	defaultSQLitePath         = "storage/data/aowugong.db"
-	defaultSQLiteMaxOpenConns = 4
-	defaultSQLiteMaxIdleConns = 2
-	defaultSQLiteBusyTimeout  = 5 * time.Second
-	defaultMySQLHost          = "127.0.0.1"
-	defaultMySQLPort          = 3306
-	defaultMySQLDatabase      = "aowugong"
-	defaultMySQLUser          = "aowugong"
 	defaultStaticDir          = "web/dist"
 	defaultTokenLifetime      = 72 * time.Hour
 	defaultWorkNavigationPath = "storage/private/work/navigation.json"
@@ -33,17 +30,19 @@ type LookupEnv func(string) (string, bool)
 
 // Config 汇总应用运行所需的配置。
 type Config struct {
-	Environment   string
-	MigrationsDir string
-	HTTP          HTTP
-	Database      Database
-	Migration     Migration
-	Development   Development
-	Auth          Auth
-	Storage       Storage
-	Clients       Clients
-	Finance       Finance
-	Scheduler     Scheduler
+	Environment       string
+	MigrationsDir     string
+	SQLiteSourcePath  string
+	HTTP              HTTP
+	Database          Database
+	Development       Development
+	Auth              Auth
+	Storage           Storage
+	GitHubBackup      GitHubBackup
+	VaultwardenBackup VaultwardenBackup
+	Clients           Clients
+	Finance           Finance
+	Scheduler         Scheduler
 }
 
 // HTTP 描述 HTTP 服务配置。
@@ -52,27 +51,13 @@ type HTTP struct {
 	StaticDir string
 }
 
-// Database 描述 SQLite 文件、锁等待和连接池配置。
+// Database 描述 PostgreSQL 地址和连接池配置。
 type Database struct {
-	Path           string
-	MaxOpenConns   int
-	MaxIdleConns   int
-	BusyTimeout    time.Duration
-	SkipMigrations bool
-}
-
-// Migration 描述一次性数据迁移所需的旧 MySQL 来源。
-type Migration struct {
-	MySQL MySQLSource
-}
-
-// MySQLSource 描述只供 cmd/migrate 使用的旧 MySQL 连接。
-type MySQLSource struct {
-	Host     string
-	Port     int
-	Database string
-	User     string
-	Password string
+	URL             string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	SkipMigrations  bool
 }
 
 // Development 描述本地前端复用线上 API 的开发模式。
@@ -87,13 +72,32 @@ type Auth struct {
 	TokenLifetime time.Duration
 }
 
-// Storage 描述运行时文件位置和 SQLite 备份保留策略。
+// Storage 描述运行时文件位置和 PostgreSQL 备份保留策略。
 type Storage struct {
 	WorkNavigationPath string
 	BackupDir          string
 	BackupRetention    int
 	PositionUploadDir  string
 	PositionTempDir    string
+}
+
+// GitHubBackup 描述固定白名单仓库的代码冷备份配置。
+type GitHubBackup struct {
+	Enabled              bool
+	Token                string
+	Directory            string
+	RetentionRefs        int
+	RequiredRepositories []string
+}
+
+// VaultwardenBackup 描述每周加密邮件备份配置。
+type VaultwardenBackup struct {
+	Enabled                  bool
+	Directory                string
+	RecoveryScriptsDirectory string
+	AgeRecipient             string
+	EmailTo                  string
+	MaxAttachmentMB          int
 }
 
 // Clients 描述当前可达业务使用的外部 HTTP 服务配置。
@@ -105,6 +109,15 @@ type Clients struct {
 	OpenILink             OpenILink
 	ServiceMonitorTargets string
 	PositionOCR           PositionOCR
+	Email                 Email
+}
+
+// Email 描述 TLS SMTP 发件服务配置。
+type Email struct {
+	Host     string
+	Port     int
+	Sender   string
+	Password string
 }
 
 // Miniflux 描述投资文章聚合 API 配置。
@@ -173,20 +186,16 @@ type Scheduler struct {
 func Load(lookup LookupEnv) (Config, error) {
 	// 1. 建立所有运行环境共用的默认配置。
 	cfg := Config{
-		Environment: defaultEnvironment,
+		Environment:      defaultEnvironment,
+		SQLiteSourcePath: defaultSQLitePath,
 		HTTP: HTTP{
 			Address:   defaultHTTPAddress,
 			StaticDir: defaultStaticDir,
 		},
 		Database: Database{
-			Path: defaultSQLitePath, MaxOpenConns: defaultSQLiteMaxOpenConns,
-			MaxIdleConns: defaultSQLiteMaxIdleConns, BusyTimeout: defaultSQLiteBusyTimeout,
-		},
-		Migration: Migration{
-			MySQL: MySQLSource{
-				Host: defaultMySQLHost, Port: defaultMySQLPort,
-				Database: defaultMySQLDatabase, User: defaultMySQLUser,
-			},
+			URL:          defaultPostgresURL,
+			MaxOpenConns: defaultPostgresMaxOpen, MaxIdleConns: defaultPostgresMaxIdle,
+			ConnMaxLifetime: defaultPostgresLifetime,
 		},
 		Auth: Auth{
 			TokenLifetime: defaultTokenLifetime,
@@ -197,6 +206,13 @@ func Load(lookup LookupEnv) (Config, error) {
 			BackupRetention:    7,
 			PositionUploadDir:  defaultPositionUploadDir,
 			PositionTempDir:    defaultPositionTempDir,
+		},
+		GitHubBackup: GitHubBackup{
+			RetentionRefs:        4,
+			RequiredRepositories: []string{"KES-IT/KES-SCM", "KES-IT/KES-BIS"},
+		},
+		VaultwardenBackup: VaultwardenBackup{
+			Directory: "storage/backup/vaultwarden", RecoveryScriptsDirectory: "scripts", MaxAttachmentMB: 45,
 		},
 		Clients: Clients{
 			WeRead: WeRead{
@@ -218,6 +234,7 @@ func Load(lookup LookupEnv) (Config, error) {
 				UploadMaxMB: 10,
 				Endpoint:    "ocr-api.cn-hangzhou.aliyuncs.com",
 			},
+			Email: Email{Host: "smtp.qq.com", Port: 465},
 		},
 	}
 
@@ -241,15 +258,21 @@ func Load(lookup LookupEnv) (Config, error) {
 		cfg.Auth.EncryptionKey = strings.TrimSpace(value)
 	}
 	loadString(lookup, "AOWUGONG_WORK_NAVIGATION_PATH", &cfg.Storage.WorkNavigationPath)
-	loadString(lookup, "AOWUGONG_SQLITE_PATH", &cfg.Database.Path)
+	loadString(lookup, "AOWUGONG_DATABASE_URL", &cfg.Database.URL)
+	loadString(lookup, "AOWUGONG_SQLITE_SOURCE_PATH", &cfg.SQLiteSourcePath)
 	loadString(lookup, "AOWUGONG_DEV_UPSTREAM_URL", &cfg.Development.UpstreamURL)
-	loadString(lookup, "AOWUGONG_MYSQL_HOST", &cfg.Migration.MySQL.Host)
-	loadString(lookup, "AOWUGONG_MYSQL_DATABASE", &cfg.Migration.MySQL.Database)
-	loadString(lookup, "AOWUGONG_MYSQL_USER", &cfg.Migration.MySQL.User)
-	loadString(lookup, "AOWUGONG_MYSQL_PASSWORD", &cfg.Migration.MySQL.Password)
 	loadString(lookup, "AOWUGONG_BACKUP_DIR", &cfg.Storage.BackupDir)
 	loadString(lookup, "AOWUGONG_POSITION_UPLOAD_DIR", &cfg.Storage.PositionUploadDir)
 	loadString(lookup, "AOWUGONG_POSITION_TEMP_DIR", &cfg.Storage.PositionTempDir)
+	loadString(lookup, "GITHUB_BACKUP_TOKEN", &cfg.GitHubBackup.Token)
+	loadString(lookup, "GITHUB_BACKUP_DIR", &cfg.GitHubBackup.Directory)
+	loadString(lookup, "VAULTWARDEN_BACKUP_DIR", &cfg.VaultwardenBackup.Directory)
+	loadString(lookup, "VAULTWARDEN_BACKUP_RECOVERY_SCRIPTS_DIR", &cfg.VaultwardenBackup.RecoveryScriptsDirectory)
+	loadString(lookup, "VAULTWARDEN_BACKUP_AGE_RECIPIENT", &cfg.VaultwardenBackup.AgeRecipient)
+	loadString(lookup, "VAULTWARDEN_BACKUP_EMAIL_TO", &cfg.VaultwardenBackup.EmailTo)
+	repositoryNames := strings.Join(cfg.GitHubBackup.RequiredRepositories, ",")
+	loadString(lookup, "GITHUB_BACKUP_REQUIRED_REPOSITORIES", &repositoryNames)
+	cfg.GitHubBackup.RequiredRepositories = splitCommaSeparated(repositoryNames)
 	loadString(lookup, "WEREAD_GATEWAY_URL", &cfg.Clients.WeRead.GatewayURL)
 	loadString(lookup, "WEREAD_API_KEY", &cfg.Clients.WeRead.APIKey)
 	loadString(lookup, "WEREAD_SKILL_VERSION", &cfg.Clients.WeRead.SkillVersion)
@@ -272,26 +295,35 @@ func Load(lookup LookupEnv) (Config, error) {
 	loadString(lookup, "ALIYUN_OCR_ACCESS_KEY_ID", &cfg.Clients.PositionOCR.AccessKeyID)
 	loadString(lookup, "ALIYUN_OCR_ACCESS_KEY_SECRET", &cfg.Clients.PositionOCR.AccessKeySecret)
 	loadString(lookup, "ALIYUN_OCR_ENDPOINT", &cfg.Clients.PositionOCR.Endpoint)
+	loadString(lookup, "SMTP_HOST", &cfg.Clients.Email.Host)
+	loadString(lookup, "SMTP_EMAIL", &cfg.Clients.Email.Sender)
+	loadString(lookup, "SMTP_PASSWORD", &cfg.Clients.Email.Password)
 	loadString(lookup, "QMT_ACCOUNT", &cfg.Finance.QMTAccount)
 	loadString(lookup, "BINANCE_API_KEY", &cfg.Finance.BinanceAPIKey)
 	loadString(lookup, "OKX_API_KEY", &cfg.Finance.OKXAPIKey)
 	if err := loadInt(lookup, "AOWUGONG_BACKUP_RETENTION", &cfg.Storage.BackupRetention, 1, 365); err != nil {
 		return Config{}, err
 	}
-	if err := loadInt(lookup, "AOWUGONG_MYSQL_PORT", &cfg.Migration.MySQL.Port, 1, 65535); err != nil {
+	if err := loadInt(lookup, "GITHUB_BACKUP_RETENTION_REFS", &cfg.GitHubBackup.RetentionRefs, 1, 52); err != nil {
 		return Config{}, err
 	}
-	if err := loadInt(lookup, "AOWUGONG_SQLITE_MAX_OPEN_CONNS", &cfg.Database.MaxOpenConns, 1, 32); err != nil {
+	if err := loadInt(lookup, "VAULTWARDEN_BACKUP_MAX_ATTACHMENT_MB", &cfg.VaultwardenBackup.MaxAttachmentMB, 1, 50); err != nil {
 		return Config{}, err
 	}
-	if err := loadInt(lookup, "AOWUGONG_SQLITE_MAX_IDLE_CONNS", &cfg.Database.MaxIdleConns, 0, 32); err != nil {
+	if err := loadInt(lookup, "SMTP_PORT", &cfg.Clients.Email.Port, 1, 65535); err != nil {
 		return Config{}, err
 	}
-	busyTimeoutMS := int(cfg.Database.BusyTimeout / time.Millisecond)
-	if err := loadInt(lookup, "AOWUGONG_SQLITE_BUSY_TIMEOUT_MS", &busyTimeoutMS, 100, 60000); err != nil {
+	if err := loadInt(lookup, "AOWUGONG_DATABASE_MAX_OPEN_CONNS", &cfg.Database.MaxOpenConns, 1, 64); err != nil {
 		return Config{}, err
 	}
-	cfg.Database.BusyTimeout = time.Duration(busyTimeoutMS) * time.Millisecond
+	if err := loadInt(lookup, "AOWUGONG_DATABASE_MAX_IDLE_CONNS", &cfg.Database.MaxIdleConns, 0, 64); err != nil {
+		return Config{}, err
+	}
+	connMaxLifetimeMinutes := int(cfg.Database.ConnMaxLifetime / time.Minute)
+	if err := loadInt(lookup, "AOWUGONG_DATABASE_CONN_MAX_LIFETIME_MINUTES", &connMaxLifetimeMinutes, 1, 1440); err != nil {
+		return Config{}, err
+	}
+	cfg.Database.ConnMaxLifetime = time.Duration(connMaxLifetimeMinutes) * time.Minute
 	if err := loadInt(lookup, "POSITION_UPLOAD_MAX_MB", &cfg.Clients.PositionOCR.UploadMaxMB, 1, 100); err != nil {
 		return Config{}, err
 	}
@@ -301,32 +333,42 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err := loadBool(lookup, "AOWUGONG_SCHEDULER_ENABLED", &cfg.Scheduler.Enabled); err != nil {
 		return Config{}, err
 	}
-	if err := loadBool(lookup, "AOWUGONG_SQLITE_SKIP_MIGRATIONS", &cfg.Database.SkipMigrations); err != nil {
+	if err := loadBool(lookup, "GITHUB_BACKUP_ENABLED", &cfg.GitHubBackup.Enabled); err != nil {
+		return Config{}, err
+	}
+	if err := loadBool(lookup, "VAULTWARDEN_BACKUP_EMAIL_ENABLED", &cfg.VaultwardenBackup.Enabled); err != nil {
+		return Config{}, err
+	}
+	if err := loadBool(lookup, "AOWUGONG_DATABASE_SKIP_MIGRATIONS", &cfg.Database.SkipMigrations); err != nil {
 		return Config{}, err
 	}
 
-	// 3. 清理路径并验证 SQLite 连接池和生产环境密钥。
+	// 3. 清理路径并验证 PostgreSQL 连接池和生产环境密钥。
 	cfg.HTTP.StaticDir = filepath.Clean(cfg.HTTP.StaticDir)
-	cfg.Database.Path = filepath.Clean(cfg.Database.Path)
+	cfg.Database.URL = strings.TrimSpace(cfg.Database.URL)
+	cfg.SQLiteSourcePath = filepath.Clean(cfg.SQLiteSourcePath)
 	cfg.Storage.WorkNavigationPath = filepath.Clean(cfg.Storage.WorkNavigationPath)
 	cfg.Storage.BackupDir = filepath.Clean(cfg.Storage.BackupDir)
 	cfg.Storage.PositionUploadDir = filepath.Clean(cfg.Storage.PositionUploadDir)
 	cfg.Storage.PositionTempDir = filepath.Clean(cfg.Storage.PositionTempDir)
+	if cfg.GitHubBackup.Directory == "" {
+		cfg.GitHubBackup.Directory = filepath.Join(cfg.Storage.BackupDir, "github")
+	}
+	cfg.GitHubBackup.Directory = filepath.Clean(cfg.GitHubBackup.Directory)
+	cfg.VaultwardenBackup.Directory = filepath.Clean(cfg.VaultwardenBackup.Directory)
+	cfg.VaultwardenBackup.RecoveryScriptsDirectory = filepath.Clean(cfg.VaultwardenBackup.RecoveryScriptsDirectory)
 	if cfg.MigrationsDir != "" {
 		cfg.MigrationsDir = filepath.Clean(cfg.MigrationsDir)
 	}
-	cfg.Migration.MySQL.Host = strings.TrimSpace(cfg.Migration.MySQL.Host)
-	cfg.Migration.MySQL.Database = strings.TrimSpace(cfg.Migration.MySQL.Database)
-	cfg.Migration.MySQL.User = strings.TrimSpace(cfg.Migration.MySQL.User)
 	cfg.Development.UpstreamURL = strings.TrimRight(strings.TrimSpace(cfg.Development.UpstreamURL), "/")
-	if cfg.Database.Path == "." || strings.TrimSpace(cfg.Database.Path) == "" {
-		return Config{}, fmt.Errorf("SQLite 数据库路径不能为空")
+	if cfg.Database.URL == "" {
+		return Config{}, fmt.Errorf("PostgreSQL 连接地址不能为空")
 	}
 	if cfg.Database.MaxIdleConns > cfg.Database.MaxOpenConns {
-		return Config{}, fmt.Errorf("SQLite 空闲连接数不能大于最大连接数")
+		return Config{}, fmt.Errorf("PostgreSQL 空闲连接数不能大于最大连接数")
 	}
-	if cfg.Database.BusyTimeout <= 0 {
-		return Config{}, fmt.Errorf("SQLite 锁等待时间必须大于零")
+	if cfg.Database.ConnMaxLifetime <= 0 {
+		return Config{}, fmt.Errorf("PostgreSQL 连接生命周期必须大于零")
 	}
 	if cfg.Environment == "production" && (cfg.Auth.JWTSecret == "" || cfg.Auth.EncryptionKey == "") {
 		return Config{}, fmt.Errorf("生产环境必须配置 JWT 与加密密钥")
@@ -334,8 +376,41 @@ func Load(lookup LookupEnv) (Config, error) {
 	if cfg.Environment == "production" && cfg.Development.UpstreamURL != "" {
 		return Config{}, fmt.Errorf("生产环境不能配置开发 API 上游")
 	}
+	if cfg.GitHubBackup.Enabled && cfg.GitHubBackup.Token == "" {
+		return Config{}, fmt.Errorf("启用 GitHub 代码备份时必须配置 GITHUB_BACKUP_TOKEN")
+	}
+	if cfg.GitHubBackup.Enabled && len(cfg.GitHubBackup.RequiredRepositories) == 0 {
+		return Config{}, fmt.Errorf("启用 GitHub 代码备份时必须配置至少一个固定组织仓库")
+	}
+	if cfg.VaultwardenBackup.Enabled && (cfg.VaultwardenBackup.AgeRecipient == "" ||
+		cfg.VaultwardenBackup.EmailTo == "" || cfg.Clients.Email.Host == "" ||
+		cfg.Clients.Email.Sender == "" || cfg.Clients.Email.Password == "") {
+		return Config{}, fmt.Errorf("启用 Vaultwarden 邮件备份时必须配置 age 公钥、收件人与 SMTP 账号")
+	}
 
 	return cfg, nil
+}
+
+// splitCommaSeparated 清理逗号分隔配置并保持首次出现顺序。
+// 输入：value 是逗号分隔文本。
+// 输出：返回去空白、去空项和去重后的列表。
+// 副作用：无。
+func splitCommaSeparated(value string) []string {
+	// 1. 逐项清理并跳过空值和重复值。
+	seen := make(map[string]struct{})
+	result := make([]string, 0)
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		result = append(result, item)
+	}
+	return result
 }
 
 // loadString 使用非空环境变量覆盖字符串配置。

@@ -140,7 +140,7 @@ export const pageMetaMap: Record<FinancePageKey, { title: string; description: s
   },
   database: {
     title: "数据库",
-    description: "只读查看 SQLite 表结构、数据和脱敏导出。",
+    description: "只读查看 PostgreSQL 表结构、数据和脱敏导出。",
   },
   permissions: {
     title: "权限管理",

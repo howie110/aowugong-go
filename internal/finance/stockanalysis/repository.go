@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/howiedata/aowugong-go/internal/money"
 )
@@ -28,13 +29,13 @@ type holdingRow struct {
 	Accounts     string
 }
 
-// Repository 负责股票仓位分析所需的受限 SQLite 查询。
+// Repository 负责股票仓位分析所需的受限 PostgreSQL 查询。
 type Repository struct {
 	db *sql.DB
 }
 
 // NewRepository 创建股票仓位分析仓储。
-// 输入：db 是已经迁移的 SQLite 连接。
+// 输入：db 是已经迁移的 PostgreSQL 连接。
 // 输出：返回只读分析仓储。
 // 副作用：无。
 func NewRepository(db *sql.DB) *Repository {
@@ -45,7 +46,7 @@ func NewRepository(db *sql.DB) *Repository {
 // snapshots 读取最近资产快照及其中的现金等价物金额。
 // 输入：ctx 控制查询，limit 是 1 到 2000 的快照上限。
 // 输出：按日期和账户正序返回内部行；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 PostgreSQL。
 func (r *Repository) snapshots(ctx context.Context, limit int) ([]snapshotRow, error) {
 	// 1. 限制大表读取范围。
 	if limit < 1 {
@@ -118,15 +119,14 @@ func (r *Repository) snapshots(ctx context.Context, limit int) ([]snapshotRow, e
 // holdings 读取指定日期按证券聚合的正市值持仓。
 // 输入：ctx 控制查询，snapshotDate 是 ISO 日期。
 // 输出：按市值倒序返回聚合持仓；失败时返回错误。
-// 副作用：只读 SQLite。
+// 副作用：只读 PostgreSQL。
 func (r *Repository) holdings(ctx context.Context, snapshotDate string) ([]holdingRow, error) {
-	// 1. 按日期限制查询并在 SQLite 内完成账户聚合。
+	// 1. 按日期限制查询并在数据库内完成数值聚合。
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT security_name,
 		       SUM(market_value),
 		       CASE WHEN COUNT(quantity) > 0 THEN SUM(quantity) END,
-		       COUNT(DISTINCT account_suffix),
-		       REPLACE(GROUP_CONCAT(DISTINCT COALESCE(account_alias, account_suffix)), ',', ' / ')
+		       COUNT(DISTINCT account_suffix)
 		FROM finance_position_holding_snapshot
 		WHERE snapshot_date = ? AND market_value > 0
 		GROUP BY security_name
@@ -142,8 +142,8 @@ func (r *Repository) holdings(ctx context.Context, snapshotDate string) ([]holdi
 	for rows.Next() {
 		var item holdingRow
 		var market string
-		var quantity, accounts sql.NullString
-		if err := rows.Scan(&item.SecurityName, &market, &quantity, &item.AccountCount, &accounts); err != nil {
+		var quantity sql.NullString
+		if err := rows.Scan(&item.SecurityName, &market, &quantity, &item.AccountCount); err != nil {
 			return nil, fmt.Errorf("扫描最新持仓分布: %w", err)
 		}
 		item.MarketCents, err = money.ParseCents(market)
@@ -153,13 +153,40 @@ func (r *Repository) holdings(ctx context.Context, snapshotDate string) ([]holdi
 		if quantity.Valid {
 			item.Quantity = &quantity.String
 		}
-		if accounts.Valid {
-			item.Accounts = accounts.String
-		}
 		results = append(results, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("遍历最新持仓分布: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("关闭最新持仓分布游标: %w", err)
+	}
+
+	// 3. 单独读取账户别名并在 Go 中去重拼接，保持各数据库测试结果一致。
+	accountRows, err := r.db.QueryContext(ctx, `
+		SELECT security_name, COALESCE(account_alias, account_suffix)
+		FROM finance_position_holding_snapshot
+		WHERE snapshot_date = ? AND market_value > 0
+		GROUP BY security_name, COALESCE(account_alias, account_suffix)
+		ORDER BY security_name, COALESCE(account_alias, account_suffix)
+	`, snapshotDate)
+	if err != nil {
+		return nil, fmt.Errorf("查询持仓账户别名: %w", err)
+	}
+	defer accountRows.Close()
+	accountsBySecurity := make(map[string][]string)
+	for accountRows.Next() {
+		var securityName, account string
+		if err := accountRows.Scan(&securityName, &account); err != nil {
+			return nil, fmt.Errorf("扫描持仓账户别名: %w", err)
+		}
+		accountsBySecurity[securityName] = append(accountsBySecurity[securityName], account)
+	}
+	if err := accountRows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历持仓账户别名: %w", err)
+	}
+	for index := range results {
+		results[index].Accounts = strings.Join(accountsBySecurity[results[index].SecurityName], " / ")
 	}
 	return results, nil
 }

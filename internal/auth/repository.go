@@ -9,13 +9,13 @@ import (
 	appdatabase "github.com/howiedata/aowugong-go/internal/database"
 )
 
-// Repository 负责在 SQLite 中读写认证用户及其资料。
+// Repository 负责在 PostgreSQL 中读写认证用户及其资料。
 type Repository struct {
 	db *sql.DB
 }
 
 // NewRepository 创建认证仓储。
-// 输入：db 是已完成迁移的 SQLite 连接池。
+// 输入：db 是已完成迁移的 PostgreSQL 连接池。
 // 输出：返回可供认证服务使用的仓储。
 // 副作用：无，不访问数据库。
 func NewRepository(db *sql.DB) *Repository {
@@ -26,7 +26,7 @@ func NewRepository(db *sql.DB) *Repository {
 // FindByUsername 按用户名读取包含密码哈希的活动判断所需记录。
 // 输入：ctx 是调用上下文，username 是精确用户名。
 // 输出：返回内部用户记录；不存在时返回 ErrNotFound。
-// 副作用：读取 SQLite。
+// 副作用：读取 PostgreSQL。
 func (r *Repository) FindByUsername(ctx context.Context, username string) (userRecord, error) {
 	// 1. 查询登录校验需要的最小字段。
 	var record userRecord
@@ -54,7 +54,7 @@ func (r *Repository) FindByUsername(ctx context.Context, username string) (userR
 // FindByID 按主键读取不含密码的用户记录。
 // 输入：ctx 是调用上下文，userID 是用户主键。
 // 输出：返回公开用户记录；不存在时返回 ErrNotFound。
-// 副作用：读取 SQLite。
+// 副作用：读取 PostgreSQL。
 func (r *Repository) FindByID(ctx context.Context, userID int64) (User, error) {
 	// 1. 查询 API 可以公开的用户字段。
 	var user User
@@ -75,13 +75,15 @@ func (r *Repository) FindByID(ctx context.Context, userID int64) (User, error) {
 // Create 写入一个使用 bcrypt 密码哈希的新用户。
 // 输入：ctx 是调用上下文，req 是用户字段，passwordHash 是已生成的 bcrypt 哈希。
 // 输出：返回新建用户；唯一键冲突时返回 ErrConflict。
-// 副作用：写入 SQLite。
+// 副作用：写入 PostgreSQL。
 func (r *Repository) Create(ctx context.Context, req CreateUserRequest, passwordHash string) (User, error) {
-	// 1. 插入用户并取得 SQLite 自增主键。
-	result, err := r.db.ExecContext(ctx, `
+	// 1. 插入用户并取得 PostgreSQL 自增主键。
+	var userID int64
+	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO aowugong_fastapi_users (username, email, password, is_active, is_superuser)
 		VALUES (?, ?, ?, 1, 0)
-	`, req.Username, req.Email, passwordHash)
+		RETURNING id
+	`, req.Username, req.Email, passwordHash).Scan(&userID)
 	if err != nil {
 		if appdatabase.IsDuplicateKey(err) {
 			return User{}, ErrConflict
@@ -89,18 +91,14 @@ func (r *Repository) Create(ctx context.Context, req CreateUserRequest, password
 		return User{}, fmt.Errorf("创建认证用户: %w", err)
 	}
 
-	// 2. 使用自增主键读取数据库中的最终公开记录。
-	userID, err := result.LastInsertId()
-	if err != nil {
-		return User{}, fmt.Errorf("读取新用户主键: %w", err)
-	}
+	// 2. 使用返回主键读取数据库中的最终公开记录。
 	return r.FindByID(ctx, userID)
 }
 
 // Profile 读取用户以及去重排序后的角色和权限。
 // 输入：ctx 是调用上下文，userID 是当前用户主键。
 // 输出：返回资料、角色和权限；用户不存在时返回 ErrNotFound。
-// 副作用：读取 SQLite。
+// 副作用：读取 PostgreSQL。
 func (r *Repository) Profile(ctx context.Context, userID int64) (Profile, error) {
 	// 1. 读取用户基本资料，提前区分用户不存在。
 	user, err := r.FindByID(ctx, userID)
@@ -143,9 +141,9 @@ func (r *Repository) Profile(ctx context.Context, userID int64) (Profile, error)
 }
 
 // queryStrings 执行单列字符串查询并返回完整结果。
-// 输入：ctx 是调用上下文，db 是 SQLite 连接，query 和 args 是参数化查询。
+// 输入：ctx 是调用上下文，db 是 PostgreSQL 连接，query 和 args 是参数化查询。
 // 输出：返回结果字符串列表。
-// 副作用：读取 SQLite。
+// 副作用：读取 PostgreSQL。
 func queryStrings(ctx context.Context, db *sql.DB, query string, args ...any) ([]string, error) {
 	// 1. 执行查询并确保游标被释放。
 	rows, err := db.QueryContext(ctx, query, args...)
