@@ -16,7 +16,7 @@ import (
 var fencedJSONPattern = regexp.MustCompile("(?s)```(?:json)?\\s*(.*?)```")
 
 const (
-	scheduledFetchLimit         = 2000
+	scheduledFetchLimit         = 1000
 	scheduledAnalysisBatchLimit = 50
 	scheduledAnalysisMaxBatches = 10
 	scheduledSourceStaleAfter   = 72 * time.Hour

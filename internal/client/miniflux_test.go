@@ -101,3 +101,36 @@ func TestMinifluxClientFetchesCategoryEntries(t *testing.T) {
 		t.Errorf("content/key = %q/%q/%q", item.Summary, item.Content, item.ArticleKey)
 	}
 }
+
+// TestMinifluxClientClampsLimitToAPIMaximum 验证文章请求不会超过 Miniflux 允许的单页上限。
+// 输入：调用方请求 2000 篇文章，测试服务模拟分类和文章 API。
+// 输出：实际文章请求使用 limit=1000，并正常返回空文章列表。
+// 副作用：启动本地测试 HTTP 服务并发起两次请求。
+func TestMinifluxClientClampsLimitToAPIMaximum(t *testing.T) {
+	// 1. 模拟 Miniflux API，并核对文章列表请求的最终上限。
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/v1/categories":
+			_, _ = response.Write([]byte(`[{"id":22,"title":"投资文章"}]`))
+		case "/v1/entries":
+			if got := request.URL.Query().Get("limit"); got != "1000" {
+				t.Errorf("limit = %q, want 1000", got)
+			}
+			_, _ = response.Write([]byte(`{"total":0,"entries":[]}`))
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	// 2. 请求超过服务端边界的数量，确认客户端完成收敛且不报错。
+	client := NewMinifluxClient(server.URL, "test-token", "投资文章", server.Client())
+	items, err := client.Fetch(context.Background(), 7, server.URL, 2000)
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("items = %#v, want empty", items)
+	}
+}

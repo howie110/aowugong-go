@@ -85,8 +85,8 @@ func (c *MinifluxClient) Fetch(ctx context.Context, sourceID int64, feedURL stri
 	if limit < 1 {
 		limit = 30
 	}
-	if limit > 2000 {
-		limit = 2000
+	if limit > 1000 {
+		limit = 1000
 	}
 
 	// 2. 解析分类名称，确保不会把其他订阅误送入投资分析。
