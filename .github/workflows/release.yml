@@ -35,11 +35,14 @@ jobs:
           npm test
           npm run build
 
-      - name: Verify Go backend
-        run: |
-          go test ./...
-          go test -race ./...
-          go vet ./...
+      - name: Test Go backend
+        run: go test ./...
+
+      - name: Test Go backend with race detector
+        run: go test -race ./...
+
+      - name: Vet Go backend
+        run: go vet ./...
 
       - name: Verify server scripts
         run: |
