@@ -1,4 +1,4 @@
-import { ArrowDownRight, BookOpenCheck, QrCode, Sparkles } from "lucide-react";
+import { ArrowDownRight, BookOpenCheck, QrCode, Rss, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -179,70 +179,6 @@ export function ArticleFetchPage() {
 
       <Card>
         <CardHeader>
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <BookOpenCheck className="h-4 w-4" />
-                微信读书
-              </CardTitle>
-              <CardDescription>从书架公众号读取新文章，公众号内容不会写入其他服务。</CardDescription>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" onClick={() => void openWeReadLogin()} disabled={isBindingWorking}>
-                {isBindingWorking ? <Spinner /> : <QrCode className="h-4 w-4" />}
-                {weRead?.state === "connected" || weRead?.state === "degraded" || weRead?.state === "failed" ? "重新绑定" : "绑定微信读书"}
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <Badge variant={weRead?.state === "connected" ? "success" : weRead?.state === "degraded" ? "warning" : weRead?.state === "failed" ? "danger" : "secondary"}>
-              {weReadStateLabel(weRead?.state)}
-            </Badge>
-            <span className="text-muted-foreground">{weRead?.message || "尚未绑定微信读书"}</span>
-          </div>
-
-          {(weRead?.state === "connected" || weRead?.state === "degraded") && weRead.accounts.length ? (
-            <div className="overflow-x-auto border-t pt-4">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-40">公众号</TableHead>
-                    <TableHead className="w-24 text-right">现有文章</TableHead>
-                    <TableHead className="w-24 text-right">今天新增</TableHead>
-                    <TableHead className="w-24 text-right">未分析</TableHead>
-                    <TableHead className="min-w-32">最近获取时间</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {weRead.accounts.map((account) => (
-                    <TableRow key={account.account_id}>
-                      <TableCell className="font-medium">{account.title}</TableCell>
-                      <TableCell className="text-right tabular-nums">{account.article_count}</TableCell>
-                      <TableCell className="text-right tabular-nums">{account.today_inserted_count}</TableCell>
-                      <TableCell className="text-right tabular-nums">{account.pending_count}</TableCell>
-                      <TableCell className="text-muted-foreground">{formatDate(account.latest_fetched_at)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          ) : null}
-
-          {(weRead?.state === "connected" || weRead?.state === "degraded") && !weRead.accounts.length ? (
-            <Empty className="border-t py-6">
-              <EmptyHeader>
-                <EmptyTitle>书架中暂未发现公众号</EmptyTitle>
-                <EmptyDescription>书架变更后可以让 AI 重新同步。</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
           <div className="flex flex-col justify-between gap-2 md:flex-row md:items-start">
             <div>
               <CardTitle>信息源</CardTitle>
@@ -254,7 +190,26 @@ export function ArticleFetchPage() {
             </div>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col justify-between gap-3 border-b pb-4 sm:flex-row sm:items-center">
+            <div className="flex min-w-0 items-start gap-3">
+              <BookOpenCheck className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="min-w-0">
+                <div className="font-medium">微信读书绑定</div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
+                  <Badge variant={weRead?.state === "connected" ? "success" : weRead?.state === "degraded" ? "warning" : weRead?.state === "failed" ? "danger" : "secondary"}>
+                    {weReadStateLabel(weRead?.state)}
+                  </Badge>
+                  <span className="text-muted-foreground">{weRead?.message || "尚未绑定微信读书"}</span>
+                </div>
+              </div>
+            </div>
+            <Button type="button" size="sm" className="shrink-0" onClick={() => void openWeReadLogin()} disabled={isBindingWorking}>
+              {isBindingWorking ? <Spinner /> : <QrCode className="h-4 w-4" />}
+              {weRead?.state === "connected" || weRead?.state === "degraded" || weRead?.state === "failed" ? "重新绑定" : "绑定微信读书"}
+            </Button>
+          </div>
+
           <Table>
             <TableHeader>
               <TableRow>
@@ -295,6 +250,51 @@ export function ArticleFetchPage() {
               ) : null}
             </TableBody>
           </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Rss className="h-4 w-4" />
+            获取公众号
+          </CardTitle>
+          <CardDescription>已发现公众号及文章获取状态。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {weRead?.accounts.length ? (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-40">公众号</TableHead>
+                    <TableHead className="w-24 text-right">现有文章</TableHead>
+                    <TableHead className="w-24 text-right">今天新增</TableHead>
+                    <TableHead className="w-24 text-right">未分析</TableHead>
+                    <TableHead className="min-w-32">最近获取时间</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {weRead.accounts.map((account) => (
+                    <TableRow key={account.account_id}>
+                      <TableCell className="font-medium">{account.title}</TableCell>
+                      <TableCell className="text-right tabular-nums">{account.article_count}</TableCell>
+                      <TableCell className="text-right tabular-nums">{account.today_inserted_count}</TableCell>
+                      <TableCell className="text-right tabular-nums">{account.pending_count}</TableCell>
+                      <TableCell className="text-muted-foreground">{formatDate(account.latest_fetched_at)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <Empty className="border-0 py-6">
+              <EmptyHeader>
+                <EmptyTitle>暂无公众号</EmptyTitle>
+                <EmptyDescription>书架公众号同步后会显示在这里。</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          )}
         </CardContent>
       </Card>
 
