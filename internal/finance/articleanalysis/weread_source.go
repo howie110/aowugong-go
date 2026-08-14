@@ -599,14 +599,15 @@ func publicWeReadLoginStatus(flow *weReadLoginFlow) WeReadLoginStatus {
 // 副作用：无。
 func buildWeReadCredentialCheckResult(health weReadCredentialHealth, checkedAt time.Time, accountCount int) WeReadCredentialCheckResult {
 	// 1. 从绑定时间计算到本次检查或首次失效的持续时间。
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
 	end := checkedAt
 	if health.InvalidAt != "" {
-		if invalidAt, err := time.ParseInLocation("2006-01-02 15:04:05", health.InvalidAt, time.Local); err == nil {
+		if invalidAt, err := time.ParseInLocation("2006-01-02 15:04:05", health.InvalidAt, location); err == nil {
 			end = invalidAt
 		}
 	}
 	duration := time.Duration(0)
-	if boundAt, err := time.ParseInLocation("2006-01-02 15:04:05", health.BoundAt, time.Local); err == nil && end.After(boundAt) {
+	if boundAt, err := time.ParseInLocation("2006-01-02 15:04:05", health.BoundAt, location); err == nil && end.After(boundAt) {
 		duration = end.Sub(boundAt)
 	}
 	return WeReadCredentialCheckResult{

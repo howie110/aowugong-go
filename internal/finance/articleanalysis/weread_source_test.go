@@ -72,7 +72,8 @@ func TestWeReadCredentialHealthLifecycle(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("initial health = %#v, %v, %v", health, found, err)
 	}
-	boundAt, err := time.ParseInLocation("2006-01-02 15:04:05", health.BoundAt, time.Local)
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	boundAt, err := time.ParseInLocation("2006-01-02 15:04:05", health.BoundAt, location)
 	if err != nil {
 		t.Fatalf("parse bound time: %v", err)
 	}
