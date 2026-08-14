@@ -101,9 +101,9 @@ func TestWeReadCredentialHealthLifecycle(t *testing.T) {
 	}
 }
 
-// TestWeReadBindingReflectsFetchFailure 验证页面状态会暴露最近一次真实抓取失败。
-// 输入：完整测试凭据和一条 refresh_token 抓取错误。
-// 输出：失败时要求重新绑定，清除错误后恢复为已绑定。
+// TestWeReadBindingReflectsFetchFailure 验证页面状态会暴露监控或抓取发现的凭据失败。
+// 输入：完整测试凭据、一条 refresh_token 监控错误和一条抓取错误。
+// 输出：两类失败都要求重新绑定，恢复有效后显示可用。
 // 副作用：写入隔离 SQLite 测试库。
 func TestWeReadBindingReflectsFetchFailure(t *testing.T) {
 	// 1. 保存完整凭据并创建微信读书文章来源。
@@ -121,7 +121,22 @@ func TestWeReadBindingReflectsFetchFailure(t *testing.T) {
 		t.Fatalf("SetWeReadSourceActive() error = %v", err)
 	}
 
-	// 2. 写入真实抓取错误，确认接口不再只根据密文存在返回已绑定。
+	// 2. 写入监控发现的凭据错误，确认接口不再只根据密文存在返回可用。
+	if err := repository.recordWeReadCredentialCheck(ctx, "error", "读取微信读书书架: 微信读书凭据字段 refresh_token 为空", time.Now()); err != nil {
+		t.Fatalf("recordWeReadCredentialCheck() error = %v", err)
+	}
+	binding, err := source.Binding(ctx)
+	if err != nil {
+		t.Fatalf("Binding() with health error = %v", err)
+	}
+	if binding.State != "failed" || binding.Message != "微信读书凭据已失效，请重新绑定" {
+		t.Fatalf("Binding() with health error = %#v", binding)
+	}
+	if err := repository.recordWeReadCredentialCheck(ctx, "valid", "", time.Now()); err != nil {
+		t.Fatalf("record valid check: %v", err)
+	}
+
+	// 3. 写入真实抓取错误，确认旧任务状态也能覆盖页面状态。
 	sources, err := repository.Sources(ctx, false)
 	if err != nil || len(sources) != 1 {
 		t.Fatalf("Sources() = %#v, %v", sources, err)
@@ -129,7 +144,7 @@ func TestWeReadBindingReflectsFetchFailure(t *testing.T) {
 	if err := repository.UpdateSourceStatus(ctx, sources[0].ID, "error", "微信读书凭据字段 refresh_token 为空"); err != nil {
 		t.Fatalf("UpdateSourceStatus() error = %v", err)
 	}
-	binding, err := source.Binding(ctx)
+	binding, err = source.Binding(ctx)
 	if err != nil {
 		t.Fatalf("Binding() error = %v", err)
 	}
@@ -137,7 +152,7 @@ func TestWeReadBindingReflectsFetchFailure(t *testing.T) {
 		t.Fatalf("Binding() = %#v", binding)
 	}
 
-	// 3. 模拟重新绑定已验证，确认历史错误被清除且不再误报。
+	// 4. 模拟重新绑定已验证，确认历史错误被清除且不再误报。
 	if err := repository.clearWeReadSourceFetchError(ctx); err != nil {
 		t.Fatalf("clearWeReadSourceFetchError() error = %v", err)
 	}

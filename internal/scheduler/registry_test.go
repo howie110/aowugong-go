@@ -12,7 +12,8 @@ import (
 )
 
 type fakeNotifier struct {
-	body string
+	body  string
+	count int
 }
 
 // TestSourceContextRoundTrip 验证任务执行来源可以传递给业务任务。
@@ -68,6 +69,7 @@ func TestManualOnlyDefinitionRejectsSchedulerSource(t *testing.T) {
 func (n *fakeNotifier) Text(_ context.Context, _ []string, body, _ string) error {
 	// 1. 保存正文供断言四段格式。
 	n.body = body
+	n.count++
 	return nil
 }
 
@@ -203,6 +205,49 @@ func TestRegistryTimesOutRecordsAndNotifiesFailure(t *testing.T) {
 	}
 	if status != "failed" || source != string(SourceCLI) || duration < 1 {
 		t.Errorf("execution = status:%q source:%q duration:%d", status, source, duration)
+	}
+}
+
+// TestRegistrySuppressesConsecutiveIdenticalFailureNotifications 验证连续相同故障只通知一次，恢复后再次故障会重新通知。
+// 输入：同一任务连续失败两次、成功一次、再次失败一次。
+// 输出：四次执行保留真实状态，但微信通知总数只有两次。
+// 副作用：创建并写入隔离 SQLite 测试 schema，修改通知测试替身计数。
+func TestRegistrySuppressesConsecutiveIdenticalFailureNotifications(t *testing.T) {
+	// 1. 注册可切换成功状态的任务并连续制造两次相同失败。
+	notifier := &fakeNotifier{}
+	registry := newTestRegistry(t, notifier)
+	failing := true
+	if err := registry.Register(Definition{
+		Name: "deduplicated_failure", Schedule: "15 * * * *", Timeout: time.Second,
+		Run: func(context.Context) (string, error) {
+			if failing {
+				return "", errors.New("same failure")
+			}
+			return "recovered", nil
+		},
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	for range 2 {
+		if _, err := registry.Run(context.Background(), "deduplicated_failure", SourceScheduler); err == nil {
+			t.Fatal("Run() error = nil, want failure")
+		}
+	}
+	if notifier.count != 1 {
+		t.Fatalf("notification count = %d, want 1", notifier.count)
+	}
+
+	// 2. 成功会结束故障周期，之后同一错误必须重新通知。
+	failing = false
+	if _, err := registry.Run(context.Background(), "deduplicated_failure", SourceScheduler); err != nil {
+		t.Fatalf("recovery Run() error = %v", err)
+	}
+	failing = true
+	if _, err := registry.Run(context.Background(), "deduplicated_failure", SourceScheduler); err == nil {
+		t.Fatal("second incident Run() error = nil, want failure")
+	}
+	if notifier.count != 2 {
+		t.Fatalf("notification count after recovery = %d, want 2", notifier.count)
 	}
 }
 

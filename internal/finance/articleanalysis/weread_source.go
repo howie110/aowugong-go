@@ -78,19 +78,26 @@ func (s *WeReadSource) Binding(ctx context.Context) (WeReadBinding, error) {
 	}
 	state, message := "disconnected", "尚未绑定微信读书"
 	if found {
-		state, message = "connected", "微信读书凭据已保存"
+		state, message = "connected", "微信读书凭据有效"
 		if _, credentialErr := s.loadCredentials(ctx); credentialErr != nil {
 			state, message = "failed", "微信读书凭据不可用，请重新绑定"
 		} else {
-			fetchStatus, fetchMessage, statusErr := s.repository.weReadSourceFetchStatus(ctx)
-			if statusErr != nil {
-				return WeReadBinding{}, statusErr
+			health, healthFound, healthErr := s.repository.weReadCredentialHealth(ctx)
+			if healthErr != nil {
+				return WeReadBinding{}, healthErr
 			}
-			if fetchStatus == "error" {
-				state, message = "degraded", "最近抓取存在异常，请查看任务记录"
-				if strings.Contains(fetchMessage, "refresh_token") || strings.Contains(fetchMessage, "凭据") {
-					state = "failed"
-					message = "微信读书凭据不可用，请重新绑定"
+			state, message = weReadBindingHealthState(health, healthFound)
+			if state == "connected" {
+				fetchStatus, fetchMessage, statusErr := s.repository.weReadSourceFetchStatus(ctx)
+				if statusErr != nil {
+					return WeReadBinding{}, statusErr
+				}
+				if fetchStatus == "error" {
+					state, message = "degraded", "最近抓取存在异常，请查看任务记录"
+					if weReadCredentialErrorMessage(fetchMessage) {
+						state = "failed"
+						message = "微信读书凭据不可用，请重新绑定"
+					}
 				}
 			}
 		}
@@ -105,6 +112,39 @@ func (s *WeReadSource) Binding(ctx context.Context) (WeReadBinding, error) {
 		s.flowMutex.Unlock()
 	}
 	return WeReadBinding{State: state, Message: message, Accounts: accounts}, nil
+}
+
+// weReadBindingHealthState 把最近一次凭据监控结果转换为页面真实状态。
+// 输入：health 是持久监控结果，found 表示健康记录是否存在。
+// 输出：返回 connected、degraded 或 failed 及对应说明。
+// 副作用：无。
+func weReadBindingHealthState(health weReadCredentialHealth, found bool) (string, string) {
+	// 1. 新绑定或有效检查显示可用，明确失效和凭据字段错误要求重新绑定。
+	if !found || health.LastStatus == "valid" {
+		return "connected", "微信读书凭据有效"
+	}
+	if health.LastStatus == "invalid" || weReadCredentialErrorMessage(health.LastError) {
+		return "failed", "微信读书凭据已失效，请重新绑定"
+	}
+	if health.LastStatus == "error" {
+		return "degraded", "最近凭据检查异常，请查看任务记录"
+	}
+	return "degraded", "微信读书凭据状态未知，请查看任务记录"
+}
+
+// weReadCredentialErrorMessage 判断错误正文是否明确表示凭据已不可用。
+// 输入：message 是抓取或监控错误正文。
+// 输出：命中凭据、Token 或认证错误返回 true。
+// 副作用：无。
+func weReadCredentialErrorMessage(message string) bool {
+	// 1. 仅识别需要重新扫码的认证类关键词，普通网络错误保持黄色警告。
+	message = strings.ToLower(strings.TrimSpace(message))
+	for _, keyword := range []string{"凭据", "refresh_token", "access_token", "认证失效", "重新绑定"} {
+		if strings.Contains(message, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 // StartLogin 创建或复用一个五分钟微信读书扫码流程。

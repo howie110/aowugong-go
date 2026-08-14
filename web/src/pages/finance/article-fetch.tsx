@@ -342,11 +342,11 @@ function weReadStateLabel(value?: WeReadArticleBinding["state"]) {
     disconnected: "未绑定",
     waiting: "等待扫码",
     scanned: "已扫码",
-    connected: "已绑定",
-    degraded: "抓取异常",
+    connected: "可用",
+    degraded: "检查异常",
     expired: "二维码已过期",
     declined: "已取消",
-    failed: "需重绑",
+    failed: "已失效",
   };
   return value ? labels[value] : "未绑定";
 }
@@ -364,7 +364,7 @@ function sourceDisplay(source: ArticleSource, weRead: WeReadArticleBinding | nul
   // 1. 微信读书来源优先使用当前绑定状态，避免旧抓取状态显示错误。
   if (source.source_type === "weread" && weRead) {
     if (weRead.state === "connected") {
-      return { label: "bound", message: "微信读书凭据已保存", variant: "success" as const };
+      return { label: "正常", message: "微信读书凭据有效", variant: "success" as const };
     }
     if (weRead.state === "degraded") {
       return { label: "warning", message: weRead.message, variant: "warning" as const };

@@ -267,7 +267,7 @@ func (r *Registry) Run(ctx context.Context, name string, source Source) (Result,
 
 	// 5. 失败时发送固定四段微信通知，并返回原始任务错误。
 	if outcome.err != nil {
-		r.notifyFailure(definition.Name, finishedAt, outcome.err)
+		r.notifyFailure(definition.Name, executionID, finishedAt, outcome.err)
 		return result, fmt.Errorf("执行任务 %s: %w", definition.Name, outcome.err)
 	}
 	return result, nil
@@ -357,13 +357,20 @@ func (r *Registry) finishExecution(ctx context.Context, result Result, runErr er
 }
 
 // notifyFailure 使用固定四段格式发送任务失败微信。
-// 输入：name 是任务名，failedAt 是失败时间，runErr 是任务错误。
+// 输入：name 是任务名，executionID 是本次记录，failedAt 是失败时间，runErr 是任务错误。
 // 输出：无，通知自身失败只写日志，不覆盖任务错误。
-// 副作用：调用统一 notification service 发送微信并写通知日志。
-func (r *Registry) notifyFailure(name string, failedAt time.Time, runErr error) {
+// 副作用：读取 PostgreSQL；新故障调用统一 notification service 发送微信并写通知日志。
+func (r *Registry) notifyFailure(name string, executionID int64, failedAt time.Time, runErr error) {
 	// 1. 未配置通知服务时记录警告并结束。
 	if r.notifier == nil {
 		r.logger.Warn("任务失败通知未配置", "job", name)
+		return
+	}
+	shouldNotify, err := r.shouldNotifyFailure(context.Background(), name, executionID, runErr.Error())
+	if err != nil {
+		r.logger.Warn("检查重复任务失败通知失败", "job", name, "error", err)
+	} else if !shouldNotify {
+		r.logger.Info("跳过重复任务失败通知", "job", name)
 		return
 	}
 
@@ -375,4 +382,23 @@ func (r *Registry) notifyFailure(name string, failedAt time.Time, runErr error) 
 	if err := r.notifier.Text(ctx, []string{"AOWUGONG", "JOB", "ERROR", name}, body, ""); err != nil {
 		r.logger.Error("发送任务失败通知失败", "job", name, "error", err)
 	}
+}
+
+// shouldNotifyFailure 判断本次失败是否是成功后出现的新故障或错误内容已经变化。
+// 输入：ctx 控制查询，name 和 executionID 定位任务，errorMessage 是本次错误正文。
+// 输出：首次失败、上次成功或错误变化返回 true；连续相同失败返回 false。
+// 副作用：只读 PostgreSQL job_execution。
+func (r *Registry) shouldNotifyFailure(ctx context.Context, name string, executionID int64, errorMessage string) (bool, error) {
+	// 1. 读取本次执行之前最近一条结果，避免相同故障按调度频率重复通知。
+	var previousStatus, previousError string
+	err := r.db.QueryRowContext(ctx, `SELECT status, COALESCE(error_message, '')
+		FROM job_execution WHERE job_id = ? AND id < ? ORDER BY id DESC LIMIT 1`,
+		name, executionID).Scan(&previousStatus, &previousError)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return true, fmt.Errorf("读取任务 %s 上次执行结果: %w", name, err)
+	}
+	return previousStatus != "failed" || previousError != errorMessage, nil
 }
