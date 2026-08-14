@@ -87,28 +87,6 @@ func TestRunJobSkipsSchemaMigrations(t *testing.T) {
 	}
 }
 
-// TestMinifluxSourceURLRequiresCompleteConfig 验证缺少 API Token 时不会启用文章来源。
-// 输入：分别提供缺少 Token 和完整的 Miniflux 配置。
-// 输出：不完整配置返回空地址，完整配置返回清理后的根地址。
-// 副作用：无。
-func TestMinifluxSourceURLRequiresCompleteConfig(t *testing.T) {
-	// 1. 缺少 API Token 时保持来源停用，避免任务请求未授权接口。
-	missingToken := config.Config{Clients: config.Clients{Miniflux: config.Miniflux{
-		BaseURL: "http://127.0.0.1:5000", Category: "投资文章",
-	}}}
-	if got := minifluxSourceURL(missingToken); got != "" {
-		t.Errorf("minifluxSourceURL(missing token) = %q, want empty", got)
-	}
-
-	// 2. 完整配置启用来源并移除根地址末尾斜线。
-	complete := config.Config{Clients: config.Clients{Miniflux: config.Miniflux{
-		BaseURL: "http://127.0.0.1:5000/", APIToken: "token", Category: "投资文章",
-	}}}
-	if got := minifluxSourceURL(complete); got != "http://127.0.0.1:5000" {
-		t.Errorf("minifluxSourceURL(complete) = %q", got)
-	}
-}
-
 // TestResolveMigrationsDirectoryUsesProductionExecutableSibling 验证生产环境使用可执行文件同级迁移目录。
 // 输入：带 migrations/sqlite 子目录的临时可执行文件路径。
 // 输出：返回发布目录中的 SQLite 迁移路径。

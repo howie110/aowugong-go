@@ -19,6 +19,11 @@ type promptFeedbackPayload struct {
 	PromptFeedback string `json:"prompt_feedback"`
 }
 
+type weReadAccountPayload struct {
+	FetchIntervalMinutes int `json:"fetch_interval_minutes"`
+	FetchLimit           int `json:"fetch_limit"`
+}
+
 // registerArticleAnalysisRoutes 注册文章抓取、分析、报告和反馈接口。
 // 输入：router 是 API 路由器，authService 和 rbacService 提供访问控制，service 提供文章业务。
 // 输出：无。
@@ -38,11 +43,112 @@ func registerArticleAnalysisRoutes(router chi.Router, authService *auth.Service,
 	fetch.Get("/api/v1/finance/article-analysis/sources", handlers.sources)
 	fetch.Post("/api/v1/finance/article-analysis/sync", handlers.sync)
 	fetch.Post("/api/v1/finance/article-analysis/analyze", handlers.analyze)
+	fetch.Get("/api/v1/finance/article-analysis/weread", handlers.weReadBinding)
+	fetch.Post("/api/v1/finance/article-analysis/weread/login", handlers.startWeReadLogin)
+	fetch.Get("/api/v1/finance/article-analysis/weread/login", handlers.pollWeReadLogin)
+	fetch.Get("/api/v1/finance/article-analysis/weread/login/qr.png", handlers.weReadLoginQR)
+	fetch.Post("/api/v1/finance/article-analysis/weread/accounts/refresh", handlers.refreshWeReadAccounts)
+	fetch.Patch("/api/v1/finance/article-analysis/weread/accounts/{accountID}", handlers.updateWeReadAccount)
 
 	// 3. 人工反馈只要求登录，处理器内额外校验 admin 角色。
 	feedback := router.With(authenticate(authService))
 	feedback.Post("/api/v1/finance/article-analysis/articles/{articleID}/prompt-feedback", handlers.feedback)
 	feedback.Patch("/api/v1/finance/article-analysis/articles/{articleID}/prompt-feedback", handlers.feedback)
+}
+
+// weReadBinding 返回微信读书连接和书架公众号状态。
+// 输入：request 已通过文章抓取权限校验。
+// 输出：写入 WeReadBinding JSON。
+// 副作用：读取 PostgreSQL 和内存扫码状态。
+func (h articleAnalysisHandlers) weReadBinding(w http.ResponseWriter, request *http.Request) {
+	// 1. 调用统一文章服务并转换读取错误。
+	result, err := h.service.WeReadBinding(request.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "读取微信读书绑定状态失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// startWeReadLogin 创建或复用微信读书扫码流程。
+// 输入：request 已通过文章抓取权限校验。
+// 输出：写入公开扫码状态。
+// 副作用：调用微信上游并修改进程内扫码状态。
+func (h articleAnalysisHandlers) startWeReadLogin(w http.ResponseWriter, request *http.Request) {
+	// 1. 创建二维码并返回等待状态。
+	result, err := h.service.StartWeReadLogin(request.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "upstream_error", "创建微信读书二维码失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// pollWeReadLogin 推进一次微信读书扫码流程。
+// 输入：request 已通过文章抓取权限校验。
+// 输出：写入最新扫码状态。
+// 副作用：调用微信上游，成功时加密写 PostgreSQL。
+func (h articleAnalysisHandlers) pollWeReadLogin(w http.ResponseWriter, request *http.Request) {
+	// 1. 执行一次轮询并返回明确状态。
+	result, err := h.service.PollWeReadLogin(request.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "upstream_error", "确认微信读书扫码状态失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// weReadLoginQR 返回当前微信读书二维码 PNG。
+// 输入：request 已通过文章抓取权限校验。
+// 输出：写入 image/png。
+// 副作用：读取内存扫码状态并写 HTTP 响应。
+func (h articleAnalysisHandlers) weReadLoginQR(w http.ResponseWriter, request *http.Request) {
+	// 1. 生成二维码并禁止浏览器缓存一次性内容。
+	content, err := h.service.WeReadLoginQRPNG()
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "微信读书二维码不存在或已过期")
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
+}
+
+// refreshWeReadAccounts 重新发现微信读书书架公众号。
+// 输入：request 已通过文章抓取权限校验。
+// 输出：写入最新 WeReadAccount 数组。
+// 副作用：调用微信读书并写 PostgreSQL。
+func (h articleAnalysisHandlers) refreshWeReadAccounts(w http.ResponseWriter, request *http.Request) {
+	// 1. 刷新书架并返回完整账号列表。
+	result, err := h.service.RefreshWeReadAccounts(request.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "upstream_error", "刷新微信读书公众号失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// updateWeReadAccount 更新一个公众号的投资文章抓取策略。
+// 输入：路径 accountID 和 JSON 抓取频率、单次数量。
+// 输出：成功时写入 status=ok。
+// 副作用：写 PostgreSQL。
+func (h articleAnalysisHandlers) updateWeReadAccount(w http.ResponseWriter, request *http.Request) {
+	// 1. 解析策略并调用统一服务入口。
+	var payload weReadAccountPayload
+	if err := decodeJSON(w, request, &payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "公众号抓取策略请求无效")
+		return
+	}
+	settings := articleanalysis.WeReadAccountSettings{
+		FetchIntervalMinutes: payload.FetchIntervalMinutes,
+		FetchLimit:           payload.FetchLimit,
+	}
+	if err := h.service.SetWeReadAccountSettings(request.Context(), chi.URLParam(request, "accountID"), settings); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "更新公众号抓取策略失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // summary 返回投资文章分析页面摘要。
@@ -202,10 +308,10 @@ func (h articleAnalysisHandlers) report(w http.ResponseWriter, request *http.Req
 	writeJSON(w, http.StatusOK, result)
 }
 
-// sync 手动读取 Miniflux 并可继续执行模型分析。
+// sync 手动读取微信读书公众号并可继续执行模型分析。
 // 输入：fetch_limit、analyze 和 analysis_limit 是可选查询参数。
 // 输出：写入 SyncResult。
-// 副作用：调用 Miniflux、DeepSeek，写入 PostgreSQL 和 HTTP 响应。
+// 副作用：调用微信读书、微信公众号原文和 DeepSeek，写入 PostgreSQL 和 HTTP 响应。
 func (h articleAnalysisHandlers) sync(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析批量上限和布尔开关。
 	fetchLimit, ok := boundedQueryInt(w, request, "fetch_limit", 30, 1, 100)

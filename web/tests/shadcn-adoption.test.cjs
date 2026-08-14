@@ -22,6 +22,7 @@ test("补齐当前页面需要的 shadcn 基础组件", () => {
     "calendar",
     "checkbox",
     "collapsible",
+    "dialog",
     "dropdown-menu",
     "empty",
     "field",

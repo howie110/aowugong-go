@@ -8,7 +8,7 @@
 - 前端：React、TypeScript、Vite、shadcn/ui、Tailwind CSS
 - 数据库：PostgreSQL 15+，连接池默认 `8/4`，时区 `Asia/Shanghai`
 - 调度：`robfig/cron/v3`，任务统一经过并发锁、超时、panic 恢复、日志、结果入库和失败微信通知
-- 外部服务：Miniflux、DeepSeek、Tushare、OpeniLink Hub、微信读书、阿里云 OCR
+- 外部服务：微信读书、微信公众号原文、Miniflux、DeepSeek、Tushare、OpeniLink Hub、阿里云 OCR
 - 生产：Linux amd64 发布产物、systemd；服务器无需 Go、Node、Python、MySQL 或 Docker
 
 ## 目录
@@ -70,6 +70,8 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 ./scripts/stop-local.ps1
 ```
 
+投资文章不再依赖 RSS 聚合接口。在“投资研究 > 投资文章抓取”中扫码绑定一个微信读书账号，服务会从书架发现公众号；人工启用的公众号由 08:00、20:00 任务各检查最近 20 篇，只为数据库未知文章读取详情和微信公众号原文。登录凭据使用 `AOWUGONG_ENCRYPTION_KEY` 派生的 AES-256-GCM 密钥加密后存入 PostgreSQL，二维码中间态只保存在当前 Go 进程内。
+
 需要补跑或修改线上数据时，通过 SSH 在服务器加载正式环境并调用统一 CLI：
 
 ```powershell
@@ -82,7 +84,7 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 
 | 时间 | 任务 | 说明 |
 |---|---|---|
-| 08:00、20:00 | `sync_investment_articles` | 从 Miniflux 同步并分析投资文章 |
+| 08:00、20:00 | `sync_investment_articles` | 从微信读书书架公众号增量抓取并分析投资文章 |
 | 09:00 | `test_crontab` | 每日任务链路测试 |
 | 22:00 | `check_service_monitors` | 服务连通性检查 |
 | 09:30 | `check_subscription_expiry_notify` | 订阅到期提醒 |

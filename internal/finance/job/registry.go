@@ -153,10 +153,10 @@ func (t *tasks) updateTushareDailyData(ctx context.Context) (string, error) {
 		result.StartDate, result.EndDate, result.MissingCount, result.SyncedCount, result.EmptyCount, result.RowCount), nil
 }
 
-// syncInvestmentArticles 同步 Miniflux 并分析当前批次待处理文章。
+// syncInvestmentArticles 同步微信读书公众号并分析当前批次待处理文章。
 // 输入：ctx 是任务超时上下文。
 // 输出：返回抓取、写入和分析摘要；来源或模型失败时返回错误。
-// 副作用：调用 Miniflux、DeepSeek 并写入 PostgreSQL。
+// 副作用：调用微信读书、微信公众号原文、DeepSeek 并写入 PostgreSQL。
 func (t *tasks) syncInvestmentArticles(ctx context.Context) (string, error) {
 	// 1. 页面手动执行优先快速返回，自动和 CLI 执行同时完成信号归类。
 	classifySignals := scheduler.SourceFromContext(ctx) != scheduler.SourceManual

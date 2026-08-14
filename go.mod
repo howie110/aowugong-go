@@ -12,7 +12,9 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/image v0.44.0
+	golang.org/x/net v0.53.0
 	modernc.org/sqlite v1.53.0
 )
 
@@ -40,7 +42,6 @@ require (
 	github.com/xuri/efp v0.0.1 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect

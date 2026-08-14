@@ -94,7 +94,7 @@ export function ArticlesCard({
                           <span className="shrink-0 text-xs text-muted-foreground">
                             {formatShortDate(article.published_at || article.created_at)}
                           </span>
-                          <span className="truncate text-sm font-medium">{article.title}</span>
+                          <ArticleTitle article={article} />
                         </div>
                       </TableCell>
                       <TableCell className="py-2">
@@ -183,7 +183,7 @@ function MobileArticleRow({
           </div>
         </div>
         <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{article.title}</div>
+          <ArticleTitle article={article} />
           <div className="mt-2 space-y-1.5">
             <MobileSignalRow label="荐" names={article.recommendation_names} tone="recommend" />
             <MobileSignalRow label="险" names={article.risk_names} tone="risk" />
@@ -191,6 +191,21 @@ function MobileArticleRow({
         </div>
       </div>
     </div>
+  );
+}
+
+// ArticleTitle 在文章标题前显示作者首字，保留完整作者数据但控制列表密度。
+// 输入：article 包含完整作者和标题。
+// 输出：返回“[作者首字] 标题”，作者为空时只显示标题。
+// 副作用：无。
+function ArticleTitle({ article }: { article: ArticleItem }) {
+  // 1. 使用 Unicode 字符数组安全读取中文作者首字。
+  const initial = Array.from(article.author?.trim() || "")[0] || "";
+  return (
+    <span className="truncate text-sm font-medium">
+      {initial ? <span className="mr-1 text-muted-foreground">[{initial}]</span> : null}
+      {article.title}
+    </span>
   );
 }
 

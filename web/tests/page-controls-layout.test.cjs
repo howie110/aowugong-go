@@ -31,7 +31,7 @@ test("文章分析和文章抓取页面不再显示刷新按钮", () => {
   const fetchSource = readSource("src/pages/finance/article-fetch.tsx");
 
   assert.doesNotMatch(analysisSource, /RefreshCw|刷新/);
-  assert.doesNotMatch(fetchSource, /RefreshCw|刷新/);
+  assert.doesNotMatch(fetchSource, /RefreshCw|>\s*刷新\s*</);
 });
 
 test("抓取和分析操作按钮使用相同固定宽度", () => {

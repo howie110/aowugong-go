@@ -35,11 +35,12 @@ type AnalysisGateway interface {
 	SimpleChat(ctx context.Context, prompt string, maxTokens int) (string, error)
 }
 
-// ServiceOptions 描述投资文章服务的当前进程 Miniflux 和模型配置。
+// ServiceOptions 描述投资文章服务的当前进程文章来源和模型配置。
 type ServiceOptions struct {
 	Model    string
 	FeedURL  string
 	Articles ArticleGateway
+	WeRead   *WeReadSource
 	Analyzer AnalysisGateway
 	Now      func() time.Time
 }
@@ -47,7 +48,7 @@ type ServiceOptions struct {
 // Sync 抓取全部启用来源，并按选项继续分析待处理文章。
 // 输入：ctx 控制处理，fetchLimit 是每来源上限，analyze 控制是否分析，analysisLimit 是分析上限。
 // 输出：返回来源、抓取、写入和分析统计；基础数据库失败时返回错误。
-// 副作用：读取 Miniflux，按需调用 DeepSeek，并写入 PostgreSQL。
+// 副作用：读取外部文章，按需调用 DeepSeek，并写入 PostgreSQL。
 func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analysisLimit int) (SyncResult, error) {
 	// 1. 读取启用来源并初始化稳定空数组结果。
 	sources, err := s.repository.sourceRecords(ctx)
@@ -62,10 +63,10 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 		fetchLimit = scheduledFetchLimit
 	}
 
-	// 2. 逐来源读取 Miniflux 数据并写入新文章，单来源错误写入统计。
+	// 2. 逐来源读取外部数据并写入新文章，部分成功项也必须正常落库。
 	for _, source := range sources {
 		if s.options.Articles == nil {
-			message := "Miniflux 客户端未配置"
+			message := "文章客户端未配置"
 			_ = s.repository.UpdateSourceStatus(ctx, source.ID, "error", message)
 			result.FailedSources = append(result.FailedSources, map[string]string{"source": source.SourceName, "error": message})
 			continue
@@ -74,12 +75,9 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 		if source.SourceType == "miniflux" && s.options.FeedURL != "" {
 			feedURL = s.options.FeedURL
 		}
-		items, err := s.options.Articles.Fetch(ctx, source.ID, feedURL, fetchLimit)
-		if err != nil {
-			message := err.Error()
-			_ = s.repository.UpdateSourceStatus(ctx, source.ID, "error", message)
-			result.FailedSources = append(result.FailedSources, map[string]string{"source": source.SourceName, "error": message})
-			continue
+		items, fetchErr := s.options.Articles.Fetch(ctx, source.ID, feedURL, fetchLimit)
+		if fetchErr != nil {
+			result.FailedSources = append(result.FailedSources, map[string]string{"source": source.SourceName, "error": fetchErr.Error()})
 		}
 		inserted, updated, unchanged := 0, 0, 0
 		for _, item := range items {
@@ -99,8 +97,12 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 				unchanged++
 			}
 		}
+		status := "success"
 		message := fmt.Sprintf("fetched=%d, inserted=%d, updated=%d, unchanged=%d", len(items), inserted, updated, unchanged)
-		if err := s.repository.UpdateSourceStatus(ctx, source.ID, "success", message); err != nil {
+		if fetchErr != nil {
+			status, message = "error", fetchErr.Error()
+		}
+		if err := s.repository.UpdateSourceStatus(ctx, source.ID, status, message); err != nil {
 			return SyncResult{}, err
 		}
 		result.FetchedCount += len(items)
@@ -124,15 +126,16 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 // SyncScheduled 执行生产任务使用的完整抓取和分批分析流程。
 // 输入：ctx 控制处理，classifySignals 控制是否补齐六十天信号概念映射。
 // 输出：返回累计同步统计；来源失败、模型缺失或仍有待分析文章时返回错误。
-// 副作用：调用 Miniflux、DeepSeek，并写入 PostgreSQL。
+// 副作用：调用微信读书、微信公众号原文、DeepSeek，并写入 PostgreSQL。
 func (s *Service) SyncScheduled(ctx context.Context, classifySignals bool) (SyncResult, error) {
 	// 1. 抓取全部来源的当前文章，来源失败时保留明细并立即升级为任务错误。
 	result, err := s.Sync(ctx, scheduledFetchLimit, false, 0)
 	if err != nil {
 		return result, fmt.Errorf("抓取投资文章: %w", err)
 	}
+	fetchFailure := ""
 	if len(result.FailedSources) > 0 {
-		return result, fmt.Errorf("投资文章抓取存在失败来源: %s", formatFailedSources(result.FailedSources))
+		fetchFailure = formatFailedSources(result.FailedSources)
 	}
 
 	// 2. 读取抓取后 pending；模型未配置时保留数据并明确失败告警。
@@ -175,6 +178,9 @@ func (s *Service) SyncScheduled(ctx context.Context, classifySignals bool) (Sync
 
 	// 5. 自动或 CLI 任务补扫六十天未知名称；页面手动任务跳过，避免额外等待。
 	if !classifySignals {
+		if fetchFailure != "" {
+			return result, fmt.Errorf("投资文章抓取存在失败来源: %s", fetchFailure)
+		}
 		return result, nil
 	}
 	classifiedCount, err := s.classifySignalAliases(ctx, DefaultTargetDays)
@@ -182,18 +188,18 @@ func (s *Service) SyncScheduled(ctx context.Context, classifySignals bool) (Sync
 		return result, fmt.Errorf("归类投资信号: %w", err)
 	}
 	result.ClassifiedAliasCount += classifiedCount
+	if fetchFailure != "" {
+		return result, fmt.Errorf("投资文章抓取存在失败来源: %s", fetchFailure)
+	}
 	return result, nil
 }
 
-// validateScheduledSourceFreshness 检查定时读取的 Miniflux 上游是否长期没有新文章。
-// 输入：result 是本次 Miniflux 读取统计，包含上游最新发布时间。
-// 输出：空分类或最新文章超过固定阈值时返回错误；正常或无来源时返回 nil。
+// validateScheduledSourceFreshness 检查本次新发现的微信读书文章是否已经长期过旧。
+// 输入：result 是本次增量读取统计，包含新发现文章的最新发布时间。
+// 输出：新发现文章超过固定阈值时返回错误；没有新文章时返回 nil。
 // 副作用：无，不访问数据库、不发送通知。
 func (s *Service) validateScheduledSourceFreshness(result SyncResult) error {
-	// 1. 已启用来源却没有任何文章时直接失败，避免空分类被长期静默忽略。
-	if result.SourceCount > 0 && result.FetchedCount == 0 {
-		return fmt.Errorf("Miniflux 未返回任何投资文章，请检查订阅和分类")
-	}
+	// 1. 微信读书来源只返回数据库未知文章，本次为零表示没有增量而不是上游故障。
 	if strings.TrimSpace(result.LatestFetchedAt) == "" {
 		return nil
 	}
@@ -209,7 +215,7 @@ func (s *Service) validateScheduledSourceFreshness(result SyncResult) error {
 	}
 	lag := now().UTC().Sub(latest.UTC())
 	if lag > scheduledSourceStaleAfter {
-		return fmt.Errorf("Miniflux 上游最新文章过旧: 最新=%s, 已滞后=%s, 请检查订阅刷新状态", result.LatestFetchedAt, formatDurationHours(lag))
+		return fmt.Errorf("微信读书上游最新文章过旧: 最新=%s, 已滞后=%s, 请检查公众号更新状态", result.LatestFetchedAt, formatDurationHours(lag))
 	}
 	return nil
 }
@@ -404,7 +410,7 @@ func (s *Service) FetchSummary(ctx context.Context) (PageSummary, error) {
 	// 2. 组装抓取页状态卡片。
 	return PageSummary{
 		Title:       "投资文章抓取",
-		Description: "管理 Miniflux 信息源，读取文章并触发 DeepSeek 结构化分析。",
+		Description: "管理微信读书公众号，读取新文章并触发 DeepSeek 结构化分析。",
 		Metrics: []PageMetric{
 			{Label: "来源", Value: strconv.Itoa(counts.SourceCount), Detail: "启用的信息源", Status: "normal"},
 			{Label: "文章", Value: strconv.Itoa(counts.ArticleCount), Detail: "已入库文章", Status: "normal"},

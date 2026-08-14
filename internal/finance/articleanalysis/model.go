@@ -160,6 +160,41 @@ type SyncResult struct {
 	PendingCount         int                 `json:"pending_count"`
 }
 
+// WeReadAccount 描述可参与投资文章抓取的微信读书书架公众号。
+type WeReadAccount struct {
+	AccountID            string `json:"account_id"`
+	Title                string `json:"title"`
+	CoverURL             string `json:"cover_url,omitempty"`
+	Enabled              bool   `json:"enabled"`
+	FetchIntervalMinutes int    `json:"fetch_interval_minutes"`
+	FetchLimit           int    `json:"fetch_limit"`
+	LastCheckedAt        string `json:"last_checked_at,omitempty"`
+	ArticleCount         int    `json:"article_count"`
+	TodayInsertedCount   int    `json:"today_inserted_count"`
+	PendingCount         int    `json:"pending_count"`
+	LatestFetchedAt      string `json:"latest_fetched_at,omitempty"`
+}
+
+// WeReadAccountSettings 描述单个公众号抓取节奏。
+type WeReadAccountSettings struct {
+	FetchIntervalMinutes int `json:"fetch_interval_minutes"`
+	FetchLimit           int `json:"fetch_limit"`
+}
+
+// WeReadBinding 描述文章抓取页展示的微信读书连接和公众号状态。
+type WeReadBinding struct {
+	State    string          `json:"state"`
+	Message  string          `json:"message"`
+	Accounts []WeReadAccount `json:"accounts"`
+}
+
+// WeReadLoginStatus 描述单个内存扫码流程的公开状态。
+type WeReadLoginStatus struct {
+	State     string `json:"state"`
+	Message   string `json:"message"`
+	ExpiresAt string `json:"expires_at,omitempty"`
+}
+
 // AnalysisBatchResult 描述一批待分析文章的处理统计。
 type AnalysisBatchResult struct {
 	AnalyzedCount int              `json:"analyzed_count"`

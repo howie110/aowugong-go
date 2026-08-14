@@ -236,12 +236,12 @@ func TestServiceScheduledSyncFailsWithPendingArticles(t *testing.T) {
 // 输出：返回明确的密钥缺失错误。
 // 副作用：执行模拟 SQLite 来源、计数和统计查询。
 
-// TestServiceScheduledSyncFailsWhenArticleLatestIsStale 验证 Miniflux 上游长期停更时任务失败通知。
-// 输入：Miniflux 返回旧缓存文章，当前时间超过旧文章 72 小时。
+// TestServiceScheduledSyncFailsWhenArticleLatestIsStale 验证微信读书上游长期停更时任务失败通知。
+// 输入：微信读书返回旧缓存文章，当前时间超过旧文章 72 小时。
 // 输出：返回包含上游最新文章过旧的错误。
 // 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestServiceScheduledSyncFailsWhenArticleLatestIsStale(t *testing.T) {
-	// 1. 创建默认来源，并用 Miniflux 旧缓存与固定模型完成基础同步流程。
+	// 1. 创建默认来源，并用旧缓存与固定模型完成基础同步流程。
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
@@ -255,7 +255,7 @@ func TestServiceScheduledSyncFailsWhenArticleLatestIsStale(t *testing.T) {
 
 	// 2. 执行生产定时入口，要求旧缓存不再被当成成功抓取。
 	result, err := service.SyncScheduled(ctx, false)
-	if err == nil || !strings.Contains(err.Error(), "Miniflux 上游最新文章过旧") {
+	if err == nil || !strings.Contains(err.Error(), "微信读书上游最新文章过旧") {
 		t.Fatalf("SyncScheduled() error = %v, result = %#v", err, result)
 	}
 	if result.LatestFetchedAt != "2026-07-29 06:10:08" {
@@ -263,11 +263,11 @@ func TestServiceScheduledSyncFailsWhenArticleLatestIsStale(t *testing.T) {
 	}
 }
 
-// TestServiceScheduledSyncFailsWhenMinifluxReturnsNoArticles 验证自动任务不会把空上游当成成功。
-// 输入：已启用 Miniflux 来源，但客户端返回零篇文章。
-// 输出：返回明确的空分类错误，供任务包装器发送微信通知。
+// TestServiceScheduledSyncAllowsNoNewWeReadArticles 验证微信读书没有增量时定时任务正常完成。
+// 输入：已启用文章来源，但客户端返回零篇文章。
+// 输出：返回零抓取且没有错误，避免每天两次无增量时误报微信通知。
 // 副作用：创建并写入隔离 SQLite 测试 schema。
-func TestServiceScheduledSyncFailsWhenMinifluxReturnsNoArticles(t *testing.T) {
+func TestServiceScheduledSyncAllowsNoNewWeReadArticles(t *testing.T) {
 	// 1. 创建启用来源，并使用返回空集合的文章客户端。
 	ctx := context.Background()
 	db := testdatabase.Open(t)
@@ -277,10 +277,10 @@ func TestServiceScheduledSyncFailsWhenMinifluxReturnsNoArticles(t *testing.T) {
 	}
 	service := NewService(repository, ServiceOptions{Articles: &recordingArticleGateway{}})
 
-	// 2. 自动任务必须失败，避免长时间无文章却没有通知。
+	// 2. 自动任务正常结束，真实接口异常仍由 Fetch 错误进入失败通知。
 	result, err := service.SyncScheduled(ctx, false)
-	if err == nil || !strings.Contains(err.Error(), "Miniflux 未返回任何投资文章") {
-		t.Fatalf("SyncScheduled() error = %v, result = %#v", err, result)
+	if err != nil || result.FetchedCount != 0 {
+		t.Fatalf("SyncScheduled() = %#v, %v", result, err)
 	}
 }
 

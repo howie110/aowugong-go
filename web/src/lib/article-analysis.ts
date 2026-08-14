@@ -90,6 +90,32 @@ export type AnalysisBatchResult = {
   items: Array<Record<string, unknown>>;
 };
 
+export type WeReadArticleAccount = {
+  account_id: string;
+  title: string;
+  cover_url?: string | null;
+  enabled: boolean;
+  fetch_interval_minutes: number;
+  fetch_limit: number;
+  last_checked_at?: string | null;
+  article_count: number;
+  today_inserted_count: number;
+  pending_count: number;
+  latest_fetched_at?: string | null;
+};
+
+export type WeReadArticleBinding = {
+  state: "disconnected" | "waiting" | "scanned" | "connected" | "degraded" | "expired" | "declined" | "failed";
+  message: string;
+  accounts: WeReadArticleAccount[];
+};
+
+export type WeReadLoginStatus = {
+  state: WeReadArticleBinding["state"];
+  message: string;
+  expires_at?: string | null;
+};
+
 export type JobRunResult = {
   id: number;
   name: string;
@@ -106,6 +132,37 @@ export async function fetchArticleFetchSummary() {
   return requestJson<{ title: string; description: string; metrics: Array<{ label: string; value: string; detail: string }> }>(
     "/api/v1/finance/article-analysis/fetch-summary",
   );
+}
+
+export async function fetchWeReadArticleBinding() {
+  return requestJson<WeReadArticleBinding>("/api/v1/finance/article-analysis/weread");
+}
+
+export async function startWeReadArticleLogin() {
+  return requestJson<WeReadLoginStatus>("/api/v1/finance/article-analysis/weread/login", { method: "POST" });
+}
+
+export async function pollWeReadArticleLogin() {
+  return requestJson<WeReadLoginStatus>("/api/v1/finance/article-analysis/weread/login");
+}
+
+export async function fetchWeReadArticleQR() {
+  const response = await authorizedFetch("/api/v1/finance/article-analysis/weread/login/qr.png", { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error("读取微信读书二维码失败");
+  }
+  return response.blob();
+}
+
+export async function refreshWeReadArticleAccounts() {
+  return requestJson<WeReadArticleAccount[]>("/api/v1/finance/article-analysis/weread/accounts/refresh", { method: "POST" });
+}
+
+export async function saveWeReadArticleAccountSettings(accountId: string, fetchIntervalMinutes: number, fetchLimit: number) {
+  return requestJson<{ status: string }>(`/api/v1/finance/article-analysis/weread/accounts/${encodeURIComponent(accountId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ fetch_interval_minutes: fetchIntervalMinutes, fetch_limit: fetchLimit }),
+  });
 }
 
 export async function fetchArticleReport(targetDays = 60, marketDays = 3) {

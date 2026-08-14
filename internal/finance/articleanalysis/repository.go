@@ -295,7 +295,7 @@ func (r *Repository) Sources(ctx context.Context, activeOnly bool) ([]Source, er
 	return results, nil
 }
 
-// sourceRecords 返回同步任务需要的启用来源和 Miniflux 地址。
+// sourceRecords 返回同步任务需要的启用来源及其内部地址。
 // 输入：ctx 控制查询。
 // 输出：返回内部来源记录；失败时返回错误。
 // 副作用：只读 PostgreSQL。
