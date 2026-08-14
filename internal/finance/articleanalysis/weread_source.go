@@ -201,13 +201,22 @@ func (s *WeReadSource) PollLogin(ctx context.Context) (WeReadLoginStatus, error)
 		return publicWeReadLoginStatus(flow), nil
 	}
 
-	// 3. 确认后交换、加密保存凭据，并立即发现书架公众号。
-	credentials, err := s.client.ExchangeLoginCode(ctx, result.Code)
+	// 3. 确认后复用既有设备身份交换凭据，避免每次扫码被识别为新设备。
+	previous, found, err := s.loadOptionalCredentials(ctx)
+	if err != nil {
+		s.updateLoginFlow(flow, "failed", "读取既有微信读书设备身份失败", true)
+		return publicWeReadLoginStatus(flow), err
+	}
+	var previousPointer *client.WeReadArticleCredentials
+	if found {
+		previousPointer = &previous
+	}
+	credentials, err := s.client.ExchangeLoginCode(ctx, result.Code, previousPointer)
 	if err != nil {
 		s.updateLoginFlow(flow, "failed", "微信读书登录失败", true)
 		return publicWeReadLoginStatus(flow), fmt.Errorf("交换微信读书登录凭据: %w", err)
 	}
-	if err := s.saveCredentials(ctx, credentials); err != nil {
+	if err := s.saveCredentials(ctx, credentials, true); err != nil {
 		s.updateLoginFlow(flow, "failed", "保存微信读书凭据失败", true)
 		return publicWeReadLoginStatus(flow), err
 	}
@@ -260,6 +269,52 @@ func (s *WeReadSource) RefreshAccounts(ctx context.Context) ([]WeReadAccount, er
 		return nil, err
 	}
 	return s.refreshAccountsWithCredentials(ctx, credentials)
+}
+
+// CheckCredential 检查扫码凭据能否读取书架并累计实际有效寿命。
+// 输入：ctx 控制数据库和微信读书请求。
+// 输出：返回本次状态、绑定时长、检查和自动刷新次数。
+// 副作用：调用微信读书，可能刷新并加密保存 Token，写入健康统计。
+func (s *WeReadSource) CheckCredential(ctx context.Context) (WeReadCredentialCheckResult, error) {
+	// 1. 串行读取凭据并通过书架接口验证完整认证链路。
+	s.operationMutex.Lock()
+	defer s.operationMutex.Unlock()
+	credentials, err := s.loadCredentials(ctx)
+	if err != nil {
+		return WeReadCredentialCheckResult{}, err
+	}
+	original := credentials
+	accounts, checkErr := s.client.DiscoverPublicAccounts(ctx, &credentials)
+	if credentials != original {
+		if saveErr := s.saveCredentials(ctx, credentials, false); saveErr != nil {
+			checkErr = errors.Join(checkErr, saveErr)
+		}
+	}
+
+	// 2. 只把明确认证拒绝记为失效，网络和上游异常保留为检查错误。
+	status, message := "valid", ""
+	if checkErr != nil {
+		status, message = "error", checkErr.Error()
+		if errors.Is(checkErr, client.ErrWeReadArticleAuth) || errors.Is(checkErr, client.ErrWeReadArticleVerification) {
+			status = "invalid"
+		}
+	}
+	checkedAt := time.Now()
+	if err := s.repository.recordWeReadCredentialCheck(ctx, status, message, checkedAt); err != nil {
+		return WeReadCredentialCheckResult{}, errors.Join(checkErr, err)
+	}
+	health, found, err := s.repository.weReadCredentialHealth(ctx)
+	if err != nil {
+		return WeReadCredentialCheckResult{}, errors.Join(checkErr, err)
+	}
+	if !found {
+		return WeReadCredentialCheckResult{}, fmt.Errorf("微信读书凭据健康记录不存在")
+	}
+	result := buildWeReadCredentialCheckResult(health, checkedAt, len(accounts))
+	if checkErr != nil {
+		return result, checkErr
+	}
+	return result, nil
 }
 
 // SetAccountEnabled 更新一个公众号是否参与投资文章抓取。
@@ -374,7 +429,7 @@ func (s *WeReadSource) Fetch(ctx context.Context, sourceID int64, _ string, limi
 
 	// 4. 自动刷新发生时先持久化新凭据，再返回成功项和可通知的部分失败。
 	if credentials != originalCredentials {
-		if saveErr := s.saveCredentials(ctx, credentials); saveErr != nil {
+		if saveErr := s.saveCredentials(ctx, credentials, false); saveErr != nil {
 			failures = append(failures, saveErr.Error())
 		}
 	}
@@ -394,7 +449,7 @@ func (s *WeReadSource) refreshAccountsWithCredentials(ctx context.Context, crede
 	original := credentials
 	discovered, err := s.client.DiscoverPublicAccounts(ctx, &credentials)
 	if credentials != original {
-		if saveErr := s.saveCredentials(ctx, credentials); saveErr != nil {
+		if saveErr := s.saveCredentials(ctx, credentials, false); saveErr != nil {
 			return nil, saveErr
 		}
 	}
@@ -411,11 +466,11 @@ func (s *WeReadSource) refreshAccountsWithCredentials(ctx context.Context, crede
 	return s.repository.listWeReadAccounts(ctx, false)
 }
 
-// saveCredentials 加密并保存微信读书凭据。
-// 输入：ctx 控制写入，credentials 是待保存明文。
+// saveCredentials 加密并保存微信读书凭据和绑定生命周期。
+// 输入：ctx 控制写入，credentials 是待保存明文，newBinding 表示本次来自重新扫码。
 // 输出：返回加密或写入错误。
 // 副作用：读取系统随机源并写 PostgreSQL。
-func (s *WeReadSource) saveCredentials(ctx context.Context, credentials client.WeReadArticleCredentials) error {
+func (s *WeReadSource) saveCredentials(ctx context.Context, credentials client.WeReadArticleCredentials, newBinding bool) error {
 	// 1. 序列化后使用 AES-256-GCM 和固定 AAD 认证加密。
 	if err := credentials.Validate(); err != nil {
 		return err
@@ -434,7 +489,7 @@ func (s *WeReadSource) saveCredentials(ctx context.Context, credentials client.W
 	}
 	envelope := append([]byte(nil), nonce...)
 	envelope = gcm.Seal(envelope, nonce, plaintext, []byte(weReadCredentialAAD))
-	return s.repository.saveWeReadCredentialCiphertext(ctx, envelope, weReadCredentialVersion)
+	return s.repository.saveWeReadCredentialCiphertext(ctx, envelope, weReadCredentialVersion, newBinding)
 }
 
 // loadCredentials 读取并解密微信读书凭据。
@@ -442,28 +497,44 @@ func (s *WeReadSource) saveCredentials(ctx context.Context, credentials client.W
 // 输出：返回完整凭据；未绑定或密文无效时返回错误。
 // 副作用：只读 PostgreSQL。
 func (s *WeReadSource) loadCredentials(ctx context.Context) (client.WeReadArticleCredentials, error) {
-	// 1. 读取固定版本密文并拆分 nonce 和认证密文。
-	envelope, version, found, err := s.repository.loadWeReadCredentialCiphertext(ctx)
+	// 1. 读取可选凭据并把未绑定状态转换为明确错误。
+	credentials, found, err := s.loadOptionalCredentials(ctx)
 	if err != nil {
 		return client.WeReadArticleCredentials{}, err
 	}
 	if !found {
 		return client.WeReadArticleCredentials{}, fmt.Errorf("尚未绑定微信读书")
 	}
+	return credentials, nil
+}
+
+// loadOptionalCredentials 读取可选的微信读书加密凭据。
+// 输入：ctx 控制查询。
+// 输出：返回凭据、是否存在和错误；未绑定不是错误。
+// 副作用：只读 PostgreSQL。
+func (s *WeReadSource) loadOptionalCredentials(ctx context.Context) (client.WeReadArticleCredentials, bool, error) {
+	// 1. 读取固定版本密文并拆分 nonce 和认证密文。
+	envelope, version, found, err := s.repository.loadWeReadCredentialCiphertext(ctx)
+	if err != nil {
+		return client.WeReadArticleCredentials{}, false, err
+	}
+	if !found {
+		return client.WeReadArticleCredentials{}, false, nil
+	}
 	if version != weReadCredentialVersion {
-		return client.WeReadArticleCredentials{}, fmt.Errorf("微信读书凭据版本 %d 不受支持", version)
+		return client.WeReadArticleCredentials{}, false, fmt.Errorf("微信读书凭据版本 %d 不受支持", version)
 	}
 	gcm, err := s.credentialGCM()
 	if err != nil {
-		return client.WeReadArticleCredentials{}, err
+		return client.WeReadArticleCredentials{}, false, err
 	}
 	if len(envelope) < gcm.NonceSize()+gcm.Overhead() {
-		return client.WeReadArticleCredentials{}, fmt.Errorf("微信读书凭据密文长度不足")
+		return client.WeReadArticleCredentials{}, false, fmt.Errorf("微信读书凭据密文长度不足")
 	}
 	nonce, ciphertext := envelope[:gcm.NonceSize()], envelope[gcm.NonceSize():]
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, []byte(weReadCredentialAAD))
 	if err != nil {
-		return client.WeReadArticleCredentials{}, fmt.Errorf("解密微信读书凭据: %w", err)
+		return client.WeReadArticleCredentials{}, false, fmt.Errorf("解密微信读书凭据: %w", err)
 	}
 
 	// 2. 严格解码唯一凭据结构并再次校验。
@@ -471,9 +542,12 @@ func (s *WeReadSource) loadCredentials(ctx context.Context) (client.WeReadArticl
 	decoder := json.NewDecoder(strings.NewReader(string(plaintext)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&credentials); err != nil {
-		return client.WeReadArticleCredentials{}, fmt.Errorf("解析微信读书凭据: %w", err)
+		return client.WeReadArticleCredentials{}, false, fmt.Errorf("解析微信读书凭据: %w", err)
 	}
-	return credentials, credentials.Validate()
+	if err := credentials.Validate(); err != nil {
+		return client.WeReadArticleCredentials{}, false, err
+	}
+	return credentials, true, nil
 }
 
 // credentialGCM 创建微信读书凭据使用的 AES-256-GCM。
@@ -517,6 +591,46 @@ func (s *WeReadSource) updateLoginFlow(flow *weReadLoginFlow, state, message str
 func publicWeReadLoginStatus(flow *weReadLoginFlow) WeReadLoginStatus {
 	// 1. 仅返回页面需要的状态、说明和有效期。
 	return WeReadLoginStatus{State: flow.state, Message: flow.message, ExpiresAt: flow.expiresAt.Format(time.RFC3339)}
+}
+
+// buildWeReadCredentialCheckResult 把数据库累计值转换为任务可展示的健康摘要。
+// 输入：health 是持久统计，checkedAt 是本次时间，accountCount 是成功读取的公众号数。
+// 输出：返回包含实际持续时间的检查结果。
+// 副作用：无。
+func buildWeReadCredentialCheckResult(health weReadCredentialHealth, checkedAt time.Time, accountCount int) WeReadCredentialCheckResult {
+	// 1. 从绑定时间计算到本次检查或首次失效的持续时间。
+	end := checkedAt
+	if health.InvalidAt != "" {
+		if invalidAt, err := time.ParseInLocation("2006-01-02 15:04:05", health.InvalidAt, time.Local); err == nil {
+			end = invalidAt
+		}
+	}
+	duration := time.Duration(0)
+	if boundAt, err := time.ParseInLocation("2006-01-02 15:04:05", health.BoundAt, time.Local); err == nil && end.After(boundAt) {
+		duration = end.Sub(boundAt)
+	}
+	return WeReadCredentialCheckResult{
+		Status: health.LastStatus, BoundAt: health.BoundAt, CheckedAt: health.LastCheckedAt,
+		LastValidAt: health.LastValidAt, InvalidAt: health.InvalidAt, ValidFor: formatWeReadCredentialDuration(duration),
+		CheckCount: health.CheckCount, RefreshCount: health.RefreshCount, AccountCount: accountCount,
+		Message: health.LastError,
+	}
+}
+
+// formatWeReadCredentialDuration 把凭据寿命格式化为紧凑中文时长。
+// 输入：duration 是非负持续时间。
+// 输出：返回“天/小时”摘要，不足一小时返回“小于1小时”。
+// 副作用：无。
+func formatWeReadCredentialDuration(duration time.Duration) string {
+	// 1. 使用整小时避免每次任务结果产生无意义的分钟波动。
+	hours := int(duration.Hours())
+	if hours < 1 {
+		return "小于1小时"
+	}
+	if hours < 24 {
+		return fmt.Sprintf("%d小时", hours)
+	}
+	return fmt.Sprintf("%d天%d小时", hours/24, hours%24)
 }
 
 // dueWeReadAccounts 筛出当前已经到达抓取频率的公众号。
@@ -690,4 +804,16 @@ func (s *Service) SetWeReadAccountSettings(ctx context.Context, accountID string
 		return fmt.Errorf("每次获取数量必须在 1 到 50 之间")
 	}
 	return s.options.WeRead.repository.updateWeReadAccountSettings(ctx, accountID, settings)
+}
+
+// CheckWeReadCredential 执行微信读书扫码凭据健康检查。
+// 输入：ctx 控制外部请求和数据库操作。
+// 输出：返回累计寿命和本次检查结果。
+// 副作用：调用微信读书，可能刷新凭据并写 PostgreSQL。
+func (s *Service) CheckWeReadCredential(ctx context.Context) (WeReadCredentialCheckResult, error) {
+	// 1. 只允许配置了微信读书来源的正式服务执行检查。
+	if s.options.WeRead == nil {
+		return WeReadCredentialCheckResult{}, fmt.Errorf("微信读书文章来源未配置")
+	}
+	return s.options.WeRead.CheckCredential(ctx)
 }

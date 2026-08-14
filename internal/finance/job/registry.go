@@ -30,6 +30,11 @@ type ArticleSyncer interface {
 	RebuildSignalGroups(ctx context.Context, days int, apply bool) (articleanalysis.SignalGroupRebuildResult, error)
 }
 
+// WeReadCredentialChecker 定义微信读书扫码凭据健康检查入口。
+type WeReadCredentialChecker interface {
+	CheckWeReadCredential(ctx context.Context) (articleanalysis.WeReadCredentialCheckResult, error)
+}
+
 // Monitor 定义服务监控任务使用的业务入口。
 type Monitor interface {
 	CheckAll(ctx context.Context) (monitoring.CheckResult, error)
@@ -63,6 +68,7 @@ type Dependencies struct {
 	DB                *sql.DB
 	Data              DataUpdater
 	Articles          ArticleSyncer
+	WeReadCredential  WeReadCredentialChecker
 	Monitoring        Monitor
 	Subscriptions     SubscriptionLister
 	Notification      NotificationSender
@@ -83,8 +89,11 @@ type tasks struct {
 // 输出：全部注册成功返回 nil，依赖或定义无效时返回错误。
 // 副作用：修改进程内任务注册表，不立即执行任务。
 func RegisterAll(registry *scheduler.Registry, dependencies Dependencies) error {
-	// 1. 校验任务运行必需依赖并应用时钟和备份函数默认值。
-	if registry == nil || dependencies.DB == nil || dependencies.Data == nil || dependencies.Articles == nil ||
+	// 1. 优先复用同时实现文章同步和凭据检查的同一服务，再校验任务依赖。
+	if dependencies.WeReadCredential == nil && dependencies.Articles != nil {
+		dependencies.WeReadCredential, _ = dependencies.Articles.(WeReadCredentialChecker)
+	}
+	if registry == nil || dependencies.DB == nil || dependencies.Data == nil || dependencies.Articles == nil || dependencies.WeReadCredential == nil ||
 		dependencies.Monitoring == nil || dependencies.Subscriptions == nil || dependencies.Notification == nil {
 		return fmt.Errorf("任务注册依赖不完整")
 	}
@@ -101,6 +110,7 @@ func RegisterAll(registry *scheduler.Registry, dependencies Dependencies) error 
 		{Name: "test_crontab", Description: "每日任务链路测试", Schedule: "0 9 * * *", Timeout: time.Minute, Run: taskSet.testCrontab},
 		{Name: "update_tushare_daily_data", Description: "更新 Tushare 日线数据", ManualOnly: true, Timeout: 2 * time.Hour, Run: taskSet.updateTushareDailyData},
 		{Name: "sync_investment_articles", Description: "同步并分析投资文章", Schedule: "0 8,20 * * *", ConcurrencyKey: "investment_signal_groups", Timeout: 3 * time.Hour, Run: taskSet.syncInvestmentArticles},
+		{Name: "check_weread_credential", Description: "检查微信读书扫码凭据寿命", Schedule: "15 * * * *", Timeout: 5 * time.Minute, Run: taskSet.checkWeReadCredential},
 		{Name: "rebuild_investment_signal_groups", Description: "全局重建投资信号概念组", ManualOnly: true, ConcurrencyKey: "investment_signal_groups", Timeout: 30 * time.Minute, Run: taskSet.rebuildInvestmentSignalGroups},
 		{Name: "check_service_monitors", Description: "检查服务连通性", Schedule: "0 22 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkServiceMonitors},
 		{Name: "check_subscription_expiry_notify", Description: "检查订阅到期并提醒", Schedule: "30 9 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkSubscriptionExpiryNotify},
@@ -168,6 +178,24 @@ func (t *tasks) syncInvestmentArticles(ctx context.Context) (string, error) {
 	// 2. 保留已完成摘要并把业务错误交给统一包装器通知。
 	if err != nil {
 		return message, fmt.Errorf("同步投资文章: %w", err)
+	}
+	return message, nil
+}
+
+// checkWeReadCredential 检查微信读书扫码凭据并输出累计有效寿命。
+// 输入：ctx 是任务超时上下文。
+// 输出：返回状态、寿命、检查次数、刷新次数和公众号数量。
+// 副作用：调用微信读书，可能刷新凭据并写 PostgreSQL；失败由统一包装器通知微信。
+func (t *tasks) checkWeReadCredential(ctx context.Context) (string, error) {
+	// 1. 调用唯一凭据检查服务并保留失败前已经写入的统计摘要。
+	result, err := t.dependencies.WeReadCredential.CheckWeReadCredential(ctx)
+	message := fmt.Sprintf("状态=%s，已有效=%s，检查=%d，自动刷新=%d，公众号=%d",
+		result.Status, result.ValidFor, result.CheckCount, result.RefreshCount, result.AccountCount)
+	if result.Message != "" {
+		message += "，信息=" + result.Message
+	}
+	if err != nil {
+		return message, fmt.Errorf("检查微信读书扫码凭据: %w", err)
 	}
 	return message, nil
 }

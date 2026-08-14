@@ -85,6 +85,7 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 | 时间 | 任务 | 说明 |
 |---|---|---|
 | 08:00、20:00 | `sync_investment_articles` | 从微信读书书架公众号增量抓取并分析投资文章 |
+| 每小时第 15 分钟 | `check_weread_credential` | 验证扫码凭据、累计有效寿命和自动刷新次数，失效时微信通知 |
 | 09:00 | `test_crontab` | 每日任务链路测试 |
 | 22:00 | `check_service_monitors` | 服务连通性检查 |
 | 09:30 | `check_subscription_expiry_notify` | 订阅到期提醒 |

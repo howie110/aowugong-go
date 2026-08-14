@@ -52,6 +52,17 @@ func (s *fakeArticleSyncer) RebuildSignalGroups(_ context.Context, _ int, apply 
 	return articleanalysis.SignalGroupRebuildResult{Applied: apply, GroupCount: 2, AliasCount: 3, PendingAliasCount: 1}, nil
 }
 
+// CheckWeReadCredential 返回固定有效的微信读书凭据寿命摘要。
+// 输入：上下文。
+// 输出：返回十二小时有效、已检查一次的摘要。
+// 副作用：无。
+func (s *fakeArticleSyncer) CheckWeReadCredential(context.Context) (articleanalysis.WeReadCredentialCheckResult, error) {
+	// 1. 返回可供任务消息断言的固定结果。
+	return articleanalysis.WeReadCredentialCheckResult{
+		Status: "valid", ValidFor: "12小时", CheckCount: 1, AccountCount: 7,
+	}, nil
+}
+
 // TestSyncInvestmentArticlesSkipsClassificationForManualRun 验证页面手动抓取不等待历史信号归类。
 // 输入：携带 manual 来源的统一文章任务。
 // 输出：文章服务收到 classifySignals=false。
@@ -146,11 +157,11 @@ func (n *captureNotification) Text(_ context.Context, _ []string, body, _ string
 	return nil
 }
 
-// TestRegisterAllAddsEightProductionJobs 验证固定任务名称和频率全部进入统一注册表。
+// TestRegisterAllAddsNineProductionJobs 验证固定任务名称和频率全部进入统一注册表。
 // 输入：完整的测试依赖和空任务注册表。
-// 输出：注册七项定时任务和一项仅手动任务，并能通过同一 Run 入口执行测试任务。
+// 输出：注册七项定时任务和两项仅手动任务，并能通过同一 Run 入口执行测试任务。
 // 副作用：创建并写入隔离 SQLite 测试库。
-func TestRegisterAllAddsEightProductionJobs(t *testing.T) {
+func TestRegisterAllAddsNineProductionJobs(t *testing.T) {
 	// 1. 创建完成迁移的 SQLite 和任务注册表。
 	ctx := context.Background()
 	db := testdatabase.Open(t)
@@ -164,17 +175,18 @@ func TestRegisterAllAddsEightProductionJobs(t *testing.T) {
 		},
 	}
 
-	// 2. 注册并核对八项固定名称、频率和仅手动属性。
+	// 2. 注册并核对九项固定名称、频率和仅手动属性。
 	if err := RegisterAll(registry, dependencies); err != nil {
 		t.Fatalf("RegisterAll() error = %v", err)
 	}
 	definitions := registry.Definitions()
-	if len(definitions) != 8 {
-		t.Fatalf("definition count = %d, want 8", len(definitions))
+	if len(definitions) != 9 {
+		t.Fatalf("definition count = %d, want 9", len(definitions))
 	}
 	wanted := map[string]string{
 		"test_crontab": "0 9 * * *", "update_tushare_daily_data": "",
 		"sync_investment_articles": "0 8,20 * * *", "check_service_monitors": "0 22 * * *",
+		"check_weread_credential":          "15 * * * *",
 		"check_subscription_expiry_notify": "30 9 * * *", "openilink_reply_reminder": "0 10 * * *",
 		"backup_postgres":                  "30 3 * * *",
 		"rebuild_investment_signal_groups": "",
@@ -226,7 +238,7 @@ func TestRegisterAllAddsOptionalGitHubBackupJob(t *testing.T) {
 			}
 		}
 	}
-	if !found || len(registry.Definitions()) != 9 {
+	if !found || len(registry.Definitions()) != 10 {
 		t.Errorf("definitions = %+v", registry.Definitions())
 	}
 }
@@ -261,7 +273,7 @@ func TestRegisterAllAddsOptionalVaultwardenEmailJob(t *testing.T) {
 			}
 		}
 	}
-	if !found || len(registry.Definitions()) != 9 {
+	if !found || len(registry.Definitions()) != 10 {
 		t.Errorf("definitions = %+v", registry.Definitions())
 	}
 }

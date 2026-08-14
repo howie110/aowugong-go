@@ -10,6 +10,17 @@ import (
 	appdatabase "github.com/howiedata/aowugong-go/internal/database"
 )
 
+type weReadCredentialHealth struct {
+	BoundAt       string
+	LastCheckedAt string
+	LastValidAt   string
+	InvalidAt     string
+	LastStatus    string
+	LastError     string
+	CheckCount    int64
+	RefreshCount  int64
+}
+
 // SyncWeReadSource 把唯一投资文章来源切换为微信读书公众号。
 // 输入：ctx 控制数据库操作。
 // 输出：返回同步错误。
@@ -125,24 +136,85 @@ func (r *Repository) loadWeReadCredentialCiphertext(ctx context.Context) ([]byte
 	return ciphertext, version, true, nil
 }
 
-// saveWeReadCredentialCiphertext 原子保存单账号加密凭据。
-// 输入：ctx 控制写入，ciphertext 是认证密文，version 是格式版本。
+// saveWeReadCredentialCiphertext 原子保存单账号加密凭据和绑定生命周期。
+// 输入：ctx 控制写入，ciphertext 是认证密文，version 是格式版本，newBinding 区分扫码和自动刷新。
 // 输出：返回写入错误。
 // 副作用：写入 weread_article_credential。
-func (r *Repository) saveWeReadCredentialCiphertext(ctx context.Context, ciphertext []byte, version int) error {
-	// 1. 固定主键覆盖旧凭据，Token 刷新和重新绑定共用此入口。
+func (r *Repository) saveWeReadCredentialCiphertext(ctx context.Context, ciphertext []byte, version int, newBinding bool) error {
+	// 1. 扫码重置寿命统计，自动刷新只替换密文并累计刷新次数。
+	now := appdatabase.TimestampText(time.Now())
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO weread_article_credential(id, ciphertext, encryption_version, updated_at)
-		VALUES (1, ?, ?, ?)
+		INSERT INTO weread_article_credential(
+			id, ciphertext, encryption_version, updated_at, bound_at, last_checked_at,
+			last_valid_at, invalid_at, last_status, last_error, check_count, refresh_count
+		)
+		VALUES (1, ?, ?, ?, ?, ?, ?, NULL, 'valid', '', 0, 0)
 		ON CONFLICT(id) DO UPDATE SET
 			ciphertext = excluded.ciphertext,
 			encryption_version = excluded.encryption_version,
-			updated_at = excluded.updated_at
-	`, ciphertext, version, appdatabase.TimestampText(time.Now()))
+			updated_at = excluded.updated_at,
+			bound_at = CASE WHEN ? THEN excluded.bound_at ELSE weread_article_credential.bound_at END,
+			last_checked_at = CASE WHEN ? THEN excluded.last_checked_at ELSE weread_article_credential.last_checked_at END,
+			last_valid_at = CASE WHEN ? THEN excluded.last_valid_at ELSE weread_article_credential.last_valid_at END,
+			invalid_at = CASE WHEN ? THEN NULL ELSE weread_article_credential.invalid_at END,
+			last_status = CASE WHEN ? THEN 'valid' ELSE weread_article_credential.last_status END,
+			last_error = CASE WHEN ? THEN '' ELSE weread_article_credential.last_error END,
+			check_count = CASE WHEN ? THEN 0 ELSE weread_article_credential.check_count END,
+			refresh_count = CASE WHEN ? THEN 0 ELSE weread_article_credential.refresh_count + 1 END
+	`, ciphertext, version, now, now, now, now,
+		newBinding, newBinding, newBinding, newBinding, newBinding, newBinding, newBinding, newBinding)
 	if err != nil {
 		return fmt.Errorf("保存微信读书加密凭据: %w", err)
 	}
 	return nil
+}
+
+// recordWeReadCredentialCheck 记录一次凭据探测结果。
+// 输入：ctx 控制写入，status 是 valid、invalid 或 error，message 保存失败上下文。
+// 输出：返回更新错误。
+// 副作用：更新 weread_article_credential 的检查计数和时间。
+func (r *Repository) recordWeReadCredentialCheck(ctx context.Context, status, message string, checkedAt time.Time) error {
+	// 1. 有效检查推进最后有效时间，认证失效只固定记录首次失效时间。
+	now := appdatabase.TimestampText(checkedAt)
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE weread_article_credential SET
+			last_checked_at = ?,
+			last_valid_at = CASE WHEN ? = 'valid' THEN ? ELSE last_valid_at END,
+			invalid_at = CASE
+				WHEN ? = 'invalid' THEN COALESCE(invalid_at, ?)
+				WHEN ? = 'valid' THEN NULL
+				ELSE invalid_at
+			END,
+			last_status = ?, last_error = ?, check_count = check_count + 1
+		WHERE id = 1
+	`, now, status, now, status, now, status, status, message)
+	if err != nil {
+		return fmt.Errorf("记录微信读书凭据检查: %w", err)
+	}
+	return nil
+}
+
+// weReadCredentialHealth 读取当前凭据绑定寿命累计值。
+// 输入：ctx 控制查询。
+// 输出：返回健康统计、是否存在和错误。
+// 副作用：只读 PostgreSQL。
+func (r *Repository) weReadCredentialHealth(ctx context.Context) (weReadCredentialHealth, bool, error) {
+	// 1. 查询单账号聚合字段并把 NULL 时间转换为空字符串。
+	var health weReadCredentialHealth
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COALESCE(bound_at, updated_at), COALESCE(last_checked_at, ''),
+		       COALESCE(last_valid_at, ''), COALESCE(invalid_at, ''), last_status,
+		       COALESCE(last_error, ''), check_count, refresh_count
+		FROM weread_article_credential WHERE id = 1
+	`).Scan(&health.BoundAt, &health.LastCheckedAt, &health.LastValidAt, &health.InvalidAt,
+		&health.LastStatus, &health.LastError, &health.CheckCount, &health.RefreshCount)
+	if err == sql.ErrNoRows {
+		return weReadCredentialHealth{}, false, nil
+	}
+	if err != nil {
+		return weReadCredentialHealth{}, false, fmt.Errorf("读取微信读书凭据健康统计: %w", err)
+	}
+	return health, true, nil
 }
 
 // upsertWeReadAccounts 保存本次书架发现的公众号并保留人工开关。

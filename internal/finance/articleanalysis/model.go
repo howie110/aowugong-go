@@ -195,6 +195,20 @@ type WeReadLoginStatus struct {
 	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
+// WeReadCredentialCheckResult 描述一次微信读书扫码凭据健康检查及累计寿命。
+type WeReadCredentialCheckResult struct {
+	Status       string `json:"status"`
+	BoundAt      string `json:"bound_at"`
+	CheckedAt    string `json:"checked_at"`
+	LastValidAt  string `json:"last_valid_at,omitempty"`
+	InvalidAt    string `json:"invalid_at,omitempty"`
+	ValidFor     string `json:"valid_for"`
+	CheckCount   int64  `json:"check_count"`
+	RefreshCount int64  `json:"refresh_count"`
+	AccountCount int    `json:"account_count"`
+	Message      string `json:"message,omitempty"`
+}
+
 // AnalysisBatchResult 描述一批待分析文章的处理统计。
 type AnalysisBatchResult struct {
 	AnalyzedCount int              `json:"analyzed_count"`

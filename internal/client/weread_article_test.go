@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -57,6 +58,42 @@ func TestWeReadArticleClientReadsShelfAndRecentPage(t *testing.T) {
 	articles, err := articleClient.ListRecentArticles(context.Background(), &credentials, accounts[0].AccountID, 20)
 	if err != nil || len(articles) != 1 || articles[0].ReviewID != "review-1" {
 		t.Fatalf("ListRecentArticles() = %#v, %v", articles, err)
+	}
+}
+
+// TestWeReadArticleClientReusesExistingDevice 验证重新扫码继续模拟同一台 BOOX 设备。
+// 输入：旧凭据包含已经登记的设备 ID 和安装 ID，内存传输层接收登录请求。
+// 输出：请求复用两个 ID、官方风格设备名和 User-Agent，并把安装 ID写回新凭据。
+// 副作用：执行一次内存 HTTP 往返，不访问网络。
+func TestWeReadArticleClientReusesExistingDevice(t *testing.T) {
+	// 1. 截获登录请求并校验整套 BOOX 设备身份保持一致。
+	transport := weReadRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode login payload: %v", err)
+		}
+		if payload["deviceId"] != "stable-device" || payload["installId"] != "stable-install" {
+			t.Fatalf("device identity = %#v", payload)
+		}
+		if payload["deviceName"] != "BOOX" || payload["appFirstInstall"] != float64(0) {
+			t.Fatalf("device presentation = %#v", payload)
+		}
+		if request.Header.Get("User-Agent") != weReadArticleUserAgent {
+			t.Fatalf("User-Agent = %q", request.Header.Get("User-Agent"))
+		}
+		return weReadTestResponse(request, http.StatusOK, "application/json", `{"vid":"123456","accessToken":"new-access","refreshToken":"new-refresh","errCode":0}`), nil
+	})
+	articleClient := NewWeReadArticleClient(&http.Client{Transport: transport})
+	articleClient.requestGap = 0
+	previous := WeReadArticleCredentials{DeviceID: "stable-device", InstallID: "stable-install"}
+
+	// 2. 交换后的 Token 更新，但稳定设备身份必须继续保存。
+	credentials, err := articleClient.ExchangeLoginCode(context.Background(), "scan-code", &previous)
+	if err != nil {
+		t.Fatalf("ExchangeLoginCode() error = %v", err)
+	}
+	if credentials.DeviceID != previous.DeviceID || credentials.InstallID != previous.InstallID {
+		t.Fatalf("credentials = %#v", credentials)
 	}
 }
 

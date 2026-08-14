@@ -335,7 +335,7 @@ func newJobRegistry(cfg config.Config, db *sql.DB, services taskServices) (*sche
 	// 2. 把唯一业务服务交给任务定义，Registry 统一负责锁、记录和失败通知。
 	registry := scheduler.NewRegistry(db, services.notification, slog.Default())
 	if err := financejob.RegisterAll(registry, financejob.Dependencies{
-		DB: db, Data: services.data, Articles: services.articles,
+		DB: db, Data: services.data, Articles: services.articles, WeReadCredential: services.articles,
 		Monitoring: services.monitoring, Subscriptions: services.subscriptions, Notification: services.notification,
 		GitHubBackup:      services.githubBackup,
 		VaultwardenBackup: services.vaultwardenBackup,

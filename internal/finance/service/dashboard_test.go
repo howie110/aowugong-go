@@ -10,7 +10,7 @@ import (
 
 // TestDashboardServiceBuildsRuntimeSummaries 验证 finance 摘要使用 SQLite 进度和 Go 运行时配置。
 // 输入：隔离 SQLite 数据与关闭的真实交易配置。
-// 输出：各页面摘要包含最新日期、八个任务定义和安全交易状态。
+// 输出：各页面摘要包含最新日期、九个任务定义和安全交易状态。
 // 副作用：创建并写入隔离 SQLite 测试库。
 func TestDashboardServiceBuildsRuntimeSummaries(t *testing.T) {
 	// 1. 创建包含当前行情日期的最小 SQLite 数据集。
@@ -37,8 +37,8 @@ func TestDashboardServiceBuildsRuntimeSummaries(t *testing.T) {
 	if got := data.Tables[1].Latest; got != "2026-07-14" {
 		t.Errorf("daily latest = %q, want 2026-07-14", got)
 	}
-	if got := len(jobs.Jobs); got != 8 {
-		t.Errorf("jobs count = %d, want 8", got)
+	if got := len(jobs.Jobs); got != 9 {
+		t.Errorf("jobs count = %d, want 9", got)
 	}
 	if got := trading.Guards[0].Value; got != "关闭" {
 		t.Errorf("real trade value = %q, want 关闭", got)
@@ -60,8 +60,8 @@ func TestJobsSummaryIncludesEnabledBackupTasks(t *testing.T) {
 	jobs := service.JobsSummary()
 
 	// 2. 核对任务数量和两个可选任务名称。
-	if len(jobs.Jobs) != 10 {
-		t.Fatalf("jobs count = %d, want 10", len(jobs.Jobs))
+	if len(jobs.Jobs) != 11 {
+		t.Fatalf("jobs count = %d, want 11", len(jobs.Jobs))
 	}
 	wanted := map[string]bool{"backup_github_code": false, "email_vaultwarden_backup": false}
 	for _, item := range jobs.Jobs {

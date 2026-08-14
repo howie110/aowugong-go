@@ -21,9 +21,10 @@ func TestWeReadSourceCredentialRoundTrip(t *testing.T) {
 	db := testdatabase.Open(t)
 	source := NewWeReadSource(NewRepository(db), client.NewWeReadArticleClient(nil), "test-encryption-secret")
 	want := client.WeReadArticleCredentials{
-		VID: "123456", DeviceID: "device-test", AccessToken: "access-secret", RefreshToken: "refresh-secret",
+		VID: "123456", DeviceID: "device-test", InstallID: "install-test",
+		AccessToken: "access-secret", RefreshToken: "refresh-secret",
 	}
-	if err := source.saveCredentials(ctx, want); err != nil {
+	if err := source.saveCredentials(ctx, want, true); err != nil {
 		t.Fatalf("saveCredentials() error = %v", err)
 	}
 
@@ -50,6 +51,55 @@ func TestWeReadSourceCredentialRoundTrip(t *testing.T) {
 	}
 }
 
+// TestWeReadCredentialHealthLifecycle 验证每小时检查累计绑定寿命和自动刷新次数。
+// 输入：一份新扫码凭据、一次有效检查、一次自动刷新和一次认证失效。
+// 输出：绑定时间不被刷新覆盖，检查与刷新次数准确，寿命停在首次失效时间。
+// 副作用：写入隔离 SQLite 测试库。
+func TestWeReadCredentialHealthLifecycle(t *testing.T) {
+	// 1. 保存新绑定并以持久绑定时间为基准构造后续检查时间。
+	ctx := context.Background()
+	db := testdatabase.Open(t)
+	repository := NewRepository(db)
+	source := NewWeReadSource(repository, client.NewWeReadArticleClient(nil), "test-encryption-secret")
+	credentials := client.WeReadArticleCredentials{
+		VID: "123456", DeviceID: "stable-device", InstallID: "stable-install",
+		AccessToken: "access-secret", RefreshToken: "refresh-secret",
+	}
+	if err := source.saveCredentials(ctx, credentials, true); err != nil {
+		t.Fatalf("save new credentials: %v", err)
+	}
+	health, found, err := repository.weReadCredentialHealth(ctx)
+	if err != nil || !found {
+		t.Fatalf("initial health = %#v, %v, %v", health, found, err)
+	}
+	boundAt, err := time.ParseInLocation("2006-01-02 15:04:05", health.BoundAt, time.Local)
+	if err != nil {
+		t.Fatalf("parse bound time: %v", err)
+	}
+
+	// 2. 有效检查和 Token 刷新分别累计，不允许刷新重置绑定起点。
+	if err := repository.recordWeReadCredentialCheck(ctx, "valid", "", boundAt.Add(2*time.Hour)); err != nil {
+		t.Fatalf("record valid check: %v", err)
+	}
+	credentials.AccessToken = "refreshed-access"
+	if err := source.saveCredentials(ctx, credentials, false); err != nil {
+		t.Fatalf("save refreshed credentials: %v", err)
+	}
+	if err := repository.recordWeReadCredentialCheck(ctx, "invalid", "认证失效", boundAt.Add(3*time.Hour)); err != nil {
+		t.Fatalf("record invalid check: %v", err)
+	}
+
+	// 3. 首次失效固定三小时寿命，累计两次检查和一次自动刷新。
+	health, found, err = repository.weReadCredentialHealth(ctx)
+	if err != nil || !found {
+		t.Fatalf("final health = %#v, %v, %v", health, found, err)
+	}
+	result := buildWeReadCredentialCheckResult(health, boundAt.Add(5*time.Hour), 0)
+	if result.Status != "invalid" || result.ValidFor != "3小时" || result.CheckCount != 2 || result.RefreshCount != 1 {
+		t.Fatalf("credential result = %#v", result)
+	}
+}
+
 // TestWeReadBindingReflectsFetchFailure 验证页面状态会暴露最近一次真实抓取失败。
 // 输入：完整测试凭据和一条 refresh_token 抓取错误。
 // 输出：失败时要求重新绑定，清除错误后恢复为已绑定。
@@ -63,7 +113,7 @@ func TestWeReadBindingReflectsFetchFailure(t *testing.T) {
 	credentials := client.WeReadArticleCredentials{
 		VID: "123456", DeviceID: "device-test", AccessToken: "access-secret", RefreshToken: "refresh-secret",
 	}
-	if err := source.saveCredentials(ctx, credentials); err != nil {
+	if err := source.saveCredentials(ctx, credentials, true); err != nil {
 		t.Fatalf("saveCredentials() error = %v", err)
 	}
 	if err := repository.SetWeReadSourceActive(ctx, true); err != nil {
@@ -213,7 +263,7 @@ func TestSyncWeReadSourceFollowsCredentialState(t *testing.T) {
 	credentials := client.WeReadArticleCredentials{
 		VID: "123456", DeviceID: "device-test", AccessToken: "access-secret", RefreshToken: "refresh-secret",
 	}
-	if err := source.saveCredentials(ctx, credentials); err != nil {
+	if err := source.saveCredentials(ctx, credentials, true); err != nil {
 		t.Fatalf("saveCredentials() error = %v", err)
 	}
 	if err := repository.SyncWeReadSource(ctx); err != nil {

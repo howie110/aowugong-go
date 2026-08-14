@@ -26,12 +26,13 @@ import (
 )
 
 const (
-	weReadArticleBaseURL   = "https://i.weread.qq.com"
-	weReadArticleAppID     = "wxab9b71ad2b90ff34"
-	weReadArticleScope     = "snsapi_userinfo,snsapi_timeline,snsapi_friend"
-	weReadArticleMaxBody   = 8 << 20
-	weReadArticleDevice    = "eink334691225"
-	weReadArticleUserAgent = "WeRead/2.1.2 WRBrand/Onyx wr_eink Dalvik/2.1.0 (Linux; U; Android 11; BOOX Build/onyx)"
+	weReadArticleBaseURL    = "https://i.weread.qq.com"
+	weReadArticleAppID      = "wxab9b71ad2b90ff34"
+	weReadArticleScope      = "snsapi_userinfo,snsapi_timeline,snsapi_friend"
+	weReadArticleMaxBody    = 8 << 20
+	weReadArticleDevice     = "eink334691225"
+	weReadArticleDeviceName = "BOOX"
+	weReadArticleUserAgent  = "WeRead/2.1.2 WRBrand/Onyx wr_eink Dalvik/2.1.0 (Linux; U; Android 11; BOOX Build/onyx)"
 )
 
 var (
@@ -51,6 +52,7 @@ var (
 type WeReadArticleCredentials struct {
 	VID          string `json:"vid"`
 	DeviceID     string `json:"device_id"`
+	InstallID    string `json:"install_id,omitempty"`
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 }
@@ -226,17 +228,13 @@ func (c *WeReadArticleClient) PollLoginQR(ctx context.Context, uuid string, last
 	}
 }
 
-// ExchangeLoginCode 使用微信确认码换取持久凭据。
-// 输入：ctx 控制请求，code 是扫码确认码。
+// ExchangeLoginCode 使用微信确认码和既有设备身份换取持久凭据。
+// 输入：ctx 控制请求，code 是扫码确认码，previous 是可复用的旧凭据。
 // 输出：返回完整微信读书凭据。
-// 副作用：生成设备身份并调用微信读书登录接口。
-func (c *WeReadArticleClient) ExchangeLoginCode(ctx context.Context, code string) (WeReadArticleCredentials, error) {
-	// 1. 生成本次绑定后持续使用的设备字段和签名。
-	deviceID, err := newWeReadDeviceID()
-	if err != nil {
-		return WeReadArticleCredentials{}, err
-	}
-	installID, err := newWeReadInstallID()
+// 副作用：首次绑定生成设备身份，重新绑定复用旧身份，并调用微信读书登录接口。
+func (c *WeReadArticleClient) ExchangeLoginCode(ctx context.Context, code string, previous *WeReadArticleCredentials) (WeReadArticleCredentials, error) {
+	// 1. 首次绑定生成 BOOX 身份，重新绑定沿用同一设备和安装标识。
+	deviceID, installID, firstInstall, err := prepareWeReadDevice(previous)
 	if err != nil {
 		return WeReadArticleCredentials{}, err
 	}
@@ -247,7 +245,7 @@ func (c *WeReadArticleClient) ExchangeLoginCode(ctx context.Context, code string
 	timestamp := time.Now().UnixMilli()
 	signature := sha256.Sum256([]byte(strconv.FormatInt(timestamp, 10) + deviceID + strconv.FormatInt(randomValue, 10)))
 	payload := map[string]any{
-		"appFirstInstall": 1, "code": code, "deviceId": deviceID, "deviceName": "BOOX",
+		"appFirstInstall": firstInstall, "code": code, "deviceId": deviceID, "deviceName": weReadArticleDeviceName,
 		"installId": installID, "isAutoLogout": 0, "isFromQrcode": 1, "random": randomValue,
 		"signature": hex.EncodeToString(signature[:]), "timestamp": timestamp, "trackId": "", "deviceType": 3,
 	}
@@ -270,6 +268,7 @@ func (c *WeReadArticleClient) ExchangeLoginCode(ctx context.Context, code string
 	if response.status < 200 || response.status >= 300 || businessCode != 0 {
 		return WeReadArticleCredentials{}, fmt.Errorf("微信读书登录被拒绝: HTTP %d, errCode=%d, errMsg=%q: %w", response.status, businessCode, businessMessage, ErrWeReadArticleAuth)
 	}
+	credentials.InstallID = installID
 	return credentials, credentials.Validate()
 }
 
@@ -485,9 +484,12 @@ func (c *WeReadArticleClient) RefreshCredentials(ctx context.Context, credential
 	timestamp := time.Now().UnixMilli()
 	signature := sha256.Sum256([]byte(strconv.FormatInt(timestamp, 10) + credentials.DeviceID + strconv.FormatInt(randomValue, 10)))
 	payload := map[string]any{
-		"deviceId": credentials.DeviceID, "deviceName": "BOOX", "inBackground": 0, "kickType": 1,
+		"deviceId": credentials.DeviceID, "deviceName": weReadArticleDeviceName, "inBackground": 0, "kickType": 1,
 		"random": randomValue, "refCgi": "", "refreshToken": credentials.RefreshToken,
 		"signature": hex.EncodeToString(signature[:]), "timestamp": timestamp, "trackId": "", "deviceType": 3,
+	}
+	if credentials.InstallID != "" {
+		payload["installId"] = credentials.InstallID
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -512,6 +514,7 @@ func (c *WeReadArticleClient) RefreshCredentials(ctx context.Context, credential
 	if refreshed.VID != credentials.VID || refreshed.DeviceID != credentials.DeviceID {
 		return WeReadArticleCredentials{}, fmt.Errorf("微信读书刷新返回了不同账号或设备")
 	}
+	refreshed.InstallID = credentials.InstallID
 	return refreshed, refreshed.Validate()
 }
 
@@ -709,6 +712,36 @@ func newWeReadInstallID() (string, error) {
 		digits[index] = byte('0' + value.Int64())
 	}
 	return "eink31" + string(digits), nil
+}
+
+// prepareWeReadDevice 准备首次登录或重新绑定使用的稳定 BOOX 设备身份。
+// 输入：previous 是可选旧凭据，包含已经向微信读书登记的设备标识。
+// 输出：返回设备 ID、安装 ID、首次安装标记和错误。
+// 副作用：缺少字段时读取系统随机源生成一次并交由调用方持久保存。
+func prepareWeReadDevice(previous *WeReadArticleCredentials) (string, string, int, error) {
+	// 1. 重新绑定必须复用旧设备 ID，旧版凭据没有安装 ID 时只补生成一次。
+	if previous != nil && strings.TrimSpace(previous.DeviceID) != "" {
+		installID := strings.TrimSpace(previous.InstallID)
+		if installID == "" {
+			var err error
+			installID, err = newWeReadInstallID()
+			if err != nil {
+				return "", "", 0, err
+			}
+		}
+		return strings.TrimSpace(previous.DeviceID), installID, 0, nil
+	}
+
+	// 2. 首次绑定同时生成设备和安装标识，后续随加密凭据保存。
+	deviceID, err := newWeReadDeviceID()
+	if err != nil {
+		return "", "", 0, err
+	}
+	installID, err := newWeReadInstallID()
+	if err != nil {
+		return "", "", 0, err
+	}
+	return deviceID, installID, 1, nil
 }
 
 // secureWeReadInt 生成闭区间密码学随机整数。
