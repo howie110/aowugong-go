@@ -97,6 +97,35 @@ func TestWeReadArticleClientReusesExistingDevice(t *testing.T) {
 	}
 }
 
+// TestWeReadArticleClientPreservesRefreshToken 验证刷新响应省略 RefreshToken 时沿用旧值。
+// 输入：旧凭据包含完整 Token，内存传输层只返回新 AccessToken。
+// 输出：新凭据更新 AccessToken 并保留原 RefreshToken。
+// 副作用：执行一次内存 HTTP 往返，不访问网络。
+func TestWeReadArticleClientPreservesRefreshToken(t *testing.T) {
+	// 1. 返回微信读书实际可能出现的仅轮换 AccessToken 响应。
+	transport := weReadRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != "/login" {
+			t.Fatalf("request path = %q", request.URL.Path)
+		}
+		return weReadTestResponse(request, http.StatusOK, "application/json", `{"vid":"123456","accessToken":"new-access","errCode":0}`), nil
+	})
+	articleClient := NewWeReadArticleClient(&http.Client{Transport: transport})
+	articleClient.requestGap = 0
+	credentials := WeReadArticleCredentials{
+		VID: "123456", DeviceID: "stable-device", InstallID: "stable-install",
+		AccessToken: "old-access", RefreshToken: "stable-refresh",
+	}
+
+	// 2. 刷新后核对新访问令牌和沿用的刷新令牌都可继续持久化。
+	refreshed, err := articleClient.RefreshCredentials(context.Background(), credentials)
+	if err != nil {
+		t.Fatalf("RefreshCredentials() error = %v", err)
+	}
+	if refreshed.AccessToken != "new-access" || refreshed.RefreshToken != credentials.RefreshToken {
+		t.Fatalf("refreshed credentials = %#v", refreshed)
+	}
+}
+
 // TestWeReadArticleClientExtractsWeChatText 验证微信公众号正文只读取 js_content 可见文本。
 // 输入：包含旁路内容、脚本和正文节点的 HTML。
 // 输出：返回压缩后的正文文本和规范原文地址。

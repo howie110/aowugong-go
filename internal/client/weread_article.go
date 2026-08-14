@@ -514,6 +514,10 @@ func (c *WeReadArticleClient) RefreshCredentials(ctx context.Context, credential
 	if refreshed.VID != credentials.VID || refreshed.DeviceID != credentials.DeviceID {
 		return WeReadArticleCredentials{}, fmt.Errorf("微信读书刷新返回了不同账号或设备")
 	}
+	// 2. 微信读书可能只轮换 AccessToken；未返回新 RefreshToken 时继续使用旧值。
+	if strings.TrimSpace(refreshed.RefreshToken) == "" {
+		refreshed.RefreshToken = credentials.RefreshToken
+	}
 	refreshed.InstallID = credentials.InstallID
 	return refreshed, refreshed.Validate()
 }
