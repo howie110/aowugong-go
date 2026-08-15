@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var numberPattern = regexp.MustCompile(`[-+]?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?`)
+var numberPattern = regexp.MustCompile(`[-+−－]?[0-9]+(?:[.,，][0-9]+)*`)
 
 // AssetMetadata 描述解析仓位资产时由上传流程提供的元数据。
 type AssetMetadata struct {
@@ -341,14 +341,35 @@ func numberAfterLabel(text, label string) (float64, bool) {
 // 输出：返回浮点值和是否成功。
 // 副作用：无。
 func parseNumber(text string) (float64, bool) {
-	// 1. 查找并清理第一个数字片段。
-	match := numberPattern.FindString(strings.ReplaceAll(text, "，", ","))
+	// 1. 查找第一个数字片段，并兼容 OCR 把千分位逗号识别成小数点的情况。
+	match := numberPattern.FindString(text)
 	if match == "" {
 		return 0, false
 	}
-	cleaned := strings.NewReplacer(",", "", "+", "", "−", "-", "－", "-").Replace(match)
+	cleaned := normalizeOCRNumber(match)
 	value, err := strconv.ParseFloat(cleaned, 64)
 	return value, err == nil
+}
+
+// normalizeOCRNumber 把 OCR 数字片段转换为 strconv 可解析的小数文本。
+// 输入：value 可能包含中英文千分位、多个小数点和中文负号。
+// 输出：返回仅保留符号及一个可选小数点的数字文本。
+// 副作用：无。
+func normalizeOCRNumber(value string) string {
+	// 1. 统一符号并移除明确的千分位逗号。
+	cleaned := strings.NewReplacer(",", "", "，", "", "+", "", "−", "-", "－", "-").Replace(value)
+	dotCount := strings.Count(cleaned, ".")
+	if dotCount <= 1 {
+		return cleaned
+	}
+
+	// 2. 多个点且末段为两位时，只保留末尾金额小数点；否则全部按千分位移除。
+	lastDot := strings.LastIndex(cleaned, ".")
+	if len(cleaned)-lastDot-1 == 2 {
+		integerPart := strings.ReplaceAll(cleaned[:lastDot], ".", "")
+		return integerPart + cleaned[lastDot:]
+	}
+	return strings.ReplaceAll(cleaned, ".", "")
 }
 
 // roundMoney 把浮点金额四舍五入到分。

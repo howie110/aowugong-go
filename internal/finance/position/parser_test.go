@@ -36,3 +36,23 @@ func TestParseAssetSnapshotReadsAccountAndMoneyFromOCRContent(t *testing.T) {
 		t.Errorf("snapshot metadata = %#v", snapshot)
 	}
 }
+
+// TestParseNumberRepairsOCRThousandsSeparators 验证金额千分位被 OCR 识别成小数点时仍能还原原值。
+// 输入：普通千分位、多小数点金额和中文负号数字。
+// 输出：每个数字都返回预期金额。
+// 副作用：无。
+func TestParseNumberRepairsOCRThousandsSeparators(t *testing.T) {
+	// 1. 覆盖线上出现的多小数点格式及原有常规格式。
+	cases := map[string]float64{
+		"422.345.00": 422345.00,
+		"1,234.56":   1234.56,
+		"558，851.72": 558851.72,
+		"－2.430.28":  -2430.28,
+	}
+	for input, expected := range cases {
+		actual, ok := parseNumber(input)
+		if !ok || actual != expected {
+			t.Errorf("parseNumber(%q) = %v, %v; want %v, true", input, actual, ok, expected)
+		}
+	}
+}
