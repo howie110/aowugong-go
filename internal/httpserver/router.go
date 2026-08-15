@@ -57,6 +57,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 	})
 	api.Get("/api/v1/health", healthHandler)
+	if deps.ArticleAnalysis != nil {
+		registerArticleFeedRoutes(api, deps.ArticleAnalysis)
+	}
 
 	// 2. 依赖可用时注册认证和权限接口，便于最小健康检查测试独立运行。
 	if deps.Auth != nil {
@@ -109,7 +112,7 @@ func NewRouter(deps Dependencies) http.Handler {
 // 副作用：调用 API 或静态资源处理器并写响应。
 func (r router) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	// 1. 将全部 API 请求交给 chi 路由，阻止进入 SPA 回退。
-	if request.URL.Path == "/api" || strings.HasPrefix(request.URL.Path, "/api/") {
+	if request.URL.Path == "/api" || strings.HasPrefix(request.URL.Path, "/api/") || strings.HasPrefix(request.URL.Path, "/feeds/") {
 		r.api.ServeHTTP(w, request)
 		return
 	}
