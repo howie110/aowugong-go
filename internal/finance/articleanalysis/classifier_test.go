@@ -166,6 +166,26 @@ func TestParseSignalClassificationJSONUsesReuseCreateAndPendingActions(t *testin
 	}
 }
 
+// TestParseSignalClassificationJSONNormalizesPendingGroupReuse 验证模型复用待归类组时自动转为 pending。
+// 输入：现有待归类组和错误使用 reuse 动作的含糊信号。
+// 输出：信号进入待归类列表，不生成正式概念组且不让整批任务失败。
+// 副作用：无。
+func TestParseSignalClassificationJSONNormalizesPendingGroupReuse(t *testing.T) {
+	// 1. 构造线上出现过的模型响应：把含糊信号复用到特殊待归类组。
+	groups := []SignalGroup{{ID: 8, Name: pendingSignalGroupName, Type: pendingSignalGroupType}}
+	candidates := []signalCandidate{{Name: "A股伪科技股", Type: "concept"}}
+	content := `{"decisions":[{"name":"A股伪科技股","action":"reuse","existing_group_id":8,"confidence":0.96}]}`
+
+	// 2. 后端应按 pending 语义接收，而不是重试模型后中断同步任务。
+	result, err := parseSignalClassificationJSON(content, candidates, groups)
+	if err != nil {
+		t.Fatalf("parseSignalClassificationJSON() error = %v", err)
+	}
+	if len(result.Groups) != 0 || len(result.Pending) != 1 || result.Pending[0].Name != "A股伪科技股" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 // TestParseSignalClassificationJSONRejectsFakeReuseAndDuplicateCreate 验证模型不能伪造复用或用新建动作复制已有组。
 // 输入：不存在的组 ID，以及与现有规范名相同的新建决策。
 // 输出：两种响应都在写库前返回错误。

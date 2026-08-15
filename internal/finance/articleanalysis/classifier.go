@@ -262,7 +262,8 @@ func parseSignalClassificationJSON(content string, candidates []signalCandidate,
 				return signalClassificationBatchResult{}, fmt.Errorf("信号分类 %q 复用了不存在的概念组 %d", candidate.Name, decision.ExistingGroupID)
 			}
 			if group.Name == pendingSignalGroupName || group.Type == pendingSignalGroupType {
-				return signalClassificationBatchResult{}, fmt.Errorf("信号分类 %q 不得复用待归类组，应返回 pending action", candidate.Name)
+				result.Pending = append(result.Pending, candidate)
+				continue
 			}
 			targetName, targetType = group.Name, group.Type
 		case "create":
