@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const weReadFeedArticleLimit = 300
+const weReadFeedArticleLimit = 1000
 
 // FeedArticle 描述 RSS 输出所需的一篇微信读书公众号文章。
 type FeedArticle struct {
@@ -21,7 +21,7 @@ type FeedArticle struct {
 
 // WeReadFeedArticles 返回供本机 RSS 阅读器订阅的最新公众号文章。
 // 输入：ctx 控制 PostgreSQL 查询。
-// 输出：返回最多三百篇按发布时间倒序排列的文章；查询失败时返回错误。
+// 输出：返回最多一千篇按发布时间倒序排列的文章；查询失败时返回错误。
 // 副作用：只读 PostgreSQL。
 func (s *Service) WeReadFeedArticles(ctx context.Context) ([]FeedArticle, error) {
 	// 1. 使用固定上限读取微信读书来源文章，避免 RSS 长期增长占用过多内存。
