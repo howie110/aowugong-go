@@ -6,6 +6,7 @@ import (
 	"html"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -43,13 +44,15 @@ type rssGUID struct {
 	Value       string `xml:",chardata"`
 }
 
+var rssCollapsedParagraphBoundary = regexp.MustCompile(`([。！？；…][”’』》）】]?)\s+`)
+
 // registerArticleFeedRoutes 注册供服务器本机 Miniflux 读取的微信公众号 RSS。
 // 输入：router 是 API 路由器，service 提供持久文章查询。
 // 输出：无。
 // 副作用：修改路由注册表。
 func registerArticleFeedRoutes(router chi.Router, service *articleanalysis.Service) {
 	// 1. RSS 不使用工作台 JWT，仅允许回环地址访问。
-	router.Get("/feeds/weread.xml", articleFeedHandler(service))
+	router.Get("/feeds/weread/{accountID}.xml", articleFeedHandler(service))
 }
 
 // articleFeedHandler 输出最新微信公众号文章的 RSS 2.0 文档。
@@ -64,8 +67,12 @@ func articleFeedHandler(service *articleanalysis.Service) http.HandlerFunc {
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
-		articles, err := service.WeReadFeedArticles(request.Context())
+		source, articles, err := service.WeReadFeedArticles(request.Context(), chi.URLParam(request, "accountID"))
 		if err != nil {
+			if articleanalysis.IsWeReadFeedAccountNotFound(err) {
+				http.Error(w, "Feed not found", http.StatusNotFound)
+				return
+			}
 			http.Error(w, "RSS unavailable", http.StatusInternalServerError)
 			return
 		}
@@ -75,7 +82,7 @@ func articleFeedHandler(service *articleanalysis.Service) http.HandlerFunc {
 		if len(articles) > 0 {
 			latestID = articles[0].ID
 		}
-		etag := fmt.Sprintf(`W/"weread-%d-%d"`, latestID, len(articles))
+		etag := fmt.Sprintf(`W/"weread-%s-%d-%d"`, source.AccountID, latestID, len(articles))
 		w.Header().Set("ETag", etag)
 		w.Header().Set("Cache-Control", "private, max-age=300")
 		if request.Header.Get("If-None-Match") == etag {
@@ -84,7 +91,7 @@ func articleFeedHandler(service *articleanalysis.Service) http.HandlerFunc {
 		}
 
 		// 1.3. 构造 RSS 并一次写入，避免部分 XML 响应。
-		document := buildWeReadRSS(request, articles, time.Now())
+		document := buildWeReadRSS(request, source, articles, time.Now())
 		content, err := xml.Marshal(document)
 		if err != nil {
 			http.Error(w, "RSS unavailable", http.StatusInternalServerError)
@@ -101,7 +108,7 @@ func articleFeedHandler(service *articleanalysis.Service) http.HandlerFunc {
 // 输入：request 提供本机服务地址，articles 是倒序文章，now 是构建时间。
 // 输出：返回可由 encoding/xml 编码的 RSS 文档。
 // 副作用：无。
-func buildWeReadRSS(request *http.Request, articles []articleanalysis.FeedArticle, now time.Time) rssDocument {
+func buildWeReadRSS(request *http.Request, source articleanalysis.FeedSource, articles []articleanalysis.FeedArticle, now time.Time) rssDocument {
 	// 1. 使用请求地址生成频道链接，并逐篇转换稳定 GUID、时间和 HTML 正文。
 	scheme := "http"
 	if request.TLS != nil {
@@ -118,8 +125,8 @@ func buildWeReadRSS(request *http.Request, articles []articleanalysis.FeedArticl
 		})
 	}
 	return rssDocument{Version: "2.0", Channel: rssChannel{
-		Title: "Aowugong 微信公众号", Link: scheme + "://" + request.Host + "/article-analysis",
-		Description: "Aowugong 从微信读书书架获取的微信公众号文章。",
+		Title: source.Title, Link: scheme + "://" + request.Host + "/article-analysis",
+		Description: source.Title + "的微信公众号文章。",
 		Language:    "zh-CN", Generator: "aowugong-go", LastBuildDate: now.Format(time.RFC1123Z), Items: items,
 	}}
 }
@@ -148,17 +155,24 @@ func parseRSSArticleTime(value string) time.Time {
 // 输出：返回转义后包在段落中的 HTML。
 // 副作用：无。
 func rssArticleHTML(content, summary string) string {
-	// 1. 优先使用正文，统一换行后转义，避免文章文本注入 RSS HTML。
+	// 1. 优先使用正文并统一换行；历史单行正文按中文句末后的空白恢复段落边界。
 	text := strings.TrimSpace(content)
 	if text == "" {
 		text = strings.TrimSpace(summary)
 	}
-	escaped := html.EscapeString(text)
-	escaped = strings.ReplaceAll(escaped, "\r\n", "\n")
-	escaped = strings.ReplaceAll(escaped, "\r", "\n")
-	paragraphs := strings.Split(escaped, "\n\n")
-	for index, paragraph := range paragraphs {
-		paragraphs[index] = "<p>" + strings.ReplaceAll(strings.TrimSpace(paragraph), "\n", "<br>") + "</p>"
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	text = rssCollapsedParagraphBoundary.ReplaceAllString(text, "$1\n\n")
+
+	// 2. 每个非空段落独立转义，段内单换行保留为 br。
+	paragraphs := make([]string, 0)
+	for _, paragraph := range strings.Split(text, "\n\n") {
+		paragraph = strings.TrimSpace(paragraph)
+		if paragraph == "" {
+			continue
+		}
+		escaped := html.EscapeString(paragraph)
+		paragraphs = append(paragraphs, "<p>"+strings.ReplaceAll(escaped, "\n", "<br>")+"</p>")
 	}
 	return strings.Join(paragraphs, "")
 }
