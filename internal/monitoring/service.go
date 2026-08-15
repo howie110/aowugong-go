@@ -11,6 +11,8 @@ import (
 	"github.com/howiedata/aowugong-go/internal/config"
 )
 
+const monitorProbeTimeout = 10 * time.Second
+
 // Service 统一处理监控目标、探测、落库和页面摘要。
 type Service struct {
 	repository *Repository
@@ -139,9 +141,7 @@ func (s *Service) Summary(ctx context.Context) (Summary, error) {
 // 输出：返回 up/down 结果，不把业务异常向上抛出。
 // 副作用：调用外部 HTTP/API 或只读访问 OpeniLink DB。
 func (s *Service) checkTarget(ctx context.Context, target Target) Result {
-	// 1. 为每个目标设置独立十秒超时，并优先选择不对外展示的内部探测地址。
-	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+	// 1. 优先选择不对外展示的内部探测地址，并准备统一结果字段。
 	probeURL := strings.TrimSpace(target.ProbeURL)
 	if probeURL == "" {
 		probeURL = target.URL
@@ -154,11 +154,13 @@ func (s *Service) checkTarget(ctx context.Context, target Target) Result {
 
 	// 2. OpeniLink 优先读本机自身的 SQLite，缺少文件时才做空内容 HTTP 探测。
 	if target.Code == "openilink-hub" {
+		checkCtx, cancel := context.WithTimeout(ctx, monitorProbeTimeout)
+		defer cancel()
 		return s.checkOpenILink(checkCtx, probeURL, base)
 	}
 
-	// 3. 普通服务按网络错误和 HTTP 5xx 判断健康。
-	probe := s.client.ProbeURL(checkCtx, probeURL)
+	// 3. 普通服务失败后复检一次，连续两次失败才判定异常。
+	probe := s.probeURLWithRetry(ctx, probeURL)
 	base.HTTPStatus = probe.HTTPStatus
 	base.LatencyMS = intValuePointer(probe.LatencyMS)
 	if probe.Healthy {
@@ -167,6 +169,26 @@ func (s *Service) checkTarget(ctx context.Context, target Target) Result {
 		base.ErrorMessage = textPointer(probe.Message)
 	}
 	return base
+}
+
+// probeURLWithRetry 探测普通 HTTP 服务，并对瞬时网络故障复检一次。
+// 输入：ctx 是任务上下文，probeURL 是实际探测地址。
+// 输出：任一次成功即返回健康结果；连续两次失败时返回最后一次结果。
+// 副作用：最多调用外部 HTTP 服务两次。
+func (s *Service) probeURLWithRetry(ctx context.Context, probeURL string) client.ProbeResult {
+	// 1. 每次请求使用独立超时，避免首次超时耗尽复检窗口。
+	var result client.ProbeResult
+	for attempt := 0; attempt < 2; attempt++ {
+		checkCtx, cancel := context.WithTimeout(ctx, monitorProbeTimeout)
+		result = s.client.ProbeURL(checkCtx, probeURL)
+		cancel()
+		if result.Healthy || ctx.Err() != nil {
+			return result
+		}
+	}
+
+	// 2. 连续失败时保留第二次结果，作为页面和通知中的最终依据。
+	return result
 }
 
 // checkOpenILink 静默验证 OpeniLink 是否具备发送能力。

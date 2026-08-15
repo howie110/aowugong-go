@@ -45,6 +45,65 @@ func TestCheckTargetUsesProbeURLAndKeepsPublicURL(t *testing.T) {
 	}
 }
 
+// TestCheckTargetRetriesTransientFailure 验证普通服务首次失败后会复检一次。
+// 输入：第一次返回 503、第二次返回 200 的本地 HTTP 服务。
+// 输出：最终监控状态为正常，并且服务共收到两次请求。
+// 副作用：启动本地 HTTP 服务。
+func TestCheckTargetRetriesTransientFailure(t *testing.T) {
+	// 1. 准备首次失败、复检成功的普通 HTTP 服务。
+	var requests atomic.Int32
+	probeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer probeServer.Close()
+
+	// 2. 执行探测并要求复检结果覆盖首次瞬时失败。
+	service := NewService(nil, client.NewMonitoringClient(probeServer.Client()), config.Clients{})
+	result := service.checkTarget(context.Background(), Target{
+		Code: "demo", Name: "Demo", URL: probeServer.URL,
+	})
+
+	// 3. 连续请求次数和最终健康状态必须与复检规则一致。
+	if result.Status != "up" || result.HTTPStatus == nil || *result.HTTPStatus != http.StatusOK {
+		t.Fatalf("result = %#v", result)
+	}
+	if requests.Load() != 2 {
+		t.Fatalf("requests = %d, want 2", requests.Load())
+	}
+}
+
+// TestCheckTargetKeepsSecondFailure 验证普通服务连续失败时仍会告警。
+// 输入：始终返回 503 的本地 HTTP 服务。
+// 输出：最终监控状态为异常，并保留第二次 HTTP 状态。
+// 副作用：启动本地 HTTP 服务。
+func TestCheckTargetKeepsSecondFailure(t *testing.T) {
+	// 1. 准备连续返回服务不可用的普通 HTTP 服务。
+	var requests atomic.Int32
+	probeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer probeServer.Close()
+
+	// 2. 执行探测并要求连续失败保持异常状态。
+	service := NewService(nil, client.NewMonitoringClient(probeServer.Client()), config.Clients{})
+	result := service.checkTarget(context.Background(), Target{
+		Code: "demo", Name: "Demo", URL: probeServer.URL,
+	})
+
+	// 3. 两次探测均失败后必须保留最终错误，不得误报正常。
+	if result.Status != "down" || result.HTTPStatus == nil || *result.HTTPStatus != http.StatusServiceUnavailable {
+		t.Fatalf("result = %#v", result)
+	}
+	if requests.Load() != 2 {
+		t.Fatalf("requests = %d, want 2", requests.Load())
+	}
+}
+
 // TestCheckOpenILinkUsesHTTPWithoutReadingDatabase 验证 OpeniLink 监控只调用内部 HTTP 接口。
 // 输入：返回健康状态的本地 OpeniLink 模拟服务。
 // 输出：监控结果正常且未依赖 OpeniLink 数据库文件。

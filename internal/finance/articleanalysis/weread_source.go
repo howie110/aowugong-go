@@ -408,6 +408,9 @@ func (s *WeReadSource) Fetch(ctx context.Context, sourceID int64, _ string, limi
 		}
 		references, listErr := s.client.ListRecentArticles(ctx, &credentials, account.AccountID, perAccount)
 		if listErr != nil {
+			if errors.Is(listErr, client.ErrWeReadArticleAuth) || errors.Is(listErr, client.ErrWeReadArticleVerification) {
+				return nil, listErr
+			}
 			failures = append(failures, account.Title+": "+listErr.Error())
 			continue
 		}
@@ -452,7 +455,10 @@ func (s *WeReadSource) Fetch(ctx context.Context, sourceID int64, _ string, limi
 		}
 		content, finalURL, contentErr := s.client.FetchArticleContent(ctx, detail.SourceURL)
 		if contentErr != nil {
-			content = weReadDetailContentFallback(detail.Title)
+			content = strings.TrimSpace(detail.Content)
+			if content == "" {
+				content = weReadDetailContentFallback(detail.Title)
+			}
 			finalURL = detail.SourceURL
 			if content == "" {
 				failures = append(failures, weReadArticleTitle(reference.Title, detail.Title)+": "+contentErr.Error())

@@ -107,6 +107,7 @@ type WeReadArticleDetail struct {
 	SourceURL   string
 	Author      string
 	PublishedAt int64
+	Content     string
 }
 
 // WeReadArticleClient 负责扫码认证、书架公众号和微信文章读取。
@@ -348,12 +349,14 @@ func (c *WeReadArticleClient) FetchArticleDetail(ctx context.Context, credential
 		"likesCount": {"10"}, "likesDirection": {"0"}, "synckey": {"0"},
 	}
 	var response struct {
-		Review *struct {
+		HTMLContent string `json:"htmlContent"`
+		Review      *struct {
 			MPInfo *struct {
 				DocumentURL string `json:"doc_url"`
 				Title       string `json:"title"`
 				AccountName string `json:"mp_name"`
 				PublishedAt int64  `json:"time"`
+				HTMLContent string `json:"htmlContent"`
 			} `json:"mpInfo"`
 		} `json:"review"`
 	}
@@ -367,7 +370,25 @@ func (c *WeReadArticleClient) FetchArticleDetail(ctx context.Context, credential
 	if info.DocumentURL == "" || info.Title == "" || info.AccountName == "" || info.PublishedAt <= 0 {
 		return WeReadArticleDetail{}, fmt.Errorf("微信读书文章 %s 详情字段不完整", reviewID)
 	}
-	return WeReadArticleDetail{Title: info.Title, SourceURL: info.DocumentURL, Author: info.AccountName, PublishedAt: info.PublishedAt}, nil
+	return WeReadArticleDetail{
+		Title: info.Title, SourceURL: info.DocumentURL, Author: info.AccountName, PublishedAt: info.PublishedAt,
+		Content: firstNonEmptyWeReadContent(response.HTMLContent, info.HTMLContent),
+	}, nil
+}
+
+// firstNonEmptyWeReadContent 从微信读书详情候选字段中提取第一份有效正文。
+// 输入：values 是可能包含 HTML 或纯文本的正文候选值。
+// 输出：返回清理后的第一份非空正文；全部无效时返回空字符串。
+// 副作用：无。
+func firstNonEmptyWeReadContent(values ...string) string {
+	// 1. 按接口稳定性顺序清理候选内容，过滤只有标签或空白的字段。
+	for _, value := range values {
+		content := htmlToText(value)
+		if strings.TrimSpace(content) != "" {
+			return content
+		}
+	}
+	return ""
 }
 
 // FetchArticleContent 抓取微信公众号原文并提取纯文本正文。

@@ -126,6 +126,35 @@ func TestWeReadArticleClientPreservesRefreshToken(t *testing.T) {
 	}
 }
 
+// TestWeReadArticleClientReadsDetailHTMLContent 验证文章详情保留微信读书返回的备用正文。
+// 输入：包含 mpInfo 和顶层 htmlContent 的单篇文章详情响应。
+// 输出：返回规范元数据和清理标签后的备用正文。
+// 副作用：执行一次内存 HTTP 往返，不访问网络。
+func TestWeReadArticleClientReadsDetailHTMLContent(t *testing.T) {
+	// 1. 返回原文元数据与微信读书详情中已经携带的富文本正文。
+	transport := weReadRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != "/review/single" || request.URL.Query().Get("reviewId") != "review-1" {
+			t.Fatalf("detail request = %s", request.URL.String())
+		}
+		body := `{"htmlContent":"<p>第一段备用正文</p><p>第二段备用正文</p>","review":{"mpInfo":{"doc_url":"https://mp.weixin.qq.com/s/test","title":"测试文章","mp_name":"测试公众号","time":100}}}`
+		return weReadTestResponse(request, http.StatusOK, "application/json", body), nil
+	})
+	articleClient := NewWeReadArticleClient(&http.Client{Transport: transport})
+	articleClient.requestGap = 0
+	credentials := WeReadArticleCredentials{
+		VID: "123456", DeviceID: "device-test", AccessToken: "access-token", RefreshToken: "refresh-token",
+	}
+
+	// 2. 读取详情并核对富文本已经转换为分析可用的纯文本。
+	detail, err := articleClient.FetchArticleDetail(context.Background(), &credentials, "review-1")
+	if err != nil {
+		t.Fatalf("FetchArticleDetail() error = %v", err)
+	}
+	if detail.Content != "第一段备用正文 第二段备用正文" || detail.Title != "测试文章" {
+		t.Fatalf("detail = %#v", detail)
+	}
+}
+
 // TestWeReadArticleClientExtractsWeChatText 验证微信公众号正文只读取 js_content 可见文本。
 // 输入：包含旁路内容、脚本和正文节点的 HTML。
 // 输出：返回压缩后的正文文本和规范原文地址。
