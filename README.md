@@ -21,6 +21,7 @@ internal/config/          环境变量和配置校验
 internal/database/        PostgreSQL 连接、迁移和 pg_dump 备份
 internal/databaseview/    管理员只读数据库页面
 internal/httpserver/      路由、中间件和 React 静态资源
+internal/vpn/             私有 VPN 资源转换、设备 Token 和 Go 直连分发
 internal/scheduler/       任务注册、Cron、执行包装和数据库锁
 internal/finance/         行情、仓位、文章分析、回测和任务
 internal/testdatabase/    隔离 SQLite 测试夹具，不进入生产运行路径
@@ -71,6 +72,8 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 ```
 
 投资文章不再依赖外部 RSS 聚合接口。在“投资研究 > 投资文章抓取”中扫码绑定一个微信读书账号，服务会从书架发现公众号；人工启用的公众号由 08:00、20:00 任务各检查最近 20 篇，只为数据库未知文章读取详情和微信公众号原文。登录凭据使用 `AOWUGONG_ENCRYPTION_KEY` 派生的 AES-256-GCM 密钥加密后存入 PostgreSQL，二维码中间态只保存在当前 Go 进程内。Go 同时按公众号从已入库文章生成 `http://127.0.0.1:2345/feeds/weread/{account_id}.xml`，仅允许服务器回环地址访问，供同机 Miniflux 分源保存和阅读公众号全文。
+
+“系统运维 > VPN 订阅”从 `storage/private/vpn` 读取被 Git 忽略的 Clash、Xray、Shadowrocket 和 Surge 文件，按文件名中的资源编码归组。每个资源统一生成 Clash/FlClash、Shadowrocket、Surge、v2rayN/v2rayNG 四种订阅。管理员可为每台终端生成独立直连订阅，复制地址或显示二维码，并单独重新发布、轮换和撤销。设备 Token 由 `AOWUGONG_ENCRYPTION_KEY`、设备主键和版本通过 HMAC 派生，数据库不保存 Token 或节点正文；订阅由当前 Go 服务实时读取私有文件并返回。
 
 需要补跑或修改线上数据时，通过 SSH 在服务器加载正式环境并调用统一 CLI：
 
@@ -134,6 +137,15 @@ BACKUP_ARCHIVE=/root/vaultwarden-backup.tar.gz CONFIRM_DISASTER_RESTORE=YES \
 - 实际启用客户端所需的 Token 或密钥
 
 启用代码备份时还需配置 `GITHUB_BACKUP_ENABLED=true` 和具备账号全部仓库及两个固定组织仓库只读权限的 `GITHUB_BACKUP_TOKEN`。Token 只通过 Git 子进程环境使用，不写入仓库远端地址、清单或日志。
+
+VPN 订阅直接由已开放的 Go 服务提供，确保设备在尚未连接代理时也能访问。生产 `.env` 配置服务器公开根地址：
+
+```env
+VPN_SOURCE_DIR=storage/private/vpn
+VPN_PUBLIC_URL=http://8.138.123.59:2345
+```
+
+原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每台设备独立高强度 Token，可以在页面轮换或撤销。当前无域名和 HTTPS，订阅正文会经过明文 HTTP 传输；它解决的是设备在没有代理时从国内服务器取得初始资源的问题。
 
 `FINANCE_ENABLE_REAL_TRADE` 默认 `false`。`AOWUGONG_SQLITE_SOURCE_PATH` 只供一次迁移工具读取，正式服务不使用。
 

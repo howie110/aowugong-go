@@ -34,6 +34,7 @@ const WorkPage = lazy(() => import("@/pages/work").then((module) => ({ default: 
 const PermissionsPage = lazy(() => import("@/pages/permissions").then((module) => ({ default: module.PermissionsPage })));
 const MonitoringPage = lazy(() => import("@/pages/monitoring").then((module) => ({ default: module.MonitoringPage })));
 const DatabasePage = lazy(() => import("@/pages/database").then((module) => ({ default: module.DatabasePage })));
+const VPNPage = lazy(() => import("@/pages/vpn").then((module) => ({ default: module.VPNPage })));
 
 const selfManagedPages = new Set<FinancePageKey>([
   "positions",
@@ -47,6 +48,7 @@ const selfManagedPages = new Set<FinancePageKey>([
   "permissions",
   "monitoring",
   "database",
+  "vpn",
 ]);
 const pageOrder: FinancePageKey[] = [
   "overview",
@@ -65,6 +67,7 @@ const pageOrder: FinancePageKey[] = [
   "notifications",
   "monitoring",
   "database",
+  "vpn",
   "permissions",
 ];
 
@@ -241,6 +244,9 @@ function FinancePageBody({
   }
   if (pageKey === "database") {
     return <DatabasePage />;
+  }
+  if (pageKey === "vpn") {
+    return <VPNPage />;
   }
   if (!pageData) {
     return <LoadingCard />;

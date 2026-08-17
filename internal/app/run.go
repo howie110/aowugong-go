@@ -30,6 +30,7 @@ import (
 	"github.com/howiedata/aowugong-go/internal/scheduler"
 	"github.com/howiedata/aowugong-go/internal/subscription"
 	"github.com/howiedata/aowugong-go/internal/vaultwardenbackup"
+	"github.com/howiedata/aowugong-go/internal/vpn"
 	"github.com/howiedata/aowugong-go/internal/weread"
 	"github.com/howiedata/aowugong-go/internal/work"
 )
@@ -237,6 +238,16 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 		MaxBytes: cfg.Clients.PositionOCR.UploadMaxMB * 1024 * 1024, OCRProvider: cfg.Clients.PositionOCR.Provider,
 	})
 	stockAnalysisService := stockanalysis.NewService(stockanalysis.NewRepository(db))
+	vpnSecret := cfg.Auth.EncryptionKey
+	if vpnSecret == "" {
+		vpnSecret = developmentJWTSecret
+	}
+	vpnService := vpn.NewService(
+		vpn.NewRepository(db),
+		vpn.NewSourceCatalog(cfg.VPN.SourceDir),
+		vpn.NewDirectDistributor(cfg.VPN.PublicURL),
+		vpnSecret,
+	)
 	if err := tasks.articleRepository.SyncWeReadSource(ctx); err != nil {
 		return nil, fmt.Errorf("初始化投资文章来源: %w", err)
 	}
@@ -259,6 +270,7 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 		WeRead: wereadService, Monitoring: tasks.monitoring, Finance: financeService,
 		Position: positionService, StockAnalysis: stockAnalysisService, ArticleAnalysis: tasks.articles,
 		Jobs: jobRegistry, Database: databaseview.NewService(db),
+		VPN: vpnService,
 	})
 	success = true
 	return &appRuntime{db: db, handler: handler, registry: jobRegistry, scheduler: cronScheduler}, nil

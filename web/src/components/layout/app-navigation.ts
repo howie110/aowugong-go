@@ -17,6 +17,7 @@ import {
   TableProperties,
   UserCog,
   WalletCards,
+  Wifi,
   type LucideIcon,
 } from "lucide-react";
 
@@ -88,6 +89,7 @@ export const navGroups: NavGroup[] = [
       { key: "jobs", label: "定时任务", icon: CalendarClock, permission: pagePermissionMap.jobs },
       { key: "notifications", label: "通知", icon: Bell, permission: pagePermissionMap.notifications },
       { key: "database", label: "数据库", icon: TableProperties, permission: pagePermissionMap.database },
+      { key: "vpn", label: "VPN 订阅", icon: Wifi, permission: pagePermissionMap.vpn },
       { key: "permissions", label: "权限管理", icon: UserCog, permission: pagePermissionMap.permissions },
     ],
   },

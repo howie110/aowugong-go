@@ -22,6 +22,7 @@ const (
 	PermissionWork                   = "page:work"
 	PermissionPermissions            = "page:permissions"
 	PermissionDatabase               = "page:database"
+	PermissionVPN                    = "page:vpn"
 )
 
 // Permission 描述系统内置页面权限。
@@ -71,6 +72,7 @@ var DefaultPermissions = []Permission{
 	{Code: PermissionWork, Name: "工作导航", Group: "work", Description: "查看常用系统、工具和资料导航。"},
 	{Code: PermissionPermissions, Name: "权限管理", Group: "system", Description: "查看权限管理页面，并给用户加入角色。"},
 	{Code: PermissionDatabase, Name: "数据库", Group: "system", Description: "只读查看 PostgreSQL 表结构、数据和脱敏导出。"},
+	{Code: PermissionVPN, Name: "VPN 订阅", Group: "system", Description: "管理私有 VPN 资源、设备订阅和分发密钥。"},
 }
 
 // DefaultRoles 是由代码维护的系统角色基线。

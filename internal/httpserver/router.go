@@ -16,6 +16,7 @@ import (
 	"github.com/howiedata/aowugong-go/internal/rbac"
 	"github.com/howiedata/aowugong-go/internal/scheduler"
 	"github.com/howiedata/aowugong-go/internal/subscription"
+	"github.com/howiedata/aowugong-go/internal/vpn"
 	"github.com/howiedata/aowugong-go/internal/weread"
 	"github.com/howiedata/aowugong-go/internal/work"
 )
@@ -36,6 +37,7 @@ type Dependencies struct {
 	ArticleAnalysis *articleanalysis.Service
 	Jobs            *scheduler.Registry
 	Database        databaseReadService
+	VPN             *vpn.Service
 }
 
 type router struct {
@@ -100,6 +102,9 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 	if deps.Auth != nil && deps.RBAC != nil && deps.Database != nil {
 		registerDatabaseRoutes(api, deps.Auth, deps.RBAC, deps.Database)
+	}
+	if deps.Auth != nil && deps.RBAC != nil && deps.VPN != nil {
+		registerVPNRoutes(api, deps.Auth, deps.RBAC, deps.VPN)
 	}
 
 	// 3. 组装 API 与 SPA 静态文件处理器。

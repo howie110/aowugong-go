@@ -18,6 +18,7 @@ export type FinancePageKey =
   | "monitoring"
   | "work"
   | "database"
+  | "vpn"
   | "permissions";
 
 export type FinanceMetric = {
@@ -74,6 +75,7 @@ export const pagePermissionMap: Record<FinancePageKey, string> = {
   monitoring: "page:monitoring",
   work: "page:work",
   database: "page:database",
+  vpn: "page:vpn",
   permissions: "page:permissions",
 };
 
@@ -142,6 +144,10 @@ export const pageMetaMap: Record<FinancePageKey, { title: string; description: s
     title: "数据库",
     description: "只读查看 PostgreSQL 表结构、数据和脱敏导出。",
   },
+  vpn: {
+    title: "VPN 订阅",
+    description: "把私有 VPN 资源转换为设备独立、可撤销的 HTTPS 订阅。",
+  },
   permissions: {
     title: "权限管理",
     description: "把用户加入角色，角色权限由系统预设维护。",
@@ -169,6 +175,7 @@ const pageEndpointMap: Record<FinancePageKey, string> = {
   monitoring: "/api/v1/monitoring/summary",
   work: "/api/v1/work/navigation",
   database: "/api/v1/database/summary",
+  vpn: "/api/v1/vpn/summary",
   permissions: "/api/v1/permissions/summary",
 };
 
@@ -206,6 +213,9 @@ export function getFinancePagePath(pageKey: FinancePageKey) {
   if (pageKey === "database") {
     return "/database";
   }
+  if (pageKey === "vpn") {
+    return "/vpn";
+  }
   return `/${pageKey}`;
 }
 
@@ -233,6 +243,7 @@ export function getFinancePageFromPath(pathname: string): FinancePageKey {
     path === "monitoring" ||
     path === "work" ||
     path === "database" ||
+    path === "vpn" ||
     path === "permissions"
   ) {
     return path;

@@ -97,6 +97,8 @@ configure_runtime_env() {
   set_env_value "$file" AOWUGONG_BACKUP_DIR "$APP_ROOT/shared/storage/backup"
   set_env_value "$file" AOWUGONG_POSITION_UPLOAD_DIR "$APP_ROOT/shared/storage/uploads/positions"
   set_env_value "$file" AOWUGONG_POSITION_TEMP_DIR "$APP_ROOT/shared/storage/temp/positions"
+  set_env_value "$file" VPN_SOURCE_DIR "$APP_ROOT/shared/storage/private/vpn"
+  set_env_value "$file" VPN_PUBLIC_URL "http://8.138.123.59:$APP_PORT"
   set_env_value "$file" AOWUGONG_SCHEDULER_ENABLED "$SCHEDULER_ENABLED"
   chown "$RUN_USER:$RUN_GROUP" "$file"
 }

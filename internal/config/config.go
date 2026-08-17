@@ -20,6 +20,7 @@ const (
 	defaultStaticDir          = "web/dist"
 	defaultTokenLifetime      = 72 * time.Hour
 	defaultWorkNavigationPath = "storage/private/work/navigation.json"
+	defaultVPNSourceDir       = "storage/private/vpn"
 	defaultBackupDir          = "storage/backup"
 	defaultPositionUploadDir  = "storage/uploads/positions"
 	defaultPositionTempDir    = "storage/temp/positions"
@@ -40,6 +41,7 @@ type Config struct {
 	Storage           Storage
 	GitHubBackup      GitHubBackup
 	VaultwardenBackup VaultwardenBackup
+	VPN               VPN
 	Clients           Clients
 	Finance           Finance
 	Scheduler         Scheduler
@@ -98,6 +100,12 @@ type VaultwardenBackup struct {
 	AgeRecipient             string
 	EmailTo                  string
 	MaxAttachmentMB          int
+}
+
+// VPN 描述私有配置目录和 Go 直连订阅公开地址。
+type VPN struct {
+	SourceDir string
+	PublicURL string
 }
 
 // Clients 描述当前可达业务使用的外部 HTTP 服务配置。
@@ -214,6 +222,7 @@ func Load(lookup LookupEnv) (Config, error) {
 		VaultwardenBackup: VaultwardenBackup{
 			Directory: "storage/backup/vaultwarden", RecoveryScriptsDirectory: "scripts", MaxAttachmentMB: 45,
 		},
+		VPN: VPN{SourceDir: defaultVPNSourceDir},
 		Clients: Clients{
 			WeRead: WeRead{
 				GatewayURL:   "https://i.weread.qq.com/api/agent/gateway",
@@ -270,6 +279,8 @@ func Load(lookup LookupEnv) (Config, error) {
 	loadString(lookup, "VAULTWARDEN_BACKUP_RECOVERY_SCRIPTS_DIR", &cfg.VaultwardenBackup.RecoveryScriptsDirectory)
 	loadString(lookup, "VAULTWARDEN_BACKUP_AGE_RECIPIENT", &cfg.VaultwardenBackup.AgeRecipient)
 	loadString(lookup, "VAULTWARDEN_BACKUP_EMAIL_TO", &cfg.VaultwardenBackup.EmailTo)
+	loadString(lookup, "VPN_SOURCE_DIR", &cfg.VPN.SourceDir)
+	loadString(lookup, "VPN_PUBLIC_URL", &cfg.VPN.PublicURL)
 	repositoryNames := strings.Join(cfg.GitHubBackup.RequiredRepositories, ",")
 	loadString(lookup, "GITHUB_BACKUP_REQUIRED_REPOSITORIES", &repositoryNames)
 	cfg.GitHubBackup.RequiredRepositories = splitCommaSeparated(repositoryNames)
@@ -357,6 +368,8 @@ func Load(lookup LookupEnv) (Config, error) {
 	cfg.GitHubBackup.Directory = filepath.Clean(cfg.GitHubBackup.Directory)
 	cfg.VaultwardenBackup.Directory = filepath.Clean(cfg.VaultwardenBackup.Directory)
 	cfg.VaultwardenBackup.RecoveryScriptsDirectory = filepath.Clean(cfg.VaultwardenBackup.RecoveryScriptsDirectory)
+	cfg.VPN.SourceDir = filepath.Clean(cfg.VPN.SourceDir)
+	cfg.VPN.PublicURL = strings.TrimRight(strings.TrimSpace(cfg.VPN.PublicURL), "/")
 	if cfg.MigrationsDir != "" {
 		cfg.MigrationsDir = filepath.Clean(cfg.MigrationsDir)
 	}
