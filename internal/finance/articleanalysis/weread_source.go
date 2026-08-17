@@ -311,27 +311,39 @@ func (s *WeReadSource) RefreshAccounts(ctx context.Context) ([]WeReadAccount, er
 	return s.refreshAccountsWithCredentials(ctx, credentials)
 }
 
-// CheckCredential 检查扫码凭据能否读取书架并累计实际有效寿命。
+// CheckCredential 检查扫码凭据能否读取公众号文章列表并累计实际有效寿命。
 // 输入：ctx 控制数据库和微信读书请求。
 // 输出：返回本次状态、绑定时长、检查和自动刷新次数。
 // 副作用：调用微信读书，可能刷新并加密保存 Token，写入健康统计。
 func (s *WeReadSource) CheckCredential(ctx context.Context) (WeReadCredentialCheckResult, error) {
-	// 1. 串行读取凭据并通过书架接口验证完整认证链路。
+	// 1. 串行读取凭据和已启用公众号，避免健康检查与文章抓取同时访问上游。
 	s.operationMutex.Lock()
 	defer s.operationMutex.Unlock()
 	credentials, err := s.loadCredentials(ctx)
 	if err != nil {
 		return WeReadCredentialCheckResult{}, err
 	}
+	accounts, err := s.repository.listWeReadAccounts(ctx, true)
+	if err != nil {
+		return WeReadCredentialCheckResult{}, err
+	}
+	if len(accounts) == 0 {
+		return WeReadCredentialCheckResult{}, fmt.Errorf("尚未启用任何微信读书公众号")
+	}
+
+	// 2. 只读取第一个公众号的一条文章，使用与正式抓取相同的接口验证凭据且控制请求量。
 	original := credentials
-	accounts, checkErr := s.client.DiscoverPublicAccounts(ctx, &credentials)
+	_, checkErr := s.client.ListRecentArticles(ctx, &credentials, accounts[0].AccountID, 1)
+	if checkErr != nil {
+		checkErr = fmt.Errorf("检查公众号 %s 文章读取: %w", accounts[0].Title, checkErr)
+	}
 	if credentials != original {
 		if saveErr := s.saveCredentials(ctx, credentials, false); saveErr != nil {
 			checkErr = errors.Join(checkErr, saveErr)
 		}
 	}
 
-	// 2. 只把明确认证拒绝记为失效，网络和上游异常保留为检查错误。
+	// 3. 只把明确认证拒绝记为失效，网络和上游异常保留为检查错误。
 	status, message := "valid", ""
 	if checkErr != nil {
 		status, message = "error", checkErr.Error()

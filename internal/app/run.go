@@ -334,14 +334,20 @@ func newJobRegistry(cfg config.Config, db *sql.DB, services taskServices) (*sche
 
 	// 2. 把唯一业务服务交给任务定义，Registry 统一负责锁、记录和失败通知。
 	registry := scheduler.NewRegistry(db, services.notification, slog.Default())
-	if err := financejob.RegisterAll(registry, financejob.Dependencies{
+	dependencies := financejob.Dependencies{
 		DB: db, Data: services.data, Articles: services.articles, WeReadCredential: services.articles,
 		Monitoring: services.monitoring, Subscriptions: services.subscriptions, Notification: services.notification,
-		GitHubBackup:      services.githubBackup,
-		VaultwardenBackup: services.vaultwardenBackup,
-		BackupDir:         backupDir, BackupRetention: backupRetention,
+		BackupDir: backupDir, BackupRetention: backupRetention,
 		Backup: database.NewPostgresBackuper(cfg.Database.URL).Backup,
-	}); err != nil {
+	}
+	// 3. 指针先判空再赋给接口，避免 typed nil 被误判为已启用的可选任务。
+	if services.githubBackup != nil {
+		dependencies.GitHubBackup = services.githubBackup
+	}
+	if services.vaultwardenBackup != nil {
+		dependencies.VaultwardenBackup = services.vaultwardenBackup
+	}
+	if err := financejob.RegisterAll(registry, dependencies); err != nil {
 		return nil, fmt.Errorf("注册生产任务: %w", err)
 	}
 	return registry, nil

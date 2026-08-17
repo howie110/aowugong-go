@@ -110,7 +110,7 @@ func RegisterAll(registry *scheduler.Registry, dependencies Dependencies) error 
 		{Name: "test_crontab", Description: "每日任务链路测试", Schedule: "0 9 * * *", Timeout: time.Minute, Run: taskSet.testCrontab},
 		{Name: "update_tushare_daily_data", Description: "更新 Tushare 日线数据", ManualOnly: true, Timeout: 2 * time.Hour, Run: taskSet.updateTushareDailyData},
 		{Name: "sync_investment_articles", Description: "同步并分析投资文章", Schedule: "0 8,20 * * *", ConcurrencyKey: "investment_signal_groups", Timeout: 3 * time.Hour, Run: taskSet.syncInvestmentArticles},
-		{Name: "check_weread_credential", Description: "检查微信读书扫码凭据寿命", Schedule: "15 * * * *", Timeout: 5 * time.Minute, Run: taskSet.checkWeReadCredential},
+		{Name: "check_weread_credential", Description: "按需检查微信读书文章接口", ManualOnly: true, Timeout: 5 * time.Minute, Run: taskSet.checkWeReadCredential},
 		{Name: "rebuild_investment_signal_groups", Description: "全局重建投资信号概念组", ManualOnly: true, ConcurrencyKey: "investment_signal_groups", Timeout: 30 * time.Minute, Run: taskSet.rebuildInvestmentSignalGroups},
 		{Name: "check_service_monitors", Description: "检查服务连通性", Schedule: "0 22 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkServiceMonitors},
 		{Name: "check_subscription_expiry_notify", Description: "检查订阅到期并提醒", Schedule: "30 9 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkSubscriptionExpiryNotify},

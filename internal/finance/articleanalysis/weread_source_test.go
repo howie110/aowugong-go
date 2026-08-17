@@ -3,6 +3,9 @@ package articleanalysis
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +13,31 @@ import (
 	"github.com/howiedata/aowugong-go/internal/client"
 	"github.com/howiedata/aowugong-go/internal/testdatabase"
 )
+
+type articleAnalysisRoundTripFunc func(*http.Request) (*http.Response, error)
+
+// RoundTrip 执行文章分析测试声明的内存 HTTP 响应。
+// 输入：request 是微信读书客户端生成的请求。
+// 输出：返回测试响应或传输错误。
+// 副作用：调用测试闭包，不访问网络。
+func (function articleAnalysisRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	// 1. 把请求交给当前测试定义的处理函数。
+	return function(request)
+}
+
+// articleAnalysisHTTPResponse 创建绑定到原请求的内存 HTTP 响应。
+// 输入：request 是原请求，status 是状态码，body 是响应正文。
+// 输出：返回可由标准客户端关闭的响应。
+// 副作用：分配内存正文读取器。
+func articleAnalysisHTTPResponse(request *http.Request, status int, body string) *http.Response {
+	// 1. 写入微信读书客户端解码所需的最小响应字段。
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    request,
+	}
+}
 
 // TestWeReadSourceCredentialRoundTrip 验证微信读书凭据只以密文保存并可由同一应用密钥恢复。
 // 输入：一组完整测试凭据和隔离 SQLite。
@@ -51,7 +79,7 @@ func TestWeReadSourceCredentialRoundTrip(t *testing.T) {
 	}
 }
 
-// TestWeReadCredentialHealthLifecycle 验证每小时检查累计绑定寿命和自动刷新次数。
+// TestWeReadCredentialHealthLifecycle 验证多次检查会累计绑定寿命和自动刷新次数。
 // 输入：一份新扫码凭据、一次有效检查、一次自动刷新和一次认证失效。
 // 输出：绑定时间不被刷新覆盖，检查与刷新次数准确，寿命停在首次失效时间。
 // 副作用：写入隔离 SQLite 测试库。
@@ -98,6 +126,50 @@ func TestWeReadCredentialHealthLifecycle(t *testing.T) {
 	result := buildWeReadCredentialCheckResult(health, boundAt.Add(5*time.Hour), 0)
 	if result.Status != "invalid" || result.ValidFor != "3小时" || result.CheckCount != 2 || result.RefreshCount != 1 {
 		t.Fatalf("credential result = %#v", result)
+	}
+}
+
+// TestWeReadCredentialCheckUsesArticleEndpoint 验证凭据检查使用正式文章列表接口而不是较宽松的书架接口。
+// 输入：一个已启用公众号和返回人工验证错误的内存微信读书服务。
+// 输出：检查返回人工验证错误并把凭据健康状态记为失效。
+// 副作用：执行一次内存 HTTP 请求并写入隔离测试数据库。
+func TestWeReadCredentialCheckUsesArticleEndpoint(t *testing.T) {
+	// 1. 保存完整凭据并准备一个参与正式抓取的公众号。
+	ctx := context.Background()
+	db := testdatabase.Open(t)
+	repository := NewRepository(db)
+	if err := repository.upsertWeReadAccounts(ctx, []WeReadAccount{{
+		AccountID: "MP_WXS_100", Title: "测试公众号",
+	}}); err != nil {
+		t.Fatalf("upsertWeReadAccounts() error = %v", err)
+	}
+	if err := repository.setWeReadAccountEnabled(ctx, "MP_WXS_100", true); err != nil {
+		t.Fatalf("setWeReadAccountEnabled() error = %v", err)
+	}
+	transport := articleAnalysisRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != "/mp/chapters" || request.URL.Query().Get("count") != "1" {
+			t.Fatalf("credential check request = %s", request.URL.String())
+		}
+		return articleAnalysisHTTPResponse(request, http.StatusOK, `{"errCode":-2041,"errMsg":"verify required"}`), nil
+	})
+	source := NewWeReadSource(repository, client.NewWeReadArticleClient(&http.Client{Transport: transport}), "test-secret")
+	credentials := client.WeReadArticleCredentials{
+		VID: "123456", DeviceID: "device-test", AccessToken: "access-secret", RefreshToken: "refresh-secret",
+	}
+	if err := source.saveCredentials(ctx, credentials, true); err != nil {
+		t.Fatalf("saveCredentials() error = %v", err)
+	}
+
+	// 2. 检查必须暴露人工验证错误，并持久化为页面可见的失效状态。
+	if _, err := source.CheckCredential(ctx); !errors.Is(err, client.ErrWeReadArticleVerification) {
+		t.Fatalf("CheckCredential() error = %v", err)
+	}
+	health, found, err := repository.weReadCredentialHealth(ctx)
+	if err != nil || !found {
+		t.Fatalf("weReadCredentialHealth() = %#v, %v, %v", health, found, err)
+	}
+	if health.LastStatus != "invalid" || !strings.Contains(health.LastError, "测试公众号") {
+		t.Fatalf("credential health = %#v", health)
 	}
 }
 

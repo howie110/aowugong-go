@@ -182,6 +182,15 @@ chown -R root:root "$release_directory"
 chmod 0755 "$release_directory/aowugong" "$release_directory/aowugong-migrate" "$release_directory/scripts/"*.sh
 chown -R "$RUN_USER:$RUN_GROUP" "$APP_ROOT/shared"
 
+# 2.1 同步可选 Vaultwarden 备份辅助脚本，并确保应用用户可读取 root 生成的归档。
+if [ -f /etc/systemd/system/vaultwarden-backup.service ] && [ -f "$release_directory/scripts/backup-vaultwarden.sh" ]; then
+  vaultwarden_backup_dir="$APP_ROOT/shared/storage/backup/vaultwarden"
+  install -m 0750 -o root -g root "$release_directory/scripts/backup-vaultwarden.sh" /usr/local/sbin/vaultwarden-backup
+  install -d -m 0750 -o root -g "$RUN_GROUP" "$vaultwarden_backup_dir"
+  find "$vaultwarden_backup_dir" -maxdepth 1 -type f \( -name 'vaultwarden-*.tar.gz' -o -name 'vaultwarden-*.tar.gz.sha256' \) \
+    -exec chown root:"$RUN_GROUP" {} + -exec chmod 0640 {} +
+fi
+
 if [ ! -f "$shared_env" ]; then
   [ -n "$ENV_FILE" ] || die "首次部署必须通过 ENV_FILE 提供生产配置"
   install -m 0600 -o "$RUN_USER" -g "$RUN_GROUP" "$ENV_FILE" "$shared_env"
