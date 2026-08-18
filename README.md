@@ -9,7 +9,7 @@
 - 数据库：PostgreSQL 15+，连接池默认 `8/4`，时区 `Asia/Shanghai`
 - 调度：`robfig/cron/v3`，任务统一经过并发锁、超时、panic 恢复、日志、结果入库和失败微信通知
 - 外部服务：微信读书、微信公众号原文、Miniflux、DeepSeek、Tushare、OpeniLink Hub、阿里云 OCR
-- 生产：Linux amd64 发布产物、systemd；服务器无需 Go、Node、Python、MySQL 或 Docker
+- 生产：Linux amd64 发布产物、systemd；Go 服务无需 Go、Node、Python 或 MySQL，公网 TLS 复用 Vaultwarden 的 Caddy 容器与 IP 证书
 
 ## 目录
 
@@ -59,7 +59,7 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 
 ## 本地运行
 
-本地默认只启动前端和 Go 代理，业务请求转发到线上 `2345`，因此看到的是线上 PostgreSQL 数据，不创建本地业务数据库，也不会启动定时任务：
+本地默认只启动前端和 Go 代理，业务请求通过 HTTPS 转发到线上 `2345`，因此看到的是线上 PostgreSQL 数据，不创建本地业务数据库，也不会启动定时任务：
 
 ```powershell
 ./scripts/run-local.ps1
@@ -142,10 +142,10 @@ VPN 订阅直接由已开放的 Go 服务提供，确保设备在尚未连接代
 
 ```env
 VPN_SOURCE_DIR=storage/private/vpn
-VPN_PUBLIC_URL=http://8.138.123.59:2345
+VPN_PUBLIC_URL=https://8.138.123.59:2345
 ```
 
-原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每台设备独立高强度 Token，可以在页面轮换或撤销。当前无域名和 HTTPS，订阅正文会经过明文 HTTP 传输；它解决的是设备在没有代理时从国内服务器取得初始资源的问题。
+原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每台设备独立高强度 Token，可以在页面轮换或撤销。生产使用 Let’s Encrypt 公网 IP 短期证书，由 Caddy 在 `2345` 终止 TLS 并转发到仅监听 `127.0.0.1:12345` 的 Go 服务；systemd 每日检查续期，证书变化后自动重启 Caddy。
 
 `FINANCE_ENABLE_REAL_TRADE` 默认 `false`。`AOWUGONG_SQLITE_SOURCE_PATH` 只供一次迁移工具读取，正式服务不使用。
 

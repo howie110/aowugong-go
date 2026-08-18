@@ -156,6 +156,17 @@ EOF
     }
     reverse_proxy 127.0.0.1:8222
 }
+
+:2345 {
+    tls /etc/letsencrypt/live/vaultwarden-ip/fullchain.pem /etc/letsencrypt/live/vaultwarden-ip/privkey.pem
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "same-origin"
+    }
+    reverse_proxy 127.0.0.1:12345
+}
 EOF
 }
 

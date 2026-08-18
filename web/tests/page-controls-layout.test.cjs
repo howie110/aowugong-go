@@ -165,12 +165,16 @@ test("综合趋势图例按钮可以控制曲线和Y轴显示", () => {
   assert.match(source, /visibleAxes\.has\("percent"\)/);
 });
 
-test("本地 Go 默认地址和 Vite API 代理统一使用 2345", () => {
-  // 1. 读取 Vite 开发配置和公开环境变量模板。
+test("本地访问使用 2345 且生产 Go 只监听反向代理内部端口", () => {
+  // 1. 读取 Vite、本地启动脚本和公开环境变量模板。
   const viteSource = readSource("vite.config.ts");
+  const localScript = readSource("../scripts/run-local.ps1");
   const envExample = readSource("../configs/.env.example");
 
-  // 2. 确认浏览器代理与本地 Go 服务使用同一端口。
+  // 2. 确认本地保持 2345，生产 Go 仅在回环内部端口接受 Caddy 转发。
   assert.match(viteSource, /http:\/\/127\.0\.0\.1:2345/);
-  assert.match(envExample, /^AOWUGONG_HTTP_ADDRESS=0\.0\.0\.0:2345$/m);
+  assert.match(localScript, /AOWUGONG_HTTP_ADDRESS = "127\.0\.0\.1:2345"/);
+  assert.match(localScript, /https:\/\/8\.138\.123\.59:2345/);
+  assert.match(envExample, /^AOWUGONG_HTTP_ADDRESS=127\.0\.0\.1:12345$/m);
+  assert.match(envExample, /^VPN_PUBLIC_URL=https:\/\/8\.138\.123\.59:2345$/m);
 });

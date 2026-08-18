@@ -21,7 +21,7 @@ certificate_fingerprint() {
 # main 检查并续期 Vaultwarden 公网 IP 证书。
 # 输入：环境变量可覆盖运行目录和 Certbot 版本。
 # 输出：证书有效时正常返回。
-# 副作用：访问 Let’s Encrypt，证书变化时重启 Caddy。
+# 副作用：访问 Let’s Encrypt，证书变化时重启共享 HTTPS 入口 Caddy。
 main() {
     local before after
 
@@ -40,9 +40,10 @@ main() {
         docker compose --project-directory "${APP_DIR}" restart caddy
     fi
 
-    # 3. 校验证书至少还能使用一天，并验证公网接口。
+    # 3. 校验证书至少还能使用一天，并验证 Vaultwarden 与 Aowugong 公网接口。
     openssl x509 -checkend 86400 -noout -in "${CERTIFICATE_PATH}"
     curl --fail --silent --show-error "https://8.138.123.59/api/config" >/dev/null
+    curl --fail --silent --show-error "https://8.138.123.59:2345/api/v1/health" >/dev/null
 }
 
 main "$@"

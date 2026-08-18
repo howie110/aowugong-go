@@ -11,6 +11,8 @@ APP_ROOT="${APP_ROOT:-/opt/aowugong-go}"
 RUN_USER="${RUN_USER:-aowugong}"
 RUN_GROUP="${RUN_GROUP:-aowugong}"
 DEPLOY_MODE="${DEPLOY_MODE:-main}"
+PUBLIC_IP="${PUBLIC_IP:-8.138.123.59}"
+MAIN_PUBLIC_PORT="${MAIN_PUBLIC_PORT:-2345}"
 ENV_FILE="${ENV_FILE:-}"
 RELEASE_ARCHIVE="${RELEASE_ARCHIVE:-}"
 HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-60}"
@@ -19,7 +21,9 @@ CANARY_SERVICE="aowugong-go-canary"
 
 case "$DEPLOY_MODE" in
   main)
-    APP_PORT="${APP_PORT:-2345}"
+    APP_PORT="${APP_PORT:-12345}"
+    BIND_ADDRESS="127.0.0.1:$APP_PORT"
+    VPN_PUBLIC_URL="https://${PUBLIC_IP}:${MAIN_PUBLIC_PORT}"
     SCHEDULER_ENABLED="${SCHEDULER_ENABLED:-true}"
     SERVICE_NAME="$MAIN_SERVICE"
     RELEASE_LINK="$APP_ROOT/current"
@@ -27,6 +31,8 @@ case "$DEPLOY_MODE" in
     ;;
   canary)
     APP_PORT="${APP_PORT:-2346}"
+    BIND_ADDRESS="0.0.0.0:$APP_PORT"
+    VPN_PUBLIC_URL="http://${PUBLIC_IP}:${APP_PORT}"
     SCHEDULER_ENABLED=false
     SERVICE_NAME="$CANARY_SERVICE"
     RELEASE_LINK="$APP_ROOT/canary"
@@ -85,7 +91,7 @@ configure_runtime_env() {
   local file="$1"
   local release_link="$2"
   set_env_value "$file" AOWUGONG_ENV production
-  set_env_value "$file" AOWUGONG_HTTP_ADDRESS "0.0.0.0:$APP_PORT"
+  set_env_value "$file" AOWUGONG_HTTP_ADDRESS "$BIND_ADDRESS"
   set_env_default "$file" AOWUGONG_DATABASE_MAX_OPEN_CONNS 8
   set_env_default "$file" AOWUGONG_DATABASE_MAX_IDLE_CONNS 4
   set_env_default "$file" AOWUGONG_DATABASE_CONN_MAX_LIFETIME_MINUTES 30
@@ -98,7 +104,7 @@ configure_runtime_env() {
   set_env_value "$file" AOWUGONG_POSITION_UPLOAD_DIR "$APP_ROOT/shared/storage/uploads/positions"
   set_env_value "$file" AOWUGONG_POSITION_TEMP_DIR "$APP_ROOT/shared/storage/temp/positions"
   set_env_value "$file" VPN_SOURCE_DIR "$APP_ROOT/shared/storage/private/vpn"
-  set_env_value "$file" VPN_PUBLIC_URL "http://8.138.123.59:$APP_PORT"
+  set_env_value "$file" VPN_PUBLIC_URL "$VPN_PUBLIC_URL"
   set_env_value "$file" AOWUGONG_SCHEDULER_ENABLED "$SCHEDULER_ENABLED"
   chown "$RUN_USER:$RUN_GROUP" "$file"
 }
@@ -184,13 +190,17 @@ chown -R root:root "$release_directory"
 chmod 0755 "$release_directory/aowugong" "$release_directory/aowugong-migrate" "$release_directory/scripts/"*.sh
 chown -R "$RUN_USER:$RUN_GROUP" "$APP_ROOT/shared"
 
-# 2.1 同步可选 Vaultwarden 备份辅助脚本，并确保应用用户可读取 root 生成的归档。
+# 2.1 同步可选 Vaultwarden 备份和证书辅助脚本，并确保应用用户可读取 root 生成的归档。
 if [ -f /etc/systemd/system/vaultwarden-backup.service ] && [ -f "$release_directory/scripts/backup-vaultwarden.sh" ]; then
   vaultwarden_backup_dir="$APP_ROOT/shared/storage/backup/vaultwarden"
   install -m 0750 -o root -g root "$release_directory/scripts/backup-vaultwarden.sh" /usr/local/sbin/vaultwarden-backup
   install -d -m 0750 -o root -g "$RUN_GROUP" "$vaultwarden_backup_dir"
   find "$vaultwarden_backup_dir" -maxdepth 1 -type f \( -name 'vaultwarden-*.tar.gz' -o -name 'vaultwarden-*.tar.gz.sha256' \) \
     -exec chown root:"$RUN_GROUP" {} + -exec chmod 0640 {} +
+fi
+if [ -f /etc/systemd/system/vaultwarden-certificate-renew.service ] && [ -f "$release_directory/scripts/renew-vaultwarden-certificate.sh" ]; then
+  install -m 0750 -o root -g root "$release_directory/scripts/renew-vaultwarden-certificate.sh" \
+    /usr/local/sbin/vaultwarden-certificate-renew
 fi
 
 if [ ! -f "$shared_env" ]; then

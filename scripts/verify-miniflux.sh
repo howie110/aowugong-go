@@ -41,7 +41,7 @@ free -h
 echo "PORTS"
 ss -lntp
 echo "AOWUGONG"
-curl -fsS http://127.0.0.1:2345/api/v1/health
+curl -fsS http://127.0.0.1:12345/api/v1/health
 echo
 
 # 5. 核对 aowugong 已配置 Miniflux 且旧 RSS 参数不存在，不输出配置值。

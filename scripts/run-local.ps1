@@ -1,6 +1,6 @@
 param(
     [string]$EnvFile = "",
-    [string]$UpstreamURL = "http://8.138.123.59:2345",
+    [string]$UpstreamURL = "https://8.138.123.59:2345",
     [string]$GoCommand = "go"
 )
 
