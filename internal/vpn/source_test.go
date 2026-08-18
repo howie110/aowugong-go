@@ -56,6 +56,59 @@ func TestSourceCatalogDiscoversAndConvertsClashProfile(t *testing.T) {
 	}
 }
 
+// TestSourceCatalogPrefersNativeXrayForV2ray 验证 v2rayNG 订阅优先使用原生 Xray 配置。
+// 输入：同名 Clash 和 Xray 测试配置，Clash 故意开启跳过证书校验。
+// 输出：生成节点来自 Xray，且不包含新版 Xray 禁用的不安全参数。
+// 副作用：创建并读取测试临时文件。
+func TestSourceCatalogPrefersNativeXrayForV2ray(t *testing.T) {
+	// 1. 写入同一资源的 Clash 和原生 Xray 配置。
+	directory := t.TempDir()
+	clashContent := `proxies:
+  - name: Clash Node
+    type: trojan
+    server: clash.example.com
+    port: 443
+    password: test-password
+    sni: clash.example.com
+    skip-cert-verify: true
+`
+	xrayContent := `{
+  "outbounds": [{
+    "protocol": "trojan",
+    "tag": "Native Node",
+    "settings": {"servers": [{"address": "native.example.com", "port": 443, "password": "test-password"}]},
+    "streamSettings": {"network": "tcp", "security": "tls", "tlsSettings": {"serverName": "native.example.com", "allowInsecure": false}}
+  }]
+}`
+	for name, content := range map[string]string{
+		"clash_demo.yaml":        clashContent,
+		"v2rayn_demo.json":       xrayContent,
+		"shadowrocket_demo.conf": "native shadowrocket test config",
+		"surge_demo.conf":        "native surge test config",
+	} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("os.WriteFile(%q) error = %v", name, err)
+		}
+	}
+
+	// 2. 解码订阅并确认只保留原生 Xray 的安全 TLS 节点。
+	configs, err := NewSourceCatalog(directory).Build("demo")
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(configs["v2ray"].Body)
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v", err)
+	}
+	link := string(decoded)
+	if !strings.Contains(link, "native.example.com") || strings.Contains(link, "clash.example.com") {
+		t.Fatalf("v2ray subscription did not use native Xray config")
+	}
+	if strings.Contains(link, "allowInsecure") || strings.Contains(link, "insecure=1") {
+		t.Fatalf("v2ray subscription contains insecure TLS parameters")
+	}
+}
+
 // TestSourceCatalogBuildsAvailableLocalPrivateProfiles 验证当前机器私有资源均可转换。
 // 输入：开发机 storage/private/vpn；CI 没有私有文件时跳过。
 // 输出：每个检测到的资源至少生成一种非空配置。

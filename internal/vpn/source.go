@@ -97,7 +97,7 @@ func (c *SourceCatalog) Build(profileCode string) (map[string]ConfigContent, err
 		return nil, ErrProfileNotFound
 	}
 
-	// 2. 优先使用原生客户端配置，Clash 同时作为通用链接转换来源。
+	// 2. 优先保留各客户端原生配置，避免跨格式转换丢失 TLS 安全参数。
 	configs := make(map[string]ConfigContent)
 	clashPath := matched["clash"]
 	if clashPath == "" {
@@ -110,13 +110,6 @@ func (c *SourceCatalog) Build(profileCode string) (map[string]ConfigContent, err
 		}
 		configs["clash"] = ConfigContent{
 			ContentType: "text/yaml; charset=utf-8", Filename: profileCode + "-clash.yaml", Body: string(content),
-		}
-		v2rayContent, convertErr := clashSubscription(content, profileCode)
-		if convertErr != nil {
-			return nil, fmt.Errorf("转换 %s Clash 节点: %w", profileCode, convertErr)
-		}
-		configs["v2ray"] = ConfigContent{
-			ContentType: "text/plain; charset=utf-8", Filename: profileCode + "-v2ray.txt", Body: v2rayContent,
 		}
 	}
 	for _, exact := range []struct {
@@ -140,7 +133,7 @@ func (c *SourceCatalog) Build(profileCode string) (map[string]ConfigContent, err
 			ContentType: exact.contentType, Filename: profileCode + "-" + exact.format + exact.extension, Body: string(content),
 		}
 	}
-	if _, exists := configs["v2ray"]; !exists && matched["v2rayn"] != "" {
+	if matched["v2rayn"] != "" {
 		content, readErr := readPrivateSource(matched["v2rayn"])
 		if readErr != nil {
 			return nil, readErr
@@ -148,6 +141,14 @@ func (c *SourceCatalog) Build(profileCode string) (map[string]ConfigContent, err
 		v2rayContent, convertErr := xraySubscription(content, profileCode)
 		if convertErr != nil {
 			return nil, fmt.Errorf("转换 %s Xray 节点: %w", profileCode, convertErr)
+		}
+		configs["v2ray"] = ConfigContent{
+			ContentType: "text/plain; charset=utf-8", Filename: profileCode + "-v2ray.txt", Body: v2rayContent,
+		}
+	} else if clashConfig, exists := configs["clash"]; exists {
+		v2rayContent, convertErr := clashSubscription([]byte(clashConfig.Body), profileCode)
+		if convertErr != nil {
+			return nil, fmt.Errorf("转换 %s Clash 节点: %w", profileCode, convertErr)
 		}
 		configs["v2ray"] = ConfigContent{
 			ContentType: "text/plain; charset=utf-8", Filename: profileCode + "-v2ray.txt", Body: v2rayContent,
@@ -690,6 +691,10 @@ func xrayOutboundLink(protocol, tag string, settings json.RawMessage, stream str
 	if len(parsed.Servers) > 0 {
 		for key, value := range parsed.Servers[0] {
 			proxy[key] = value
+		}
+		// 2. 把 Xray 的 address 字段统一为分享链接生成器使用的 server 字段。
+		if proxy["server"] == nil {
+			proxy["server"] = proxy["address"]
 		}
 	}
 	if len(parsed.VNext) > 0 {
