@@ -145,7 +145,7 @@ VPN_SOURCE_DIR=storage/private/vpn
 VPN_PUBLIC_URL=https://8.138.123.59:2345
 ```
 
-原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每台设备独立高强度 Token，可以在页面轮换或撤销。生产使用 Let’s Encrypt 公网 IP 短期证书，由 Caddy 在 `2345` 终止 TLS 并转发到仅监听 `127.0.0.1:12345` 的 Go 服务；systemd 每日检查续期，证书变化后自动重启 Caddy。
+原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每台设备独立高强度 Token，可以在页面轮换或撤销。生产使用 Let’s Encrypt 公网 IP 短期证书，由 Caddy 在 `2345` 终止 TLS 并转发到仅监听 `127.0.0.1:12345` 的 Go 服务；同端口收到 HTTP 请求时自动跳转到 HTTPS。systemd 每日检查续期，证书变化后自动重启 Caddy。
 
 `FINANCE_ENABLE_REAL_TRADE` 默认 `false`。`AOWUGONG_SQLITE_SOURCE_PATH` 只供一次迁移工具读取，正式服务不使用。
 

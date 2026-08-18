@@ -134,6 +134,12 @@ EOF
 {
     auto_https off
     admin off
+    servers :2345 {
+        listener_wrappers {
+            http_redirect
+            tls
+        }
+    }
 }
 
 :80 {
