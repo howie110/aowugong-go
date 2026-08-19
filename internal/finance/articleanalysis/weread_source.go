@@ -369,6 +369,81 @@ func (s *WeReadSource) CheckCredential(ctx context.Context) (WeReadCredentialChe
 	return result, nil
 }
 
+// KeepAliveCredential 低频刷新凭据并读取一条公众号文章，验证凭据仍可用于正式抓取。
+// 输入：ctx 控制数据库和微信读书请求。
+// 输出：返回累计寿命和当前健康状态；首次状态转坏时返回错误，重复失效不重复告警。
+// 副作用：调用微信读书登录和文章列表接口，可能保存新凭据并写入健康统计。
+func (s *WeReadSource) KeepAliveCredential(ctx context.Context) (WeReadCredentialCheckResult, error) {
+	// 1. 串行加载凭据、公众号和上一次状态，避免与正式抓取交叉刷新。
+	s.operationMutex.Lock()
+	defer s.operationMutex.Unlock()
+	credentials, err := s.loadCredentials(ctx)
+	if err != nil {
+		return WeReadCredentialCheckResult{}, err
+	}
+	accounts, err := s.repository.listWeReadAccounts(ctx, true)
+	if err != nil {
+		return WeReadCredentialCheckResult{}, err
+	}
+	if len(accounts) == 0 {
+		return WeReadCredentialCheckResult{}, fmt.Errorf("尚未启用任何微信读书公众号")
+	}
+	previous, previousFound, err := s.repository.weReadCredentialHealth(ctx)
+	if err != nil {
+		return WeReadCredentialCheckResult{}, err
+	}
+
+	// 2. 先主动刷新，再读取一条正式文章列表；刷新成功也立即保存，防止新 Token 丢失。
+	original := credentials
+	savedCredentials := original
+	refreshed, keepAliveErr := s.client.RefreshCredentials(ctx, credentials)
+	if keepAliveErr == nil {
+		credentials = refreshed
+		if err := s.saveCredentials(ctx, credentials, false); err != nil {
+			keepAliveErr = err
+		} else {
+			savedCredentials = credentials
+		}
+	}
+	if keepAliveErr == nil {
+		_, listErr := s.client.ListRecentArticles(ctx, &credentials, accounts[0].AccountID, 1)
+		if listErr != nil {
+			keepAliveErr = fmt.Errorf("检查公众号 %s 文章读取: %w", accounts[0].Title, listErr)
+		}
+	}
+	if credentials != savedCredentials {
+		if saveErr := s.saveCredentials(ctx, credentials, false); saveErr != nil {
+			keepAliveErr = errors.Join(keepAliveErr, saveErr)
+		}
+	}
+
+	// 3. 把主动刷新和正式文章读取统一写入健康状态，并仅在状态首次变化时升级错误通知。
+	status, message := "valid", ""
+	if keepAliveErr != nil {
+		status, message = "error", keepAliveErr.Error()
+		if errors.Is(keepAliveErr, client.ErrWeReadArticleAuth) || errors.Is(keepAliveErr, client.ErrWeReadArticleVerification) {
+			status = "invalid"
+		}
+	}
+	checkedAt := time.Now()
+	if err := s.repository.recordWeReadCredentialCheck(ctx, status, message, checkedAt); err != nil {
+		return WeReadCredentialCheckResult{}, errors.Join(keepAliveErr, err)
+	}
+	health, found, err := s.repository.weReadCredentialHealth(ctx)
+	if err != nil {
+		return WeReadCredentialCheckResult{}, errors.Join(keepAliveErr, err)
+	}
+	if !found {
+		return WeReadCredentialCheckResult{}, fmt.Errorf("微信读书凭据健康记录不存在")
+	}
+	result := buildWeReadCredentialCheckResult(health, checkedAt, len(accounts))
+	result.StatusChanged = !previousFound || previous.LastStatus != status
+	if keepAliveErr != nil && result.StatusChanged {
+		return result, keepAliveErr
+	}
+	return result, nil
+}
+
 // SetAccountEnabled 更新一个公众号是否参与投资文章抓取。
 // 输入：ctx 控制写入，accountID 是公众号，enabled 是目标状态。
 // 输出：返回更新错误。
@@ -398,6 +473,9 @@ func (s *WeReadSource) Fetch(ctx context.Context, sourceID int64, _ string, limi
 	}
 	now := time.Now()
 	dueAccounts := dueWeReadAccounts(accounts, now)
+	if _, forced := ctx.Value(forceArticleFetchContextKey{}).(bool); forced {
+		dueAccounts = accounts
+	}
 	if len(dueAccounts) == 0 {
 		return nil, nil
 	}
@@ -409,6 +487,7 @@ func (s *WeReadSource) Fetch(ctx context.Context, sourceID int64, _ string, limi
 	// 2. 每个公众号只读取最近一页并按 reviewId 去重。
 	listed := make([]weReadListedArticle, 0, len(dueAccounts)*weReadRecentPerAccount)
 	failures := make([]string, 0)
+	successfulLists := 0
 	seen := make(map[string]struct{})
 	for _, account := range dueAccounts {
 		perAccount := account.FetchLimit
@@ -421,11 +500,16 @@ func (s *WeReadSource) Fetch(ctx context.Context, sourceID int64, _ string, limi
 		references, listErr := s.client.ListRecentArticles(ctx, &credentials, account.AccountID, perAccount)
 		if listErr != nil {
 			if errors.Is(listErr, client.ErrWeReadArticleAuth) || errors.Is(listErr, client.ErrWeReadArticleVerification) {
+				if credentials != originalCredentials {
+					_ = s.saveCredentials(ctx, credentials, false)
+				}
+				_ = s.repository.recordWeReadCredentialCheck(ctx, "invalid", account.Title+": "+listErr.Error(), now)
 				return nil, listErr
 			}
 			failures = append(failures, account.Title+": "+listErr.Error())
 			continue
 		}
+		successfulLists++
 		if markErr := s.repository.markWeReadAccountChecked(ctx, account.AccountID, now); markErr != nil {
 			failures = append(failures, account.Title+": "+markErr.Error())
 		}
@@ -490,6 +574,13 @@ func (s *WeReadSource) Fetch(ctx context.Context, sourceID int64, _ string, limi
 		if saveErr := s.saveCredentials(ctx, credentials, false); saveErr != nil {
 			failures = append(failures, saveErr.Error())
 		}
+	}
+	status, statusMessage := "valid", ""
+	if successfulLists == 0 && len(failures) > 0 {
+		status, statusMessage = "error", strings.Join(failures, "；")
+	}
+	if healthErr := s.repository.recordWeReadCredentialCheck(ctx, status, statusMessage, now); healthErr != nil {
+		failures = append(failures, healthErr.Error())
 	}
 	if len(failures) > 0 {
 		sort.Strings(failures)
@@ -875,4 +966,16 @@ func (s *Service) CheckWeReadCredential(ctx context.Context) (WeReadCredentialCh
 		return WeReadCredentialCheckResult{}, fmt.Errorf("微信读书文章来源未配置")
 	}
 	return s.options.WeRead.CheckCredential(ctx)
+}
+
+// KeepWeReadCredentialAlive 执行微信读书凭据低频保活。
+// 输入：ctx 控制外部请求和数据库操作。
+// 输出：返回累计寿命和当前健康状态。
+// 副作用：调用微信读书，可能刷新并加密保存 Token，写入健康统计。
+func (s *Service) KeepWeReadCredentialAlive(ctx context.Context) (WeReadCredentialCheckResult, error) {
+	// 1. 只允许配置了微信读书来源的正式服务执行保活。
+	if s.options.WeRead == nil {
+		return WeReadCredentialCheckResult{}, fmt.Errorf("微信读书文章来源未配置")
+	}
+	return s.options.WeRead.KeepAliveCredential(ctx)
 }

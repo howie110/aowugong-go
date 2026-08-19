@@ -37,8 +37,8 @@ func TestDashboardServiceBuildsRuntimeSummaries(t *testing.T) {
 	if got := data.Tables[1].Latest; got != "2026-07-14" {
 		t.Errorf("daily latest = %q, want 2026-07-14", got)
 	}
-	if got := len(jobs.Jobs); got != 9 {
-		t.Errorf("jobs count = %d, want 9", got)
+	if got := len(jobs.Jobs); got != 10 {
+		t.Errorf("jobs count = %d, want 10", got)
 	}
 	if got := trading.Guards[0].Value; got != "关闭" {
 		t.Errorf("real trade value = %q, want 关闭", got)
@@ -60,8 +60,8 @@ func TestJobsSummaryIncludesEnabledBackupTasks(t *testing.T) {
 	jobs := service.JobsSummary()
 
 	// 2. 核对任务数量和两个可选任务名称。
-	if len(jobs.Jobs) != 11 {
-		t.Fatalf("jobs count = %d, want 11", len(jobs.Jobs))
+	if len(jobs.Jobs) != 12 {
+		t.Fatalf("jobs count = %d, want 12", len(jobs.Jobs))
 	}
 	wanted := map[string]bool{"backup_github_code": false, "email_vaultwarden_backup": false}
 	for _, item := range jobs.Jobs {

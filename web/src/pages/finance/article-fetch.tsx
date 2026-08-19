@@ -146,7 +146,7 @@ export function ArticleFetchPage() {
     // 1. 执行待分析批次并在完成后刷新页面数据。
     setIsWorking(true);
     try {
-      const result = await analyzePendingArticles(10);
+      const result = await analyzePendingArticles(50, true);
       notify.success("分析完成", `成功 ${result.analyzed_count} 篇，跳过 ${result.skipped_count} 篇，失败 ${result.error_count} 篇。`);
       await loadData();
     } catch (error) {

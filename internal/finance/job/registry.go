@@ -33,6 +33,7 @@ type ArticleSyncer interface {
 // WeReadCredentialChecker 定义微信读书扫码凭据健康检查入口。
 type WeReadCredentialChecker interface {
 	CheckWeReadCredential(ctx context.Context) (articleanalysis.WeReadCredentialCheckResult, error)
+	KeepWeReadCredentialAlive(ctx context.Context) (articleanalysis.WeReadCredentialCheckResult, error)
 }
 
 // Monitor 定义服务监控任务使用的业务入口。
@@ -111,6 +112,7 @@ func RegisterAll(registry *scheduler.Registry, dependencies Dependencies) error 
 		{Name: "update_tushare_daily_data", Description: "更新 Tushare 日线数据", ManualOnly: true, Timeout: 2 * time.Hour, Run: taskSet.updateTushareDailyData},
 		{Name: "sync_investment_articles", Description: "同步并分析投资文章", Schedule: "0 8,20 * * *", ConcurrencyKey: "investment_signal_groups", Timeout: 3 * time.Hour, Run: taskSet.syncInvestmentArticles},
 		{Name: "check_weread_credential", Description: "按需检查微信读书文章接口", ManualOnly: true, Timeout: 5 * time.Minute, Run: taskSet.checkWeReadCredential},
+		{Name: "keep_weread_credential_alive", Description: "低频保活微信读书凭据", Schedule: "0 2,14 * * *", Timeout: 10 * time.Minute, Run: taskSet.keepWeReadCredentialAlive},
 		{Name: "rebuild_investment_signal_groups", Description: "全局重建投资信号概念组", ManualOnly: true, ConcurrencyKey: "investment_signal_groups", Timeout: 30 * time.Minute, Run: taskSet.rebuildInvestmentSignalGroups},
 		{Name: "check_service_monitors", Description: "检查服务连通性", Schedule: "0 22 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkServiceMonitors},
 		{Name: "check_subscription_expiry_notify", Description: "检查订阅到期并提醒", Schedule: "30 9 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkSubscriptionExpiryNotify},
@@ -196,6 +198,26 @@ func (t *tasks) checkWeReadCredential(ctx context.Context) (string, error) {
 	}
 	if err != nil {
 		return message, fmt.Errorf("检查微信读书扫码凭据: %w", err)
+	}
+	return message, nil
+}
+
+// keepWeReadCredentialAlive 低频刷新并验证微信读书凭据，首次失效时通知微信。
+// 输入：ctx 是任务超时上下文。
+// 输出：返回当前状态摘要；重复失效不重复返回任务错误。
+// 副作用：调用微信读书并写入 PostgreSQL，首次状态转坏时由统一包装器通知微信。
+func (t *tasks) keepWeReadCredentialAlive(ctx context.Context) (string, error) {
+	// 1. 调用低频保活入口并格式化当前健康统计。
+	result, err := t.dependencies.WeReadCredential.KeepWeReadCredentialAlive(ctx)
+	message := fmt.Sprintf("状态=%s，已有效=%s，检查=%d，自动刷新=%d，公众号=%d",
+		result.Status, result.ValidFor, result.CheckCount, result.RefreshCount, result.AccountCount)
+	if result.Message != "" {
+		message += "，信息=" + result.Message
+	}
+
+	// 2. 仅在健康状态首次变化时升级任务错误，避免每六小时重复发送相同告警。
+	if err != nil && result.StatusChanged {
+		return message, fmt.Errorf("保活微信读书扫码凭据: %w", err)
 	}
 	return message, nil
 }

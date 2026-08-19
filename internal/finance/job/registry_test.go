@@ -63,6 +63,17 @@ func (s *fakeArticleSyncer) CheckWeReadCredential(context.Context) (articleanaly
 	}, nil
 }
 
+// KeepWeReadCredentialAlive 返回固定的微信读书保活摘要。
+// 输入：上下文。
+// 输出：返回可供任务消息断言的固定结果。
+// 副作用：无。
+func (s *fakeArticleSyncer) KeepWeReadCredentialAlive(context.Context) (articleanalysis.WeReadCredentialCheckResult, error) {
+	// 1. 返回可供任务消息断言的固定有效结果。
+	return articleanalysis.WeReadCredentialCheckResult{
+		Status: "valid", ValidFor: "12小时", CheckCount: 1, AccountCount: 7,
+	}, nil
+}
+
 // TestSyncInvestmentArticlesSkipsClassificationForManualRun 验证页面手动抓取不等待历史信号归类。
 // 输入：携带 manual 来源的统一文章任务。
 // 输出：文章服务收到 classifySignals=false。
@@ -175,18 +186,19 @@ func TestRegisterAllAddsNineProductionJobs(t *testing.T) {
 		},
 	}
 
-	// 2. 注册并核对九项固定名称、频率和仅手动属性。
+	// 2. 注册并核对十项固定名称、频率和仅手动属性。
 	if err := RegisterAll(registry, dependencies); err != nil {
 		t.Fatalf("RegisterAll() error = %v", err)
 	}
 	definitions := registry.Definitions()
-	if len(definitions) != 9 {
-		t.Fatalf("definition count = %d, want 9", len(definitions))
+	if len(definitions) != 10 {
+		t.Fatalf("definition count = %d, want 10", len(definitions))
 	}
 	wanted := map[string]string{
 		"test_crontab": "0 9 * * *", "update_tushare_daily_data": "",
 		"sync_investment_articles": "0 8,20 * * *", "check_service_monitors": "0 22 * * *",
 		"check_weread_credential":          "",
+		"keep_weread_credential_alive":     "0 2,14 * * *",
 		"check_subscription_expiry_notify": "30 9 * * *", "openilink_reply_reminder": "0 10 * * *",
 		"backup_postgres":                  "30 3 * * *",
 		"rebuild_investment_signal_groups": "",
@@ -239,7 +251,7 @@ func TestRegisterAllAddsOptionalGitHubBackupJob(t *testing.T) {
 			}
 		}
 	}
-	if !found || len(registry.Definitions()) != 10 {
+	if !found || len(registry.Definitions()) != 11 {
 		t.Errorf("definitions = %+v", registry.Definitions())
 	}
 }
@@ -274,7 +286,7 @@ func TestRegisterAllAddsOptionalVaultwardenEmailJob(t *testing.T) {
 			}
 		}
 	}
-	if !found || len(registry.Definitions()) != 10 {
+	if !found || len(registry.Definitions()) != 11 {
 		t.Errorf("definitions = %+v", registry.Definitions())
 	}
 }

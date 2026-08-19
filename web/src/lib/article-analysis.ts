@@ -221,8 +221,9 @@ export async function runScheduledArticleSync() {
   });
 }
 
-export async function analyzePendingArticles(limit = 10) {
-  return requestJson<AnalysisBatchResult>(`/api/v1/finance/article-analysis/analyze?limit=${limit}`, {
+export async function analyzePendingArticles(limit = 10, all = false) {
+  const params = new URLSearchParams({ limit: String(limit), all: String(all) });
+  return requestJson<AnalysisBatchResult>(`/api/v1/finance/article-analysis/analyze?${params.toString()}`, {
     method: "POST",
   });
 }

@@ -15,6 +15,8 @@ import (
 
 var fencedJSONPattern = regexp.MustCompile("(?s)```(?:json)?\\s*(.*?)```")
 
+type forceArticleFetchContextKey struct{}
+
 const (
 	scheduledFetchLimit         = 1000
 	scheduledAnalysisBatchLimit = 50
@@ -43,6 +45,15 @@ type ServiceOptions struct {
 	WeRead   *WeReadSource
 	Analyzer AnalysisGateway
 	Now      func() time.Time
+}
+
+// SyncNow 立即抓取全部启用文章来源，供页面手动按钮使用。
+// 输入：ctx 控制处理，fetchLimit 是每来源上限，analyze 控制是否分析，analysisLimit 是分析上限。
+// 输出：返回来源、抓取、写入和分析统计；基础数据库失败时返回错误。
+// 副作用：立即读取外部文章，按需调用 DeepSeek，并写入 PostgreSQL。
+func (s *Service) SyncNow(ctx context.Context, fetchLimit int, analyze bool, analysisLimit int) (SyncResult, error) {
+	// 1. 通过上下文标记跳过公众号定时频率判断，正式定时任务仍走原有节流逻辑。
+	return s.Sync(context.WithValue(ctx, forceArticleFetchContextKey{}, true), fetchLimit, analyze, analysisLimit)
 }
 
 // Sync 抓取全部启用来源，并按选项继续分析待处理文章。
@@ -281,6 +292,29 @@ func (s *Service) AnalyzePending(ctx context.Context, limit int) (AnalysisBatchR
 		}
 	}
 
+	return result, nil
+}
+
+// AnalyzeAllPending 连续分析待处理文章，供页面手动补齐历史文章使用。
+// 输入：ctx 控制处理；每批固定五十篇，最多处理十批。
+// 输出：返回所有已执行批次的累计结果；数据库失败时返回错误。
+// 副作用：调用 DeepSeek 并写入 PostgreSQL 分析表。
+func (s *Service) AnalyzeAllPending(ctx context.Context) (AnalysisBatchResult, error) {
+	// 1. 循环复用单批入口，遇到没有进展时停止，避免错误状态反复占用模型额度。
+	result := AnalysisBatchResult{Items: []map[string]any{}}
+	for batch := 0; batch < scheduledAnalysisMaxBatches; batch++ {
+		current, err := s.AnalyzePending(ctx, scheduledAnalysisBatchLimit)
+		if err != nil {
+			return AnalysisBatchResult{}, err
+		}
+		result.AnalyzedCount += current.AnalyzedCount
+		result.SkippedCount += current.SkippedCount
+		result.ErrorCount += current.ErrorCount
+		result.Items = append(result.Items, current.Items...)
+		if current.AnalyzedCount == 0 || len(current.Items) < scheduledAnalysisBatchLimit {
+			break
+		}
+	}
 	return result, nil
 }
 

@@ -333,7 +333,7 @@ func (h articleAnalysisHandlers) sync(w http.ResponseWriter, request *http.Reque
 	}
 
 	// 2. 调用统一同步入口并返回统计。
-	result, err := h.service.Sync(request.Context(), fetchLimit, analyze, analysisLimit)
+	result, err := h.service.SyncNow(request.Context(), fetchLimit, analyze, analysisLimit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "同步投资文章失败")
 		return
@@ -351,7 +351,14 @@ func (h articleAnalysisHandlers) analyze(w http.ResponseWriter, request *http.Re
 	if !ok {
 		return
 	}
-	result, err := h.service.AnalyzePending(request.Context(), limit)
+	all := request.URL.Query().Get("all") == "true"
+	var result articleanalysis.AnalysisBatchResult
+	var err error
+	if all {
+		result, err = h.service.AnalyzeAllPending(request.Context())
+	} else {
+		result, err = h.service.AnalyzePending(request.Context(), limit)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "分析投资文章失败")
 		return
