@@ -93,7 +93,7 @@ func (s *WeReadSource) Binding(ctx context.Context) (WeReadBinding, error) {
 					return WeReadBinding{}, statusErr
 				}
 				if fetchStatus == "error" {
-					state, message = "degraded", "最近抓取存在异常，请查看任务记录"
+					state, message = "degraded", weReadFetchWarningMessage(fetchMessage)
 					if weReadCredentialErrorMessage(fetchMessage) {
 						state = "failed"
 						message = "微信读书凭据不可用，请重新绑定"
@@ -139,12 +139,25 @@ func weReadBindingHealthState(health weReadCredentialHealth, found bool) (string
 func weReadCredentialErrorMessage(message string) bool {
 	// 1. 仅识别需要重新扫码的认证类关键词，普通网络错误保持黄色警告。
 	message = strings.ToLower(strings.TrimSpace(message))
-	for _, keyword := range []string{"凭据", "refresh_token", "access_token", "认证失效", "重新绑定"} {
+	for _, keyword := range []string{"凭据", "refresh_token", "access_token", "认证失效", "人工验证", "要求人工验证", "重新绑定"} {
 		if strings.Contains(message, keyword) {
 			return true
 		}
 	}
 	return false
+}
+
+// weReadFetchWarningMessage 把不影响凭据有效性的文章部分失败转换为准确页面文案。
+// 输入：message 是最近一次微信读书来源抓取错误。
+// 输出：返回不会误导用户重新扫码的提示。
+// 副作用：无。
+func weReadFetchWarningMessage(message string) string {
+	// 1. 正文节点缺失只影响对应文章，已经成功获取的文章仍然保留在数据库。
+	if strings.Contains(message, "微信原文缺少正文节点") || strings.Contains(message, "正文解析") {
+		return "部分文章正文解析失败，成功文章已入库"
+	}
+	// 2. 其他非认证错误继续提示查看任务详情。
+	return "最近抓取存在异常，请查看任务记录"
 }
 
 // StartLogin 创建或复用一个五分钟微信读书扫码流程。

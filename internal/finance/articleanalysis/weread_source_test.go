@@ -208,23 +208,35 @@ func TestWeReadBindingReflectsFetchFailure(t *testing.T) {
 		t.Fatalf("record valid check: %v", err)
 	}
 
-	// 3. 写入真实抓取错误，确认旧任务状态也能覆盖页面状态。
+	// 3. 正文节点缺失只表示部分文章解析失败，不应要求重新绑定。
 	sources, err := repository.Sources(ctx, false)
 	if err != nil || len(sources) != 1 {
 		t.Fatalf("Sources() = %#v, %v", sources, err)
 	}
-	if err := repository.UpdateSourceStatus(ctx, sources[0].ID, "error", "微信读书凭据字段 refresh_token 为空"); err != nil {
-		t.Fatalf("UpdateSourceStatus() error = %v", err)
+	if err := repository.UpdateSourceStatus(ctx, sources[0].ID, "error", "微信读书文章读取部分失败: 测试文章: 微信原文缺少正文节点"); err != nil {
+		t.Fatalf("UpdateSourceStatus() content error = %v", err)
 	}
 	binding, err = source.Binding(ctx)
 	if err != nil {
-		t.Fatalf("Binding() error = %v", err)
+		t.Fatalf("Binding() content error = %v", err)
+	}
+	if binding.State != "degraded" || binding.Message != "部分文章正文解析失败，成功文章已入库" {
+		t.Fatalf("Binding() content error = %#v", binding)
+	}
+
+	// 4. 明确凭据错误仍然要求重新绑定。
+	if err := repository.UpdateSourceStatus(ctx, sources[0].ID, "error", "微信读书凭据字段 refresh_token 为空"); err != nil {
+		t.Fatalf("UpdateSourceStatus() credential error = %v", err)
+	}
+	binding, err = source.Binding(ctx)
+	if err != nil {
+		t.Fatalf("Binding() credential error = %v", err)
 	}
 	if binding.State != "failed" || binding.Message != "微信读书凭据不可用，请重新绑定" {
 		t.Fatalf("Binding() = %#v", binding)
 	}
 
-	// 4. 模拟重新绑定已验证，确认历史错误被清除且不再误报。
+	// 5. 模拟重新绑定已验证，确认历史错误被清除且不再误报。
 	if err := repository.clearWeReadSourceFetchError(ctx); err != nil {
 		t.Fatalf("clearWeReadSourceFetchError() error = %v", err)
 	}
