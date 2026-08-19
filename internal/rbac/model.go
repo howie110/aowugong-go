@@ -4,6 +4,7 @@ package rbac
 const (
 	AdminRoleCode    = "admin"
 	InvestorRoleCode = "investor"
+	VPNUserRoleCode  = "vpn_user"
 
 	PermissionFinanceOverview        = "page:finance:overview"
 	PermissionWeread                 = "page:weread"
@@ -22,7 +23,8 @@ const (
 	PermissionWork                   = "page:work"
 	PermissionPermissions            = "page:permissions"
 	PermissionDatabase               = "page:database"
-	PermissionVPN                    = "page:vpn"
+	PermissionVPNDistribution        = "page:resource_sharing:vpn_distribution"
+	PermissionVPNResources           = "page:resource_sharing:vpn_resources"
 )
 
 // Permission 描述系统内置页面权限。
@@ -72,11 +74,13 @@ var DefaultPermissions = []Permission{
 	{Code: PermissionWork, Name: "工作导航", Group: "work", Description: "查看常用系统、工具和资料导航。"},
 	{Code: PermissionPermissions, Name: "权限管理", Group: "system", Description: "查看权限管理页面，并给用户加入角色。"},
 	{Code: PermissionDatabase, Name: "数据库", Group: "system", Description: "只读查看 PostgreSQL 表结构、数据和脱敏导出。"},
-	{Code: PermissionVPN, Name: "VPN 订阅", Group: "system", Description: "管理私有 VPN 资源、设备订阅和分发密钥。"},
+	{Code: PermissionVPNDistribution, Name: "VPN 分配", Group: "resource_sharing", Description: "给登录用户分配、轮换或撤销 VPN 资源。"},
+	{Code: PermissionVPNResources, Name: "VPN 资源", Group: "resource_sharing", Description: "查看当前登录用户获配的 VPN 资源并扫码配置。"},
 }
 
 // DefaultRoles 是由代码维护的系统角色基线。
 var DefaultRoles = []Role{
 	{Code: AdminRoleCode, Name: "管理员", Description: "系统管理员，天然拥有所有权限。", IsActive: true, IsSystem: true},
 	{Code: InvestorRoleCode, Name: "投资者", Description: "普通投资者，只能查看已开通的业务页面。", IsActive: true, IsSystem: true},
+	{Code: VPNUserRoleCode, Name: "VPN 用户", Description: "只能查看和使用分配给自己的 VPN 订阅。", IsActive: true, IsSystem: true},
 }

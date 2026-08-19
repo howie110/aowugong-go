@@ -21,7 +21,7 @@ internal/config/          环境变量和配置校验
 internal/database/        PostgreSQL 连接、迁移和 pg_dump 备份
 internal/databaseview/    管理员只读数据库页面
 internal/httpserver/      路由、中间件和 React 静态资源
-internal/vpn/             私有 VPN 资源转换、设备 Token 和 Go 直连分发
+internal/vpn/             私有 VPN 资源转换、用户 Token 和 Go 直连分发
 internal/scheduler/       任务注册、Cron、执行包装和数据库锁
 internal/finance/         行情、仓位、文章分析、回测和任务
 internal/testdatabase/    隔离 SQLite 测试夹具，不进入生产运行路径
@@ -73,7 +73,7 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 
 投资文章不再依赖外部 RSS 聚合接口。在“投资研究 > 投资文章抓取”中扫码绑定一个微信读书账号，服务会从书架发现公众号；人工启用的公众号由 08:00、20:00 任务各检查最近 20 篇，只为数据库未知文章读取详情和微信公众号原文。登录凭据使用 `AOWUGONG_ENCRYPTION_KEY` 派生的 AES-256-GCM 密钥加密后存入 PostgreSQL，二维码中间态只保存在当前 Go 进程内。Go 同时按公众号从已入库文章生成 `http://127.0.0.1:2345/feeds/weread/{account_id}.xml`，仅允许服务器回环地址访问，供同机 Miniflux 分源保存和阅读公众号全文。
 
-“系统运维 > VPN 订阅”从 `storage/private/vpn` 读取被 Git 忽略的 Clash、Xray、Shadowrocket 和 Surge 文件，按文件名中的资源编码归组。每个资源统一生成 Clash/FlClash、Shadowrocket、Surge、v2rayN/v2rayNG 四种订阅。管理员可为每台终端生成独立直连订阅，复制地址或显示二维码，并单独重新发布、轮换和撤销。设备 Token 由 `AOWUGONG_ENCRYPTION_KEY`、设备主键和版本通过 HMAC 派生，数据库不保存 Token 或节点正文；订阅由当前 Go 服务实时读取私有文件并返回。
+“资源分享 > VPN 分配”仅管理员可见，用于给登录用户分配、重新发布、轮换或撤销 VPN 资源。“资源分享 > VPN 资源”只展示当前登录用户获配的资源，用户选择客户端格式后扫码即可配置。服务从 `storage/private/vpn` 读取被 Git 忽略的 Clash、Xray、Shadowrocket 和 Surge 文件，按文件名中的资源编码归组，并统一生成 Clash/FlClash、Shadowrocket、Surge、v2rayN/v2rayNG 四种订阅。分配时会自动加入 `VPN 用户` 角色；用户 Token 由 `AOWUGONG_ENCRYPTION_KEY`、订阅主键和版本通过 HMAC 派生，数据库不保存 Token 或节点正文。
 
 需要补跑或修改线上数据时，通过 SSH 在服务器加载正式环境并调用统一 CLI：
 
@@ -145,7 +145,7 @@ VPN_SOURCE_DIR=storage/private/vpn
 VPN_PUBLIC_URL=https://8.138.123.59:2345
 ```
 
-原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每台设备独立高强度 Token，可以在页面轮换或撤销。生产使用 Let’s Encrypt 公网 IP 短期证书，由 Caddy 在 `2345` 终止 TLS 并转发到仅监听 `127.0.0.1:12345` 的 Go 服务；同端口收到 HTTP 请求时自动跳转到 HTTPS。systemd 每日检查续期，证书变化后自动重启 Caddy。
+原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每名登录用户独立的高强度 Token；管理员在“VPN 分配”管理订阅，`VPN 用户` 在“VPN 资源”中只读取自己的订阅并扫码。生产使用 Let’s Encrypt 公网 IP 短期证书，由 Caddy 在 `2345` 终止 TLS 并转发到仅监听 `127.0.0.1:12345` 的 Go 服务；同端口收到 HTTP 请求时自动跳转到 HTTPS。systemd 每日检查续期，证书变化后自动重启 Caddy。
 
 `FINANCE_ENABLE_REAL_TRADE` 默认 `false`。`AOWUGONG_SQLITE_SOURCE_PATH` 只供一次迁移工具读取，正式服务不使用。
 

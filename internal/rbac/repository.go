@@ -69,11 +69,11 @@ func (r *Repository) SyncDefaults(ctx context.Context, permissions []Permission,
 		}
 	}
 
-	// 4. 重建两个系统角色的权限绑定，确保代码基线是唯一来源。
+	// 4. 重建三个系统角色的权限绑定，确保代码基线是唯一来源。
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM aowugong_role_permissions
-		WHERE role_id IN (SELECT id FROM aowugong_roles WHERE code IN (?, ?))
-	`, AdminRoleCode, InvestorRoleCode); err != nil {
+		WHERE role_id IN (SELECT id FROM aowugong_roles WHERE code IN (?, ?, ?))
+	`, AdminRoleCode, InvestorRoleCode, VPNUserRoleCode); err != nil {
 		return fmt.Errorf("清理默认角色权限: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -93,6 +93,15 @@ func (r *Repository) SyncDefaults(ctx context.Context, permissions []Permission,
 		WHERE role.code = ?
 	`, PermissionFinanceArticleAnalysis, InvestorRoleCode); err != nil {
 		return fmt.Errorf("绑定投资者权限: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO aowugong_role_permissions (role_id, permission_id)
+		SELECT role.id, permission.id
+		FROM aowugong_roles role
+		JOIN aowugong_permissions permission ON permission.code = ?
+		WHERE role.code = ?
+	`, PermissionVPNResources, VPNUserRoleCode); err != nil {
+		return fmt.Errorf("绑定 VPN 用户权限: %w", err)
 	}
 
 	// 5. 原子提交完整 RBAC 基线。

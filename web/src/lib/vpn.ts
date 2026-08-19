@@ -11,9 +11,10 @@ export type VPNProfile = {
   formats: VPNFormat[];
 };
 
-export type VPNDevice = {
+export type VPNUserSubscription = {
   id: number;
-  name: string;
+  user_id: number;
+  username: string;
   profile_code: string;
   token_version: number;
   status: "draft" | "active" | "error" | "revoked";
@@ -24,60 +25,78 @@ export type VPNDevice = {
   subscriptions: Record<string, string>;
 };
 
+export type VPNUserOption = {
+  id: number;
+  username: string;
+  email: string;
+  has_subscription: boolean;
+};
+
 export type VPNSummary = {
   distributor_configured: boolean;
   distributor_url: string;
+  can_manage: boolean;
   profiles: VPNProfile[];
-  devices: VPNDevice[];
+  user_subscriptions: VPNUserSubscription[];
+  users: VPNUserOption[];
 };
 
-// fetchVPNSummary 读取 VPN 私有资源、设备和分发状态。
+// fetchVPNDistributionSummary 读取管理员 VPN 分配状态。
 // 输入：无。
-// 输出：返回管理员 VPN 页面完整数据。
+// 输出：返回全部用户、资源和分配记录。
 // 副作用：请求 Go API。
-export async function fetchVPNSummary(): Promise<VPNSummary> {
+export async function fetchVPNDistributionSummary(): Promise<VPNSummary> {
   // 1. 使用统一认证请求并转换失败响应。
-  return requestVPN<VPNSummary>("/api/v1/vpn/summary");
+  return requestVPN<VPNSummary>("/api/v1/vpn/distribution/summary");
 }
 
-// createVPNDevice 新增并发布一台设备订阅。
-// 输入：name 是设备名，profileCode 是资源编码。
-// 输出：返回已发布设备。
+// fetchVPNResourceSummary 读取当前登录用户获配的 VPN 资源。
+// 输入：无。
+// 输出：返回当前用户的订阅和对应客户端格式。
+// 副作用：请求 Go API。
+export async function fetchVPNResourceSummary(): Promise<VPNSummary> {
+  // 1. 请求严格按当前登录用户过滤的资源接口。
+  return requestVPN<VPNSummary>("/api/v1/vpn/resources/summary");
+}
+
+// createVPNUserSubscription 给登录用户开通并发布订阅。
+// 输入：userID 是用户主键，profileCode 是资源编码。
+// 输出：返回已发布用户订阅。
 // 副作用：请求 Go API 写 PostgreSQL 并推送 Worker。
-export async function createVPNDevice(name: string, profileCode: string): Promise<VPNDevice> {
-  // 1. 提交结构化 JSON，节点正文不会经过浏览器。
-  return requestVPN<VPNDevice>("/api/v1/vpn/devices", {
+export async function createVPNUserSubscription(userID: number, profileCode: string): Promise<VPNUserSubscription> {
+  // 1. 提交用户和资源编码，节点正文不会经过浏览器。
+  return requestVPN<VPNUserSubscription>("/api/v1/vpn/distribution/users", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, profile_code: profileCode }),
+    body: JSON.stringify({ user_id: userID, profile_code: profileCode }),
   });
 }
 
-// publishVPNDevice 重新发布设备当前配置。
-// 输入：deviceID 是设备主键。
-// 输出：返回更新后的设备。
+// publishVPNUserSubscription 重新发布用户当前配置。
+// 输入：subscriptionID 是订阅主键。
+// 输出：返回更新后的用户订阅。
 // 副作用：请求 Go API 推送 Worker。
-export async function publishVPNDevice(deviceID: number): Promise<VPNDevice> {
-  // 1. 调用设备当前版本发布入口。
-  return requestVPN<VPNDevice>(`/api/v1/vpn/devices/${deviceID}/publish`, { method: "POST" });
+export async function publishVPNUserSubscription(subscriptionID: number): Promise<VPNUserSubscription> {
+  // 1. 调用用户订阅当前版本发布入口。
+  return requestVPN<VPNUserSubscription>(`/api/v1/vpn/distribution/users/${subscriptionID}/publish`, { method: "POST" });
 }
 
-// rotateVPNDevice 轮换设备订阅 Token。
-// 输入：deviceID 是设备主键。
-// 输出：返回包含新订阅地址的设备。
+// rotateVPNUserSubscription 轮换用户订阅 Token。
+// 输入：subscriptionID 是订阅主键。
+// 输出：返回包含新订阅地址的用户订阅。
 // 副作用：请求 Go API 发布新地址并撤销旧地址。
-export async function rotateVPNDevice(deviceID: number): Promise<VPNDevice> {
+export async function rotateVPNUserSubscription(subscriptionID: number): Promise<VPNUserSubscription> {
   // 1. 调用服务端原子轮换流程。
-  return requestVPN<VPNDevice>(`/api/v1/vpn/devices/${deviceID}/rotate`, { method: "POST" });
+  return requestVPN<VPNUserSubscription>(`/api/v1/vpn/distribution/users/${subscriptionID}/rotate`, { method: "POST" });
 }
 
-// revokeVPNDevice 撤销设备当前订阅。
-// 输入：deviceID 是设备主键。
-// 输出：返回已撤销设备。
+// revokeVPNUserSubscription 撤销用户当前订阅。
+// 输入：subscriptionID 是订阅主键。
+// 输出：返回已撤销用户订阅。
 // 副作用：请求 Go API 删除 Worker KV 并写 PostgreSQL。
-export async function revokeVPNDevice(deviceID: number): Promise<VPNDevice> {
+export async function revokeVPNUserSubscription(subscriptionID: number): Promise<VPNUserSubscription> {
   // 1. 使用 DELETE 表达撤销语义，保留本地审计记录。
-  return requestVPN<VPNDevice>(`/api/v1/vpn/devices/${deviceID}`, { method: "DELETE" });
+  return requestVPN<VPNUserSubscription>(`/api/v1/vpn/distribution/users/${subscriptionID}`, { method: "DELETE" });
 }
 
 // fetchVPNQRCode 下载指定订阅格式二维码。
@@ -86,7 +105,7 @@ export async function revokeVPNDevice(deviceID: number): Promise<VPNDevice> {
 // 副作用：请求 Go API。
 export async function fetchVPNQRCode(deviceID: number, format: string): Promise<Blob> {
   // 1. 认证读取不缓存二维码图片。
-  const response = await authorizedFetch(`/api/v1/vpn/devices/${deviceID}/qr?format=${encodeURIComponent(format)}`);
+  const response = await authorizedFetch(`/api/v1/vpn/resources/users/${deviceID}/qr?format=${encodeURIComponent(format)}`);
   if (!response.ok) {
     throw await vpnResponseError(response, "读取订阅二维码失败");
   }

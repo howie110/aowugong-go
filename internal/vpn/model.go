@@ -1,4 +1,4 @@
-// Package vpn 提供私有 VPN 资源转换、设备订阅和 Go 直连分发能力。
+// Package vpn 提供私有 VPN 资源转换、用户订阅和 Go 直连分发能力。
 package vpn
 
 import "errors"
@@ -16,6 +16,7 @@ var (
 	ErrConflict                 = errors.New("VPN 订阅设备名称已存在")
 	ErrProfileNotFound          = errors.New("VPN 资源不存在")
 	ErrFormatNotFound           = errors.New("VPN 订阅格式不存在")
+	ErrUserNotFound             = errors.New("VPN 订阅用户不存在")
 	ErrDistributorNotConfigured = errors.New("VPN 分发服务尚未配置")
 )
 
@@ -32,10 +33,11 @@ type Profile struct {
 	Formats []Format `json:"formats"`
 }
 
-// Device 描述一台使用独立订阅密钥的终端。
-type Device struct {
+// UserSubscription 描述一名登录用户独享的 VPN 订阅。
+type UserSubscription struct {
 	ID            int64             `json:"id"`
-	Name          string            `json:"name"`
+	UserID        int64             `json:"user_id"`
+	Username      string            `json:"username"`
 	ProfileCode   string            `json:"profile_code"`
 	TokenVersion  int               `json:"token_version"`
 	Status        string            `json:"status"`
@@ -46,18 +48,28 @@ type Device struct {
 	Subscriptions map[string]string `json:"subscriptions"`
 }
 
-// CreateRequest 描述新增设备需要的最小字段。
+// CreateRequest 描述给登录用户开通订阅需要的最小字段。
 type CreateRequest struct {
-	Name        string `json:"name"`
+	UserID      int64  `json:"user_id"`
 	ProfileCode string `json:"profile_code"`
+}
+
+// UserOption 描述管理员可选择的活动登录用户。
+type UserOption struct {
+	ID              int64  `json:"id"`
+	Username        string `json:"username"`
+	Email           string `json:"email"`
+	HasSubscription bool   `json:"has_subscription"`
 }
 
 // Summary 描述 VPN 页面一次加载所需的完整状态。
 type Summary struct {
-	DistributorConfigured bool      `json:"distributor_configured"`
-	DistributorURL        string    `json:"distributor_url"`
-	Profiles              []Profile `json:"profiles"`
-	Devices               []Device  `json:"devices"`
+	DistributorConfigured bool               `json:"distributor_configured"`
+	DistributorURL        string             `json:"distributor_url"`
+	CanManage             bool               `json:"can_manage"`
+	Profiles              []Profile          `json:"profiles"`
+	Subscriptions         []UserSubscription `json:"user_subscriptions"`
+	Users                 []UserOption       `json:"users"`
 }
 
 // ConfigContent 描述公开订阅接口返回的一份客户端配置。
@@ -67,17 +79,18 @@ type ConfigContent struct {
 	Body        string `json:"body"`
 }
 
-// DistributionPayload 描述统一发布流程校验的完整设备订阅。
+// DistributionPayload 描述统一发布流程校验的完整用户订阅。
 type DistributionPayload struct {
-	Device   string                   `json:"device"`
+	User     string                   `json:"user"`
 	Profile  string                   `json:"profile"`
 	Formats  map[string]ConfigContent `json:"formats"`
 	IssuedAt string                   `json:"issued_at"`
 }
 
-type storedDevice struct {
+type storedSubscription struct {
 	ID           int64
-	Name         string
+	UserID       int64
+	Username     string
 	ProfileCode  string
 	TokenVersion int
 	Status       string

@@ -1,7 +1,6 @@
 import {
   Ban,
   Cloud,
-  Copy,
   Ellipsis,
   KeyRound,
   Plus,
@@ -44,39 +43,39 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { notify } from "@/lib/notify";
 import {
-  createVPNDevice,
+  createVPNUserSubscription,
   fetchVPNQRCode,
-  fetchVPNSummary,
-  publishVPNDevice,
-  revokeVPNDevice,
-  rotateVPNDevice,
-  type VPNDevice,
+  fetchVPNDistributionSummary,
+  fetchVPNResourceSummary,
+  publishVPNUserSubscription,
+  revokeVPNUserSubscription,
+  rotateVPNUserSubscription,
+  type VPNUserSubscription,
   type VPNFormat,
+  type VPNUserOption,
   type VPNSummary,
 } from "@/lib/vpn";
 
 type QRTarget = {
-  device: VPNDevice;
+  subscription: VPNUserSubscription;
   format: VPNFormat;
+  profileName: string;
 };
 
-export function VPNPage() {
+export function VPNDistributionPage() {
   const [summary, setSummary] = useState<VPNSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [deviceName, setDeviceName] = useState("");
+  const [userID, setUserID] = useState("");
   const [profileCode, setProfileCode] = useState("");
   const [busyDeviceID, setBusyDeviceID] = useState<number | null>(null);
-  const [revokeTarget, setRevokeTarget] = useState<VPNDevice | null>(null);
-  const [rotateTarget, setRotateTarget] = useState<VPNDevice | null>(null);
-  const [qrTarget, setQRTarget] = useState<QRTarget | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<VPNUserSubscription | null>(null);
+  const [rotateTarget, setRotateTarget] = useState<VPNUserSubscription | null>(null);
 
   useEffect(() => {
     void loadSummary();
@@ -85,10 +84,14 @@ export function VPNPage() {
   async function loadSummary() {
     setIsLoading(true);
     try {
-      const data = await fetchVPNSummary();
+      const data = await fetchVPNDistributionSummary();
       setSummary(data);
       if (!profileCode && data.profiles.length) {
         setProfileCode(data.profiles[0].code);
+      }
+      if (!userID) {
+        const availableUser = data.users.find((user) => !user.has_subscription);
+        setUserID(availableUser ? String(availableUser.id) : "");
       }
     } catch (error) {
       notify.errorFrom(error, "VPN 订阅状态加载失败");
@@ -98,26 +101,27 @@ export function VPNPage() {
   }
 
   async function handleCreate() {
-    if (!deviceName.trim() || !profileCode) {
-      notify.warning("请填写设备名称并选择 VPN 资源");
+    const selectedUserID = Number(userID);
+    if (!Number.isInteger(selectedUserID) || selectedUserID <= 0 || !profileCode) {
+      notify.warning("请选择登录用户和 VPN 资源");
       return;
     }
     setBusyDeviceID(0);
     try {
-      await createVPNDevice(deviceName.trim(), profileCode);
-      notify.success("设备订阅已创建");
-      setDeviceName("");
+      await createVPNUserSubscription(selectedUserID, profileCode);
+      notify.success("用户订阅已开通");
+      setUserID("");
       setIsCreateOpen(false);
       await loadSummary();
     } catch (error) {
-      notify.errorFrom(error, "创建设备订阅失败");
+      notify.errorFrom(error, "开通用户订阅失败");
     } finally {
       setBusyDeviceID(null);
     }
   }
 
-  async function handlePublish(device: VPNDevice) {
-    await runDeviceAction(device, publishVPNDevice, "订阅配置已重新发布", "重新发布失败");
+  async function handlePublish(device: VPNUserSubscription) {
+    await runDeviceAction(device, publishVPNUserSubscription, "订阅配置已重新发布", "重新发布失败");
   }
 
   async function handleRotate() {
@@ -126,7 +130,7 @@ export function VPNPage() {
     }
     const target = rotateTarget;
     setRotateTarget(null);
-    await runDeviceAction(target, rotateVPNDevice, "订阅地址已轮换，旧地址已失效", "轮换订阅地址失败");
+    await runDeviceAction(target, rotateVPNUserSubscription, "订阅地址已轮换，旧地址已失效", "轮换订阅地址失败");
   }
 
   async function handleRevoke() {
@@ -135,12 +139,12 @@ export function VPNPage() {
     }
     const target = revokeTarget;
     setRevokeTarget(null);
-    await runDeviceAction(target, revokeVPNDevice, "设备订阅已撤销", "撤销设备订阅失败");
+    await runDeviceAction(target, revokeVPNUserSubscription, "用户订阅已撤销", "撤销用户订阅失败");
   }
 
   async function runDeviceAction(
-    device: VPNDevice,
-    action: (deviceID: number) => Promise<VPNDevice>,
+    device: VPNUserSubscription,
+    action: (deviceID: number) => Promise<VPNUserSubscription>,
     successMessage: string,
     failureMessage: string,
   ) {
@@ -156,12 +160,7 @@ export function VPNPage() {
     }
   }
 
-  const activeCount = summary?.devices.filter((device) => device.status === "active").length ?? 0;
-  const formatCount = useMemo(() => {
-    const formats = new Set(summary?.profiles.flatMap((profile) => profile.formats.map((format) => format.code)) ?? []);
-    return formats.size;
-  }, [summary]);
-
+  const activeCount = summary?.user_subscriptions.filter((subscription) => subscription.status === "active").length ?? 0;
   if (isLoading && !summary) {
     return <VPNPageSkeleton />;
   }
@@ -169,49 +168,45 @@ export function VPNPage() {
   return (
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatusCard label="VPN 资源" value={`${summary?.profiles.length ?? 0}`} detail="本机私有目录" icon={Wifi} />
-        <StatusCard label="有效设备" value={`${activeCount}`} detail={`共 ${summary?.devices.length ?? 0} 台`} icon={KeyRound} />
+        <StatusCard label="VPN 资源" value={`${summary?.profiles.length ?? 0}`} detail={summary?.can_manage ? "本机私有目录" : "当前账号可用"} icon={Wifi} />
+        <StatusCard label="登录用户" value={`${summary?.users.length ?? 0}`} detail="可分配账号" icon={KeyRound} />
+        <StatusCard label="已分配" value={`${activeCount}`} detail={`共 ${summary?.user_subscriptions.length ?? 0} 条记录`} icon={KeyRound} />
         <StatusCard
           label="直连订阅"
           value={summary?.distributor_configured ? "已配置" : "未配置"}
           detail={summary?.distributor_url || "等待公开地址"}
           icon={Cloud}
         />
-        <StatusCard label="客户端格式" value={`${formatCount}`} detail="按现有源文件生成" icon={QrCode} />
       </div>
 
       {!summary?.distributor_configured ? (
         <Alert>
           <Cloud className="h-4 w-4" />
           <AlertTitle>Go 直连订阅地址尚未配置</AlertTitle>
-          <AlertDescription>现在可以先创建设备草稿；配置无需代理即可访问的服务器地址后，再从设备菜单发布订阅。</AlertDescription>
+          <AlertDescription>现在可以先创建用户订阅草稿；配置无需代理即可访问的服务器地址后，再从菜单发布订阅。</AlertDescription>
         </Alert>
       ) : null}
-
-      <SourceCard summary={summary} />
 
       <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-3">
           <div>
-            <CardTitle>设备订阅</CardTitle>
-            <CardDescription>每台设备使用独立地址，可单独轮换或撤销。</CardDescription>
+            <CardTitle>用户分配</CardTitle>
+            <CardDescription>一名登录用户分配一个 VPN 资源，可在多台终端中使用。</CardDescription>
           </div>
-          <Button
+          {summary?.can_manage ? <Button
             type="button"
             size="sm"
             onClick={() => setIsCreateOpen(true)}
             disabled={!summary?.profiles.length}
           >
             <Plus className="h-4 w-4" />
-            添加设备
-          </Button>
+            开通用户
+          </Button> : null}
         </CardHeader>
         <CardContent>
-          <DeviceTable
+          <UserSubscriptionTable
             summary={summary}
             busyDeviceID={busyDeviceID}
-            onCopy={copySubscription}
-            onQR={setQRTarget}
             onPublish={handlePublish}
             onRotate={setRotateTarget}
             onRevoke={setRevokeTarget}
@@ -219,26 +214,25 @@ export function VPNPage() {
         </CardContent>
       </Card>
 
-      <CreateDeviceDialog
+      <CreateUserDialog
         open={isCreateOpen}
-        name={deviceName}
+        userID={userID}
         profileCode={profileCode}
+        users={summary?.users ?? []}
         profiles={summary?.profiles ?? []}
         isSaving={busyDeviceID === 0}
         onOpenChange={setIsCreateOpen}
-        onNameChange={setDeviceName}
+        onUserChange={setUserID}
         onProfileChange={setProfileCode}
         onSave={handleCreate}
       />
-
-      <QRCodeDialog target={qrTarget} onOpenChange={(open) => !open && setQRTarget(null)} />
 
       <AlertDialog open={Boolean(rotateTarget)} onOpenChange={(open) => !open && setRotateTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>轮换订阅地址</AlertDialogTitle>
             <AlertDialogDescription>
-              「{rotateTarget?.name}」的旧地址会立即失效，需要在对应终端重新填写或扫码。
+              「{rotateTarget?.username}」的旧地址会立即失效，需要在对应终端重新填写或扫码。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -251,9 +245,9 @@ export function VPNPage() {
       <AlertDialog open={Boolean(revokeTarget)} onOpenChange={(open) => !open && setRevokeTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>撤销设备订阅</AlertDialogTitle>
+            <AlertDialogTitle>撤销用户订阅</AlertDialogTitle>
             <AlertDialogDescription>
-              「{revokeTarget?.name}」将无法继续更新订阅，设备记录会保留用于审计。
+              「{revokeTarget?.username}」将无法继续更新订阅，记录会保留用于审计。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -268,94 +262,136 @@ export function VPNPage() {
   );
 }
 
-function SourceCard({ summary }: { summary: VPNSummary | null }) {
+// VPNResourcesPage 展示当前登录用户获配的 VPN 资源和客户端二维码。
+// 输入：无。
+// 输出：返回只包含当前用户资源的页面。
+// 副作用：请求 Go API，点击客户端时读取二维码。
+export function VPNResourcesPage() {
+  const [summary, setSummary] = useState<VPNSummary | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [qrTarget, setQRTarget] = useState<QRTarget | null>(null);
+
+  useEffect(() => {
+    // 1. 页面加载时读取服务端按当前用户过滤的资源。
+    fetchVPNResourceSummary()
+      .then(setSummary)
+      .catch((error) => notify.errorFrom(error, "VPN 资源加载失败"))
+      .finally(() => setIsLoading(false));
+  }, []);
+
+  const profileMap = useMemo(
+    () => new Map((summary?.profiles ?? []).map((profile) => [profile.code, profile])),
+    [summary],
+  );
+
+  if (isLoading && !summary) {
+    return <VPNPageSkeleton />;
+  }
+
+  const subscriptions = summary?.user_subscriptions ?? [];
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>私有资源</CardTitle>
-        <CardDescription>只读取 storage/private/vpn，节点地址和密钥不会写入数据库。</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>资源</TableHead>
-              <TableHead>可用客户端</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(summary?.profiles ?? []).map((profile) => (
-              <TableRow key={profile.code}>
-                <TableCell>
-                  <div className="font-medium">{profile.name}</div>
-                  <div className="font-mono text-xs text-muted-foreground">{profile.code}</div>
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-1.5">
-                    {profile.formats.map((format) => <Badge key={format.code} variant="secondary">{format.name}</Badge>)}
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-            {!summary?.profiles.length ? (
-              <TableRow>
-                <TableCell colSpan={2}>
-                  <Empty className="border-0 py-5">
-                    <EmptyHeader>
-                      <EmptyTitle>没有检测到 VPN 资源</EmptyTitle>
-                      <EmptyDescription>请检查私有目录中的文件命名和读取权限。</EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      {subscriptions.map((subscription) => {
+        const profile = profileMap.get(subscription.profile_code);
+        const formats = profile?.formats.filter((format) => subscription.subscriptions[format.code]) ?? [];
+        return (
+          <Card key={subscription.id}>
+            <CardHeader className="flex flex-row items-start justify-between gap-3">
+              <div>
+                <CardTitle>{profile?.name || subscription.profile_code}</CardTitle>
+                <CardDescription>选择客户端后扫码导入，手机和电脑可共用当前账号的资源。</CardDescription>
+              </div>
+              <DeviceStatusBadge device={subscription} />
+            </CardHeader>
+            <CardContent>
+              {subscription.last_error ? (
+                <Alert className="mb-4" variant="destructive">
+                  <AlertTitle>资源暂不可用</AlertTitle>
+                  <AlertDescription>{subscription.last_error}</AlertDescription>
+                </Alert>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {formats.map((format) => (
+                  <Button
+                    key={format.code}
+                    type="button"
+                    variant="outline"
+                    className="h-auto min-h-20 justify-between px-4 py-3"
+                    onClick={() => setQRTarget({ subscription, format, profileName: profile?.name || subscription.profile_code })}
+                  >
+                    <span className="text-left">
+                      <span className="block font-medium">{format.name}</span>
+                      <span className="mt-1 block text-xs font-normal text-muted-foreground">扫码配置</span>
+                    </span>
+                    <QrCode className="h-5 w-5" />
+                  </Button>
+                ))}
+              </div>
+              {!formats.length ? (
+                <Empty className="border-0 py-8">
+                  <EmptyHeader>
+                    <EmptyTitle>当前资源不可扫码</EmptyTitle>
+                    <EmptyDescription>请联系管理员检查发布状态或重新分配。</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              ) : null}
+            </CardContent>
+          </Card>
+        );
+      })}
+
+      {!subscriptions.length ? (
+        <Card>
+          <CardContent>
+            <Empty className="border-0 py-12">
+              <EmptyHeader>
+                <EmptyTitle>尚未分配 VPN 资源</EmptyTitle>
+                <EmptyDescription>管理员完成分配后，资源和二维码会显示在这里。</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <QRCodeDialog target={qrTarget} onOpenChange={(open) => !open && setQRTarget(null)} />
+    </div>
   );
 }
 
-function DeviceTable({
+function UserSubscriptionTable({
   summary,
   busyDeviceID,
-  onCopy,
-  onQR,
   onPublish,
   onRotate,
   onRevoke,
 }: {
   summary: VPNSummary | null;
   busyDeviceID: number | null;
-  onCopy: (url: string) => void;
-  onQR: (target: QRTarget) => void;
-  onPublish: (device: VPNDevice) => void;
-  onRotate: (device: VPNDevice) => void;
-  onRevoke: (device: VPNDevice) => void;
+  onPublish: (device: VPNUserSubscription) => void;
+  onRotate: (device: VPNUserSubscription) => void;
+  onRevoke: (device: VPNUserSubscription) => void;
 }) {
   const profileMap = new Map((summary?.profiles ?? []).map((profile) => [profile.code, profile]));
   return (
     <div className="overflow-x-auto">
-      <Table className="min-w-[760px]">
+      <Table className="min-w-[620px]">
         <TableHeader>
           <TableRow>
-            <TableHead>设备</TableHead>
+            <TableHead>用户</TableHead>
             <TableHead>资源</TableHead>
             <TableHead>状态</TableHead>
-            <TableHead>客户端订阅</TableHead>
             <TableHead>最近发布</TableHead>
             <TableHead className="w-12 text-right">操作</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {(summary?.devices ?? []).map((device) => {
+          {(summary?.user_subscriptions ?? []).map((device) => {
             const profile = profileMap.get(device.profile_code);
-            const formats = profile?.formats.filter((format) => device.subscriptions[format.code]) ?? [];
             const isBusy = busyDeviceID === device.id;
             return (
               <TableRow key={device.id}>
                 <TableCell>
-                  <div className="font-medium">{device.name}</div>
+                  <div className="font-medium">{device.username}</div>
                   <div className="text-xs text-muted-foreground">密钥版本 {device.token_version}</div>
                 </TableCell>
                 <TableCell>{profile?.name || device.profile_code}</TableCell>
@@ -363,45 +399,11 @@ function DeviceTable({
                   <DeviceStatusBadge device={device} />
                   {device.last_error ? <div className="mt-1 max-w-56 text-xs text-destructive">{device.last_error}</div> : null}
                 </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-1">
-                    {formats.map((format) => (
-                      <div key={format.code} className="inline-flex items-center rounded-md border">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 rounded-r-none px-2"
-                          onClick={() => onCopy(device.subscriptions[format.code])}
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                          {format.name}
-                        </Button>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 rounded-l-none border-l"
-                              onClick={() => onQR({ device, format })}
-                              aria-label={`${format.name} 二维码`}
-                            >
-                              <QrCode className="h-3.5 w-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>扫码订阅</TooltipContent>
-                        </Tooltip>
-                      </div>
-                    ))}
-                    {!formats.length ? <span className="text-sm text-muted-foreground">-</span> : null}
-                  </div>
-                </TableCell>
                 <TableCell className="text-muted-foreground">{formatTime(device.published_at)}</TableCell>
                 <TableCell className="text-right">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button type="button" variant="ghost" size="icon" disabled={isBusy} aria-label="设备操作">
+                      <Button type="button" variant="ghost" size="icon" disabled={isBusy} aria-label="用户订阅操作">
                         {isBusy ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Ellipsis className="h-4 w-4" />}
                       </Button>
                     </DropdownMenuTrigger>
@@ -417,7 +419,7 @@ function DeviceTable({
                       <DropdownMenuSeparator />
                       <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onRevoke(device)} disabled={device.status === "revoked"}>
                         <Ban className="h-4 w-4" />
-                        撤销设备
+                        撤销订阅
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -425,13 +427,13 @@ function DeviceTable({
               </TableRow>
             );
           })}
-          {!summary?.devices.length ? (
+          {!summary?.user_subscriptions.length ? (
             <TableRow>
-              <TableCell colSpan={6}>
+              <TableCell colSpan={5}>
                 <Empty className="border-0 py-8">
                   <EmptyHeader>
-                    <EmptyTitle>还没有设备订阅</EmptyTitle>
-                    <EmptyDescription>添加设备后会生成独立的 HTTPS 地址和二维码。</EmptyDescription>
+                    <EmptyTitle>还没有用户分配</EmptyTitle>
+                    <EmptyDescription>选择登录用户和 VPN 资源后即可完成分配。</EmptyDescription>
                   </EmptyHeader>
                 </Empty>
               </TableCell>
@@ -443,24 +445,26 @@ function DeviceTable({
   );
 }
 
-function CreateDeviceDialog({
+function CreateUserDialog({
   open,
-  name,
+  userID,
   profileCode,
+  users,
   profiles,
   isSaving,
   onOpenChange,
-  onNameChange,
+  onUserChange,
   onProfileChange,
   onSave,
 }: {
   open: boolean;
-  name: string;
+  userID: string;
   profileCode: string;
+  users: VPNUserOption[];
   profiles: VPNSummary["profiles"];
   isSaving: boolean;
   onOpenChange: (open: boolean) => void;
-  onNameChange: (name: string) => void;
+  onUserChange: (userID: string) => void;
   onProfileChange: (code: string) => void;
   onSave: () => void;
 }) {
@@ -468,13 +472,22 @@ function CreateDeviceDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>添加订阅设备</DialogTitle>
-          <DialogDescription>设备使用独立地址，丢失或弃用时可单独撤销。</DialogDescription>
+          <DialogTitle>开通用户订阅</DialogTitle>
+          <DialogDescription>一个登录用户使用一组地址，可在多台终端中共用。</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <Field>
-            <FieldLabel>设备名称</FieldLabel>
-            <Input value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="例如 OnePlus 13" maxLength={60} />
+            <FieldLabel>登录用户</FieldLabel>
+            <Select value={userID} onValueChange={onUserChange}>
+              <SelectTrigger>
+                <SelectValue placeholder="选择用户" />
+              </SelectTrigger>
+              <SelectContent>
+                {users.filter((user) => !user.has_subscription).map((user) => (
+                  <SelectItem key={user.id} value={String(user.id)}>{user.username} · {user.email}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
           <Field>
             <FieldLabel>VPN 资源</FieldLabel>
@@ -492,7 +505,7 @@ function CreateDeviceDialog({
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>取消</Button>
           <Button type="button" onClick={onSave} disabled={isSaving}>
             {isSaving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            创建设备
+            确认开通
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -513,7 +526,7 @@ function QRCodeDialog({ target, onOpenChange }: { target: QRTarget | null; onOpe
     let cancelled = false;
     setImageURL("");
     setIsLoading(true);
-    fetchVPNQRCode(target.device.id, target.format.code)
+    fetchVPNQRCode(target.subscription.id, target.format.code)
       .then((blob) => {
         if (cancelled) {
           return;
@@ -535,8 +548,8 @@ function QRCodeDialog({ target, onOpenChange }: { target: QRTarget | null; onOpe
     <Dialog open={Boolean(target)} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>{target?.device.name}</DialogTitle>
-          <DialogDescription>{target?.format.name} 订阅二维码</DialogDescription>
+          <DialogTitle>{target?.profileName}</DialogTitle>
+          <DialogDescription>{target?.format.name} 导入二维码</DialogDescription>
         </DialogHeader>
         <div className="flex aspect-square items-center justify-center rounded-md border bg-white p-4">
           {imageURL ? <img src={imageURL} alt="VPN 订阅二维码" className="h-full w-full object-contain" /> : null}
@@ -562,7 +575,7 @@ function StatusCard({ label, value, detail, icon: Icon }: { label: string; value
   );
 }
 
-function DeviceStatusBadge({ device }: { device: VPNDevice }) {
+function DeviceStatusBadge({ device }: { device: VPNUserSubscription }) {
   if (device.status === "active") {
     return <Badge variant="success">有效</Badge>;
   }
@@ -589,24 +602,4 @@ function VPNPageSkeleton() {
 
 function formatTime(value?: string | null) {
   return value ? value.slice(0, 16) : "-";
-}
-
-async function copySubscription(value: string) {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(value);
-    } else {
-      const textarea = document.createElement("textarea");
-      textarea.value = value;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      textarea.remove();
-    }
-    notify.success("订阅地址已复制");
-  } catch {
-    notify.error("复制失败，请手动选择订阅地址");
-  }
 }

@@ -30,8 +30,8 @@ func TestServiceSyncDefaultsIsIdempotent(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM aowugong_permissions`).Scan(&permissionCount); err != nil {
 		t.Fatalf("count permissions error = %v", err)
 	}
-	if roleCount != 2 || permissionCount != len(DefaultPermissions) {
-		t.Errorf("counts = roles:%d permissions:%d, want roles:2 permissions:%d", roleCount, permissionCount, len(DefaultPermissions))
+	if roleCount != len(DefaultRoles) || permissionCount != len(DefaultPermissions) {
+		t.Errorf("counts = roles:%d permissions:%d, want roles:%d permissions:%d", roleCount, permissionCount, len(DefaultRoles), len(DefaultPermissions))
 	}
 }
 
@@ -90,6 +90,35 @@ func TestServiceInvestorGetsOnlyArticleAnalysis(t *testing.T) {
 	hasAdminRole, err := service.HasRole(context.Background(), userID, AdminRoleCode)
 	if err != nil || hasAdminRole {
 		t.Errorf("HasRole(admin) = %v, %v, want false", hasAdminRole, err)
+	}
+}
+
+// TestServiceVPNUserGetsOnlyAssignedResources 验证 VPN 用户只能查看分配给自己的 VPN 资源。
+// 输入：分配 VPN 用户角色的测试用户。
+// 输出：仅包含 VPN 资源页面权限，不包含管理员分配权限。
+// 副作用：创建并写入临时 SQLite。
+func TestServiceVPNUserGetsOnlyAssignedResources(t *testing.T) {
+	// 1. 同步默认 RBAC 数据并创建 VPN 用户。
+	service, db := newTestService(t)
+	if err := service.SyncDefaults(context.Background()); err != nil {
+		t.Fatalf("SyncDefaults() error = %v", err)
+	}
+	userID := insertTestUser(t, db, "vpn-user", "vpn@example.com")
+	if err := service.AssignRole(context.Background(), userID, VPNUserRoleCode); err != nil {
+		t.Fatalf("AssignRole() error = %v", err)
+	}
+
+	// 2. VPN 用户只能进入资源页，不能进入管理员分配页。
+	permissions, err := service.PermissionsForUser(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("PermissionsForUser() error = %v", err)
+	}
+	if len(permissions) != 1 || permissions[0] != PermissionVPNResources {
+		t.Errorf("permissions = %v, want [%s]", permissions, PermissionVPNResources)
+	}
+	hasDistribution, err := service.HasPermission(context.Background(), userID, PermissionVPNDistribution)
+	if err != nil || hasDistribution {
+		t.Errorf("HasPermission(vpn distribution) = %v, %v, want false", hasDistribution, err)
 	}
 }
 

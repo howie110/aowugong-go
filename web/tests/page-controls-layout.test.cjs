@@ -69,6 +69,23 @@ test("导入记录在桌面和手机端都隐藏账户与券商", () => {
   assert.doesNotMatch(snapshotTableSource, /账户|券商|account_alias|account_suffix|broker_name/);
 });
 
+test("资源分享将管理员分配与用户扫码拆成两个页面", () => {
+  // 1. 读取导航、路由和 VPN 页面源码。
+  const navigationSource = readSource("src/components/layout/app-navigation.ts");
+  const financeSource = readSource("src/lib/finance.ts");
+  const vpnSource = readSource("src/pages/vpn.tsx");
+
+  // 2. 管理员在 VPN 分配操作，用户只在 VPN 资源查看自己的二维码。
+  assert.match(navigationSource, /label: "资源分享"/);
+  assert.match(navigationSource, /key: "vpnDistribution", label: "VPN 分配"/);
+  assert.match(navigationSource, /key: "vpnResources", label: "VPN 资源"/);
+  assert.match(financeSource, /page:resource_sharing:vpn_distribution/);
+  assert.match(financeSource, /page:resource_sharing:vpn_resources/);
+  assert.match(vpnSource, /export function VPNDistributionPage/);
+  assert.match(vpnSource, /export function VPNResourcesPage/);
+  assert.match(vpnSource, /尚未分配 VPN 资源/);
+});
+
 test("综合趋势仅在指针进入图表后显示浮层并在左侧展示精简图例", () => {
   // 1. 读取综合趋势组件并检查指针跟随行为。
   const source = readSource("src/pages/finance/stock-analysis/trend-chart.tsx");

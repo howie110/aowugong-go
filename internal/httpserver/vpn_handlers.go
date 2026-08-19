@@ -15,25 +15,33 @@ import (
 
 type vpnHandlers struct {
 	service *vpn.Service
+	rbac    *rbac.Service
 }
 
-// registerVPNRoutes 注册管理员 VPN 订阅资源和设备接口。
+// registerVPNRoutes 注册 VPN 管理分配、用户资源和公开订阅接口。
 // 输入：router 是 API 路由，authService、rbacService 控制访问，service 提供业务能力。
 // 输出：无。
 // 副作用：修改路由注册表。
 func registerVPNRoutes(router chi.Router, authService *auth.Service, rbacService *rbac.Service, service *vpn.Service) {
-	// 1. 给全部接口安装登录和管理员页面权限。
-	handlers := vpnHandlers{service: service}
+	// 1. 公开订阅只校验派生 Token，管理与用户页面分别安装权限。
+	handlers := vpnHandlers{service: service, rbac: rbacService}
 	router.Get("/api/v1/vpn/subscriptions/{deviceID}/{token}/{format}", handlers.subscription)
 	router.Route("/api/v1/vpn", func(routes chi.Router) {
 		routes.Use(authenticate(authService))
-		routes.Use(requirePermission(rbacService, rbac.PermissionVPN))
-		routes.Get("/summary", handlers.summary)
-		routes.Post("/devices", handlers.create)
-		routes.Post("/devices/{deviceID}/publish", handlers.publish)
-		routes.Post("/devices/{deviceID}/rotate", handlers.rotate)
-		routes.Delete("/devices/{deviceID}", handlers.revoke)
-		routes.Get("/devices/{deviceID}/qr", handlers.qrCode)
+		routes.Route("/distribution", func(distributionRoutes chi.Router) {
+			distributionRoutes.Use(requirePermission(rbacService, rbac.PermissionVPNDistribution))
+			distributionRoutes.Use(requireAdministrator(rbacService))
+			distributionRoutes.Get("/summary", handlers.distributionSummary)
+			distributionRoutes.Post("/users", handlers.create)
+			distributionRoutes.Post("/users/{deviceID}/publish", handlers.publish)
+			distributionRoutes.Post("/users/{deviceID}/rotate", handlers.rotate)
+			distributionRoutes.Delete("/users/{deviceID}", handlers.revoke)
+		})
+		routes.Route("/resources", func(resourceRoutes chi.Router) {
+			resourceRoutes.Use(requirePermission(rbacService, rbac.PermissionVPNResources))
+			resourceRoutes.Get("/summary", handlers.resourceSummary)
+			resourceRoutes.Get("/users/{deviceID}/qr", handlers.qrCode)
+		})
 	})
 }
 
@@ -67,15 +75,39 @@ func (h vpnHandlers) subscription(w http.ResponseWriter, request *http.Request) 
 	_, _ = w.Write([]byte(config.Body))
 }
 
-// summary 返回 VPN 页面资源、设备和分发状态。
+// distributionSummary 返回管理员分配页面所需的全部用户和资源状态。
 // 输入：request 包含管理员上下文。
 // 输出：成功写入 vpn.Summary JSON。
 // 副作用：读取 PostgreSQL 和 VPN 私有目录。
-func (h vpnHandlers) summary(w http.ResponseWriter, request *http.Request) {
-	// 1. 调用统一服务并隐藏内部错误细节。
-	summary, err := h.service.Summary(request.Context())
+func (h vpnHandlers) distributionSummary(w http.ResponseWriter, request *http.Request) {
+	// 1. 管理路由已完成管理员校验，读取完整分配视图。
+	user, ok := currentUser(request)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "缺少当前用户")
+		return
+	}
+	summary, err := h.service.Summary(request.Context(), user.ID, true)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "读取 VPN 订阅状态失败")
+		writeError(w, http.StatusInternalServerError, "internal_error", "读取 VPN 分配状态失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, summary)
+}
+
+// resourceSummary 返回当前登录用户获配的 VPN 资源。
+// 输入：request 包含已获 VPN 资源页面权限的当前用户。
+// 输出：成功写入只包含当前用户订阅的 vpn.Summary JSON。
+// 副作用：读取 PostgreSQL 和 VPN 私有目录。
+func (h vpnHandlers) resourceSummary(w http.ResponseWriter, request *http.Request) {
+	// 1. 无论是否管理员，都按当前用户主键限制资源范围。
+	user, ok := currentUser(request)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "缺少当前用户")
+		return
+	}
+	summary, err := h.service.Summary(request.Context(), user.ID, false)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "读取当前 VPN 资源失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, summary)
@@ -92,6 +124,13 @@ func (h vpnHandlers) create(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "VPN 设备参数无效")
 		return
 	}
+	// 2. 先同步页面角色，保证即使首次发布失败，目标用户也能进入页面查看真实状态。
+	if err := h.rbac.AssignRole(request.Context(), payload.UserID, rbac.VPNUserRoleCode); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "VPN 订阅用户不存在或无法开通")
+		return
+	}
+
+	// 3. 创建用户订阅并按当前分发配置尝试首次发布。
 	device, err := h.service.Create(request.Context(), payload)
 	if err != nil {
 		writeVPNError(w, err)
@@ -110,7 +149,8 @@ func (h vpnHandlers) publish(w http.ResponseWriter, request *http.Request) {
 	if !ok {
 		return
 	}
-	device, err := h.service.Publish(request.Context(), deviceID)
+	user, _ := currentUser(request)
+	device, err := h.service.Publish(request.Context(), deviceID, user.ID, true)
 	if err != nil {
 		writeVPNError(w, err)
 		return
@@ -118,7 +158,7 @@ func (h vpnHandlers) publish(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, device)
 }
 
-// rotate 轮换设备订阅地址并撤销旧地址。
+// rotate 轮换用户订阅地址并撤销旧地址。
 // 输入：request 路径包含设备主键。
 // 输出：成功写入新版本设备 JSON。
 // 副作用：读写 PostgreSQL 并轮换设备 Token。
@@ -128,7 +168,8 @@ func (h vpnHandlers) rotate(w http.ResponseWriter, request *http.Request) {
 	if !ok {
 		return
 	}
-	device, err := h.service.Rotate(request.Context(), deviceID)
+	user, _ := currentUser(request)
+	device, err := h.service.Rotate(request.Context(), deviceID, user.ID, true)
 	if err != nil {
 		writeVPNError(w, err)
 		return
@@ -146,7 +187,8 @@ func (h vpnHandlers) revoke(w http.ResponseWriter, request *http.Request) {
 	if !ok {
 		return
 	}
-	device, err := h.service.Revoke(request.Context(), deviceID)
+	user, _ := currentUser(request)
+	device, err := h.service.Revoke(request.Context(), deviceID, user.ID, true)
 	if err != nil {
 		writeVPNError(w, err)
 		return
@@ -164,7 +206,12 @@ func (h vpnHandlers) qrCode(w http.ResponseWriter, request *http.Request) {
 	if !ok {
 		return
 	}
-	image, err := h.service.QRCode(request.Context(), deviceID, request.URL.Query().Get("format"))
+	user, ok := currentUser(request)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "缺少当前用户")
+		return
+	}
+	image, err := h.service.QRCode(request.Context(), deviceID, user.ID, false, request.URL.Query().Get("format"))
 	if err != nil {
 		writeVPNError(w, err)
 		return
@@ -214,7 +261,7 @@ func parseVPNDeviceID(w http.ResponseWriter, request *http.Request) (int64, bool
 func writeVPNError(w http.ResponseWriter, err error) {
 	// 1. 区分参数、冲突、不存在、未配置和远端执行错误。
 	switch {
-	case errors.Is(err, vpn.ErrInvalidInput), errors.Is(err, vpn.ErrProfileNotFound), errors.Is(err, vpn.ErrFormatNotFound):
+	case errors.Is(err, vpn.ErrInvalidInput), errors.Is(err, vpn.ErrProfileNotFound), errors.Is(err, vpn.ErrFormatNotFound), errors.Is(err, vpn.ErrUserNotFound):
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 	case errors.Is(err, vpn.ErrConflict):
 		writeError(w, http.StatusConflict, "conflict", err.Error())

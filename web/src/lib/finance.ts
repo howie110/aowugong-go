@@ -18,7 +18,8 @@ export type FinancePageKey =
   | "monitoring"
   | "work"
   | "database"
-  | "vpn"
+  | "vpnDistribution"
+  | "vpnResources"
   | "permissions";
 
 export type FinanceMetric = {
@@ -75,7 +76,8 @@ export const pagePermissionMap: Record<FinancePageKey, string> = {
   monitoring: "page:monitoring",
   work: "page:work",
   database: "page:database",
-  vpn: "page:vpn",
+  vpnDistribution: "page:resource_sharing:vpn_distribution",
+  vpnResources: "page:resource_sharing:vpn_resources",
   permissions: "page:permissions",
 };
 
@@ -144,9 +146,13 @@ export const pageMetaMap: Record<FinancePageKey, { title: string; description: s
     title: "数据库",
     description: "只读查看 PostgreSQL 表结构、数据和脱敏导出。",
   },
-  vpn: {
-    title: "VPN 订阅",
-    description: "把私有 VPN 资源转换为设备独立、可撤销的 HTTPS 订阅。",
+  vpnDistribution: {
+    title: "VPN 分配",
+    description: "给登录用户分配 VPN 资源并维护订阅状态。",
+  },
+  vpnResources: {
+    title: "VPN 资源",
+    description: "查看当前账号获配的 VPN 资源并扫码配置客户端。",
   },
   permissions: {
     title: "权限管理",
@@ -175,7 +181,8 @@ const pageEndpointMap: Record<FinancePageKey, string> = {
   monitoring: "/api/v1/monitoring/summary",
   work: "/api/v1/work/navigation",
   database: "/api/v1/database/summary",
-  vpn: "/api/v1/vpn/summary",
+  vpnDistribution: "/api/v1/vpn/distribution/summary",
+  vpnResources: "/api/v1/vpn/resources/summary",
   permissions: "/api/v1/permissions/summary",
 };
 
@@ -213,8 +220,11 @@ export function getFinancePagePath(pageKey: FinancePageKey) {
   if (pageKey === "database") {
     return "/database";
   }
-  if (pageKey === "vpn") {
-    return "/vpn";
+  if (pageKey === "vpnDistribution") {
+    return "/vpn-distribution";
+  }
+  if (pageKey === "vpnResources") {
+    return "/vpn-resources";
   }
   return `/${pageKey}`;
 }
@@ -230,6 +240,12 @@ export function getFinancePageFromPath(pathname: string): FinancePageKey {
   if (path === "article-fetch") {
     return "articleFetch";
   }
+  if (path === "vpn-distribution") {
+    return "vpnDistribution";
+  }
+  if (path === "vpn-resources") {
+    return "vpnResources";
+  }
   if (
     path === "weread" ||
     path === "positions" ||
@@ -243,7 +259,6 @@ export function getFinancePageFromPath(pathname: string): FinancePageKey {
     path === "monitoring" ||
     path === "work" ||
     path === "database" ||
-    path === "vpn" ||
     path === "permissions"
   ) {
     return path;

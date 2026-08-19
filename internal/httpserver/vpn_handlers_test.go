@@ -17,11 +17,11 @@ import (
 	"github.com/howiedata/aowugong-go/internal/vpn"
 )
 
-// TestVPNRoutesRequireAdministratorPermission 验证 VPN 资源和设备接口只对管理员开放。
-// 输入：隔离 SQLite 中的管理员、投资者和空私有目录。
-// 输出：管理员获得摘要，投资者获得 403。
+// TestVPNRoutesSeparateViewerAndAdministratorPermissions 验证 VPN 页面与管理操作权限分离。
+// 输入：隔离 SQLite 中的管理员、VPN 用户、投资者和空私有目录。
+// 输出：管理员独占分配页，VPN 用户只可读取自己的资源页。
 // 副作用：创建并写入隔离 SQLite，执行 httptest 请求。
-func TestVPNRoutesRequireAdministratorPermission(t *testing.T) {
+func TestVPNRoutesSeparateViewerAndAdministratorPermissions(t *testing.T) {
 	// 1. 组装完整认证、权限和 VPN 路由。
 	ctx := context.Background()
 	db := testdatabase.Open(t)
@@ -38,25 +38,41 @@ func TestVPNRoutesRequireAdministratorPermission(t *testing.T) {
 
 	// 2. 创建两个角色用户并取得认证令牌。
 	createHTTPTestUser(t, db, "vpn-admin", "vpn-admin@example.com", "password", rbac.AdminRoleCode)
+	createHTTPTestUser(t, db, "vpn-user", "vpn-user@example.com", "password", rbac.VPNUserRoleCode)
 	createHTTPTestUser(t, db, "vpn-investor", "vpn-investor@example.com", "password", rbac.InvestorRoleCode)
 	adminToken := loginHTTPTestUser(t, handler, "vpn-admin", "password")
+	vpnUserToken := loginHTTPTestUser(t, handler, "vpn-user", "password")
 	investorToken := loginHTTPTestUser(t, handler, "vpn-investor", "password")
 
-	// 3. 管理员可读取未配置摘要，投资者不能进入 VPN 页面接口。
+	// 3. 分配页只允许管理员，资源页允许管理员和 VPN 用户。
 	for _, testCase := range []struct {
+		path  string
 		token string
 		want  int
 	}{
-		{token: adminToken, want: http.StatusOK},
-		{token: investorToken, want: http.StatusForbidden},
+		{path: "/api/v1/vpn/distribution/summary", token: adminToken, want: http.StatusOK},
+		{path: "/api/v1/vpn/distribution/summary", token: vpnUserToken, want: http.StatusForbidden},
+		{path: "/api/v1/vpn/resources/summary", token: adminToken, want: http.StatusOK},
+		{path: "/api/v1/vpn/resources/summary", token: vpnUserToken, want: http.StatusOK},
+		{path: "/api/v1/vpn/resources/summary", token: investorToken, want: http.StatusForbidden},
 	} {
-		request := httptest.NewRequest(http.MethodGet, "/api/v1/vpn/summary", nil)
+		request := httptest.NewRequest(http.MethodGet, testCase.path, nil)
 		request.Header.Set("Authorization", "Bearer "+testCase.token)
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, request)
 		if recorder.Code != testCase.want {
 			t.Errorf("summary status = %d, want %d, body = %s", recorder.Code, testCase.want, recorder.Body.String())
 		}
+	}
+
+	// 4. VPN 用户不能调用管理员分配入口。
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/vpn/distribution/users", strings.NewReader(`{"user_id":1,"profile_code":"demo"}`))
+	request.Header.Set("Authorization", "Bearer "+vpnUserToken)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden {
+		t.Errorf("VPN user create status = %d, want 403", recorder.Code)
 	}
 }
 
@@ -77,7 +93,15 @@ func TestVPNSubscriptionUsesDeviceTokenWithoutLogin(t *testing.T) {
 		vpn.NewRepository(db), vpn.NewSourceCatalog(directory),
 		vpn.NewDirectDistributor("http://vpn.example.test"), "vpn-token-secret",
 	)
-	device, err := vpnService.Create(ctx, vpn.CreateRequest{Name: "Android", ProfileCode: "demo"})
+	var subscriptionUserID int64
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO aowugong_fastapi_users (username, email, password, is_active)
+		VALUES ('subscription-user', 'subscription-user@example.com', 'test-hash', 1)
+		RETURNING id
+	`).Scan(&subscriptionUserID); err != nil {
+		t.Fatalf("create subscription user: %v", err)
+	}
+	device, err := vpnService.Create(ctx, vpn.CreateRequest{UserID: subscriptionUserID, ProfileCode: "demo"})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}

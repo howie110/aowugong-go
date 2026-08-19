@@ -11,6 +11,7 @@ import {
   PlayCircle,
   Radar,
   Rss,
+  Share2,
   ShieldCheck,
   Trophy,
   TrendingUp,
@@ -81,6 +82,15 @@ export const navGroups: NavGroup[] = [
     ],
   },
   {
+    id: "resource-sharing",
+    label: "资源分享",
+    icon: Share2,
+    items: [
+      { key: "vpnDistribution", label: "VPN 分配", icon: UserCog, permission: pagePermissionMap.vpnDistribution },
+      { key: "vpnResources", label: "VPN 资源", icon: Wifi, permission: pagePermissionMap.vpnResources },
+    ],
+  },
+  {
     id: "system",
     label: "系统运维",
     icon: ShieldCheck,
@@ -89,7 +99,6 @@ export const navGroups: NavGroup[] = [
       { key: "jobs", label: "定时任务", icon: CalendarClock, permission: pagePermissionMap.jobs },
       { key: "notifications", label: "通知", icon: Bell, permission: pagePermissionMap.notifications },
       { key: "database", label: "数据库", icon: TableProperties, permission: pagePermissionMap.database },
-      { key: "vpn", label: "VPN 订阅", icon: Wifi, permission: pagePermissionMap.vpn },
       { key: "permissions", label: "权限管理", icon: UserCog, permission: pagePermissionMap.permissions },
     ],
   },

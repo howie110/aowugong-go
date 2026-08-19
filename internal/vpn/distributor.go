@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Distributor 定义设备订阅发布状态和公开根地址。
+// Distributor 定义用户订阅发布状态和公开根地址。
 type Distributor interface {
 	Configured() bool
 	BaseURL() string

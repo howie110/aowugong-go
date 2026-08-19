@@ -70,6 +70,37 @@ func requirePermission(service *rbac.Service, permissionCode string) func(http.H
 	}
 }
 
+// requireAdministrator 要求当前用户是超级用户或管理员角色成员。
+// 输入：service 是 RBAC 服务。
+// 输出：返回管理员接口中间件。
+// 副作用：读取 PostgreSQL，拒绝访问时写入 HTTP 响应。
+func requireAdministrator(service *rbac.Service) func(http.Handler) http.Handler {
+	// 1. 返回同时兼容超级用户标记和 admin 角色的检查器。
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			user, ok := currentUser(request)
+			if !ok {
+				writeError(w, http.StatusUnauthorized, "unauthorized", "缺少当前用户")
+				return
+			}
+			if user.IsSuperuser {
+				next.ServeHTTP(w, request)
+				return
+			}
+			allowed, err := service.HasRole(request.Context(), user.ID, rbac.AdminRoleCode)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error", "读取管理员身份失败")
+				return
+			}
+			if !allowed {
+				writeError(w, http.StatusForbidden, "forbidden", "只有管理员可以执行此操作")
+				return
+			}
+			next.ServeHTTP(w, request)
+		})
+	}
+}
+
 // currentUser 返回认证中间件写入请求上下文的用户。
 // 输入：request 是已通过认证的请求。
 // 输出：返回当前用户及存在标记。
