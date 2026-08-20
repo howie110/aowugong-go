@@ -218,8 +218,6 @@ func (s *DashboardService) JobsSummary() JobsPage {
 		{Name: "test_crontab", Schedule: "0 9 * * *", Description: "每日任务链路测试", Command: "scheduler.Run(test_crontab)", Status: jobStatus},
 		{Name: "update_tushare_daily_data", Schedule: "仅手动", Description: "按需更新 Tushare 日线数据", Command: "scheduler.Run(update_tushare_daily_data)", Status: "manual"},
 		{Name: "sync_investment_articles", Schedule: "0 8,20 * * *", Description: "同步并分析投资文章", Command: "scheduler.Run(sync_investment_articles)", Status: jobStatus},
-		{Name: "check_weread_credential", Schedule: "仅手动", Description: "按需检查微信读书文章接口", Command: "scheduler.Run(check_weread_credential)", Status: "manual"},
-		{Name: "keep_weread_credential_alive", Schedule: "02:00、14:00", Description: "低频保活微信读书凭据", Command: "scheduler.Run(keep_weread_credential_alive)", Status: jobStatus},
 		{Name: "rebuild_investment_signal_groups", Schedule: "仅手动", Description: "全局重建投资信号概念组", Command: "scheduler.Run(rebuild_investment_signal_groups)", Status: "manual"},
 		{Name: "check_service_monitors", Schedule: "0 22 * * *", Description: "检查服务连通性", Command: "scheduler.Run(check_service_monitors)", Status: jobStatus},
 		{Name: "check_subscription_expiry_notify", Schedule: "30 9 * * *", Description: "检查订阅到期并提醒", Command: "scheduler.Run(check_subscription_expiry_notify)", Status: jobStatus},

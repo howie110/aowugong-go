@@ -87,7 +87,6 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 
 | 时间 | 任务 | 说明 |
 |---|---|---|
-| 02:00、14:00 | `keep_weread_credential_alive` | 刷新微信读书凭据并读取一条文章，首次失效时通知 |
 | 08:00、20:00 | `sync_investment_articles` | 从微信读书书架公众号增量抓取并分析投资文章 |
 | 09:00 | `test_crontab` | 每日任务链路测试 |
 | 22:00 | `check_service_monitors` | 服务连通性检查 |
@@ -97,7 +96,7 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 | 周日 04:00 | `backup_github_code` | 启用后备份账号自有仓库及两个固定组织仓库 |
 | 周日 05:00 | `email_vaultwarden_backup` | 加密最新 Vaultwarden 备份并发送到异地邮箱 |
 
-以下任务保留为手动或 CLI 执行：`update_tushare_daily_data`、`rebuild_investment_signal_groups`、`check_weread_credential`。微信读书在 `02:00/08:00/14:00/20:00` 形成约六小时一次的低频真实访问；重复失效不会重复发送微信告警。
+以下任务保留为手动或 CLI 执行：`update_tushare_daily_data`、`rebuild_investment_signal_groups`。微信读书不再自动保活或定时探测；需要更新文章时，先在页面重新扫码，再手动执行抓取。
 
 ```bash
 /opt/aowugong-go/current/aowugong job backup_postgres
