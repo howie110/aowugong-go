@@ -232,7 +232,7 @@ func TestWeReadBindingReflectsFetchFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Binding() verification error = %v", err)
 	}
-	if binding.State != "degraded" || binding.Message != "微信读书要求人工验证，凭据已保留，请稍后重新扫码后再抓取" {
+	if binding.State != "degraded" || binding.Message != "微信读书暂时拒绝服务器请求，请稍后重试" {
 		t.Fatalf("Binding() verification error = %#v", binding)
 	}
 

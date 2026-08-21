@@ -156,9 +156,9 @@ func weReadFetchWarningMessage(message string) string {
 	if strings.Contains(message, "微信原文缺少正文节点") || strings.Contains(message, "正文解析") {
 		return "部分文章正文解析失败，成功文章已入库"
 	}
-	// 2. 人工验证是微信读书的风控拦截，不代表扫码凭据已经失效。
+	// 2. 上游风控拒绝服务器请求，不代表扫码凭据已经失效。
 	if strings.Contains(message, "人工验证") || strings.Contains(message, "要求验证") {
-		return "微信读书要求人工验证，凭据已保留，请稍后重新扫码后再抓取"
+		return "微信读书暂时拒绝服务器请求，请稍后重试"
 	}
 	// 3. 其他非认证错误继续提示查看任务详情。
 	return "最近抓取存在异常，请查看任务记录"

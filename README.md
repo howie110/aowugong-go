@@ -96,7 +96,7 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 | 周日 04:00 | `backup_github_code` | 启用后备份账号自有仓库及两个固定组织仓库 |
 | 周日 05:00 | `email_vaultwarden_backup` | 加密最新 Vaultwarden 备份并发送到异地邮箱 |
 
-以下任务保留为手动或 CLI 执行：`update_tushare_daily_data`、`rebuild_investment_signal_groups`。微信读书不再自动保活或定时探测；需要更新文章时，先在页面重新扫码，再手动执行抓取。
+以下任务保留为手动或 CLI 执行：`update_tushare_daily_data`、`sync_investment_articles`、`rebuild_investment_signal_groups`。微信读书不再自动保活、定时探测或定时抓取；需要更新文章时，先在页面重新扫码，再手动执行抓取。
 
 ```bash
 /opt/aowugong-go/current/aowugong job backup_postgres

@@ -174,7 +174,7 @@ func TestRegisterAllAddsNineProductionJobs(t *testing.T) {
 	}
 	wanted := map[string]string{
 		"test_crontab": "0 9 * * *", "update_tushare_daily_data": "",
-		"sync_investment_articles": "0 8,20 * * *", "check_service_monitors": "0 22 * * *",
+		"sync_investment_articles": "", "check_service_monitors": "0 22 * * *",
 		"check_subscription_expiry_notify": "30 9 * * *", "openilink_reply_reminder": "0 10 * * *",
 		"backup_postgres":                  "30 3 * * *",
 		"rebuild_investment_signal_groups": "",
@@ -184,7 +184,8 @@ func TestRegisterAllAddsNineProductionJobs(t *testing.T) {
 			t.Errorf("schedule %s = %q, want %q", definition.Name, definition.Schedule, wanted[definition.Name])
 		}
 		if (definition.Name == "rebuild_investment_signal_groups" ||
-			definition.Name == "update_tushare_daily_data") && !definition.ManualOnly {
+			definition.Name == "update_tushare_daily_data" ||
+			definition.Name == "sync_investment_articles") && !definition.ManualOnly {
 			t.Errorf("%s should be manual-only", definition.Name)
 		}
 	}

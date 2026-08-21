@@ -10,7 +10,7 @@ import (
 
 // TestDashboardServiceBuildsRuntimeSummaries 验证 finance 摘要使用 SQLite 进度和 Go 运行时配置。
 // 输入：隔离 SQLite 数据与关闭的真实交易配置。
-// 输出：各页面摘要包含最新日期、八个任务定义和安全交易状态。
+	// 输出：各页面摘要包含最新日期、八个任务定义和安全交易状态。
 // 副作用：创建并写入隔离 SQLite 测试库。
 func TestDashboardServiceBuildsRuntimeSummaries(t *testing.T) {
 	// 1. 创建包含当前行情日期的最小 SQLite 数据集。
