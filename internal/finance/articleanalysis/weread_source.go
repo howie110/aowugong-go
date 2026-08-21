@@ -139,7 +139,7 @@ func weReadBindingHealthState(health weReadCredentialHealth, found bool) (string
 func weReadCredentialErrorMessage(message string) bool {
 	// 1. 仅识别需要重新扫码的认证类关键词，普通网络错误保持黄色警告。
 	message = strings.ToLower(strings.TrimSpace(message))
-	for _, keyword := range []string{"凭据", "refresh_token", "access_token", "认证失效", "人工验证", "要求人工验证", "重新绑定"} {
+	for _, keyword := range []string{"凭据字段", "refresh_token", "access_token", "认证失效", "重新绑定"} {
 		if strings.Contains(message, keyword) {
 			return true
 		}
@@ -156,7 +156,11 @@ func weReadFetchWarningMessage(message string) string {
 	if strings.Contains(message, "微信原文缺少正文节点") || strings.Contains(message, "正文解析") {
 		return "部分文章正文解析失败，成功文章已入库"
 	}
-	// 2. 其他非认证错误继续提示查看任务详情。
+	// 2. 人工验证是微信读书的风控拦截，不代表扫码凭据已经失效。
+	if strings.Contains(message, "人工验证") || strings.Contains(message, "要求验证") {
+		return "微信读书要求人工验证，凭据已保留，请稍后重新扫码后再抓取"
+	}
+	// 3. 其他非认证错误继续提示查看任务详情。
 	return "最近抓取存在异常，请查看任务记录"
 }
 
@@ -360,7 +364,7 @@ func (s *WeReadSource) CheckCredential(ctx context.Context) (WeReadCredentialChe
 	status, message := "valid", ""
 	if checkErr != nil {
 		status, message = "error", checkErr.Error()
-		if errors.Is(checkErr, client.ErrWeReadArticleAuth) || errors.Is(checkErr, client.ErrWeReadArticleVerification) {
+		if errors.Is(checkErr, client.ErrWeReadArticleAuth) {
 			status = "invalid"
 		}
 	}
@@ -434,7 +438,7 @@ func (s *WeReadSource) KeepAliveCredential(ctx context.Context) (WeReadCredentia
 	status, message := "valid", ""
 	if keepAliveErr != nil {
 		status, message = "error", keepAliveErr.Error()
-		if errors.Is(keepAliveErr, client.ErrWeReadArticleAuth) || errors.Is(keepAliveErr, client.ErrWeReadArticleVerification) {
+		if errors.Is(keepAliveErr, client.ErrWeReadArticleAuth) {
 			status = "invalid"
 		}
 	}
@@ -516,7 +520,11 @@ func (s *WeReadSource) Fetch(ctx context.Context, sourceID int64, _ string, limi
 				if credentials != originalCredentials {
 					_ = s.saveCredentials(ctx, credentials, false)
 				}
-				_ = s.repository.recordWeReadCredentialCheck(ctx, "invalid", account.Title+": "+listErr.Error(), now)
+				status := "invalid"
+				if errors.Is(listErr, client.ErrWeReadArticleVerification) {
+					status = "error"
+				}
+				_ = s.repository.recordWeReadCredentialCheck(ctx, status, account.Title+": "+listErr.Error(), now)
 				return nil, listErr
 			}
 			failures = append(failures, account.Title+": "+listErr.Error())

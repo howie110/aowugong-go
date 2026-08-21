@@ -131,7 +131,7 @@ func TestWeReadCredentialHealthLifecycle(t *testing.T) {
 
 // TestWeReadCredentialCheckUsesArticleEndpoint 验证凭据检查使用正式文章列表接口而不是较宽松的书架接口。
 // 输入：一个已启用公众号和返回人工验证错误的内存微信读书服务。
-// 输出：检查返回人工验证错误并把凭据健康状态记为失效。
+// 输出：检查返回人工验证错误并把凭据健康状态记为警告。
 // 副作用：执行一次内存 HTTP 请求并写入隔离测试数据库。
 func TestWeReadCredentialCheckUsesArticleEndpoint(t *testing.T) {
 	// 1. 保存完整凭据并准备一个参与正式抓取的公众号。
@@ -160,7 +160,7 @@ func TestWeReadCredentialCheckUsesArticleEndpoint(t *testing.T) {
 		t.Fatalf("saveCredentials() error = %v", err)
 	}
 
-	// 2. 检查必须暴露人工验证错误，并持久化为页面可见的失效状态。
+	// 2. 检查必须暴露人工验证错误，并持久化为页面可见的警告状态。
 	if _, err := source.CheckCredential(ctx); !errors.Is(err, client.ErrWeReadArticleVerification) {
 		t.Fatalf("CheckCredential() error = %v", err)
 	}
@@ -168,7 +168,7 @@ func TestWeReadCredentialCheckUsesArticleEndpoint(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("weReadCredentialHealth() = %#v, %v, %v", health, found, err)
 	}
-	if health.LastStatus != "invalid" || !strings.Contains(health.LastError, "测试公众号") {
+	if health.LastStatus != "error" || !strings.Contains(health.LastError, "测试公众号") {
 		t.Fatalf("credential health = %#v", health)
 	}
 }
@@ -224,7 +224,19 @@ func TestWeReadBindingReflectsFetchFailure(t *testing.T) {
 		t.Fatalf("Binding() content error = %#v", binding)
 	}
 
-	// 4. 明确凭据错误仍然要求重新绑定。
+	// 4. 人工验证只显示警告，不应要求重新绑定。
+	if err := repository.UpdateSourceStatus(ctx, sources[0].ID, "error", "读取公众号 测试文章: 微信读书要求人工验证"); err != nil {
+		t.Fatalf("UpdateSourceStatus() verification error = %v", err)
+	}
+	binding, err = source.Binding(ctx)
+	if err != nil {
+		t.Fatalf("Binding() verification error = %v", err)
+	}
+	if binding.State != "degraded" || binding.Message != "微信读书要求人工验证，凭据已保留，请稍后重新扫码后再抓取" {
+		t.Fatalf("Binding() verification error = %#v", binding)
+	}
+
+	// 5. 明确凭据错误仍然要求重新绑定。
 	if err := repository.UpdateSourceStatus(ctx, sources[0].ID, "error", "微信读书凭据字段 refresh_token 为空"); err != nil {
 		t.Fatalf("UpdateSourceStatus() credential error = %v", err)
 	}
@@ -236,7 +248,7 @@ func TestWeReadBindingReflectsFetchFailure(t *testing.T) {
 		t.Fatalf("Binding() = %#v", binding)
 	}
 
-	// 5. 模拟重新绑定已验证，确认历史错误被清除且不再误报。
+	// 6. 模拟重新绑定已验证，确认历史错误被清除且不再误报。
 	if err := repository.clearWeReadSourceFetchError(ctx); err != nil {
 		t.Fatalf("clearWeReadSourceFetchError() error = %v", err)
 	}
