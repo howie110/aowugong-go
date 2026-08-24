@@ -33,9 +33,10 @@ type pendingArticle struct {
 }
 
 type pendingParseArticle struct {
-	ID    int64
-	Title string
-	Link  string
+	ID           int64
+	Title        string
+	Link         string
+	RawEntryJSON string
 }
 
 type analysisRow struct {
@@ -400,7 +401,7 @@ func (r *Repository) pendingParseArticles(ctx context.Context, limit int) ([]pen
 		limit = 100
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, title, link FROM investment_article
+		SELECT id, title, link, COALESCE(raw_entry_json, '') FROM investment_article
 		WHERE fetch_status = 'pending_parse' AND COALESCE(link, '') <> ''
 		ORDER BY COALESCE(published_at, created_at) DESC, id DESC LIMIT ?
 	`, limit)
@@ -411,7 +412,7 @@ func (r *Repository) pendingParseArticles(ctx context.Context, limit int) ([]pen
 	result := make([]pendingParseArticle, 0)
 	for rows.Next() {
 		var item pendingParseArticle
-		if err := rows.Scan(&item.ID, &item.Title, &item.Link); err != nil {
+		if err := rows.Scan(&item.ID, &item.Title, &item.Link, &item.RawEntryJSON); err != nil {
 			return nil, fmt.Errorf("扫描待解析投资文章: %w", err)
 		}
 		result = append(result, item)
