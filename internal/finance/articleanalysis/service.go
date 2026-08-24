@@ -134,6 +134,43 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 	return result, nil
 }
 
+// ParsePending 解析已经抓取元数据但尚未成功获取正文的文章。
+// 输入：ctx 控制请求，limit 限制本次解析数量。
+// 输出：返回解析统计；失败文章保留待解析状态。
+// 副作用：调用微信原文接口并写入 PostgreSQL。
+func (s *Service) ParsePending(ctx context.Context, limit int) (ParseBatchResult, error) {
+	// 1. 解析功能只对当前微信读书来源开放，避免误调用其他文章来源。
+	if s.options.WeRead == nil {
+		return ParseBatchResult{}, fmt.Errorf("微信读书解析器未配置")
+	}
+	items, err := s.repository.pendingParseArticles(ctx, limit)
+	if err != nil {
+		return ParseBatchResult{}, err
+	}
+	result := ParseBatchResult{Items: make([]map[string]any, 0, len(items))}
+	for _, item := range items {
+		content, _, fetchErr := s.options.WeRead.client.FetchArticleContent(ctx, item.Link)
+		if fetchErr != nil || strings.TrimSpace(content) == "" {
+			result.ErrorCount++
+			result.Items = append(result.Items, map[string]any{"id": item.ID, "title": item.Title, "status": "pending_parse", "error": errorText(fetchErr, "正文为空")})
+			continue
+		}
+		if err := s.repository.UpdateArticleContent(ctx, item.ID, content, truncateRunes(content, 300), "parsed"); err != nil {
+			return result, err
+		}
+		result.ParsedCount++
+		result.Items = append(result.Items, map[string]any{"id": item.ID, "title": item.Title, "status": "parsed"})
+	}
+	return result, nil
+}
+
+func errorText(err error, fallback string) string {
+	if err != nil {
+		return err.Error()
+	}
+	return fallback
+}
+
 // SyncScheduled 执行生产任务使用的完整抓取和分批分析流程。
 // 输入：ctx 控制处理，classifySignals 控制是否补齐六十天信号概念映射。
 // 输出：返回累计同步统计；来源失败、模型缺失或仍有待分析文章时返回错误。
@@ -384,7 +421,7 @@ func feedEntryFromClient(item client.ArticleItem) FeedEntry {
 	return FeedEntry{
 		ArticleKey: item.ArticleKey, ExternalID: item.ExternalID, Title: item.Title,
 		Link: item.Link, Author: item.Author, PublishedAt: item.PublishedAt,
-		Summary: item.Summary, Content: item.Content, RawEntry: item.RawEntry,
+		Summary: item.Summary, Content: item.Content, FetchStatus: item.FetchStatus, RawEntry: item.RawEntry,
 	}
 }
 

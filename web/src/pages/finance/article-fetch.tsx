@@ -1,4 +1,4 @@
-import { ArrowDownRight, BookOpenCheck, QrCode, Rss, Sparkles } from "lucide-react";
+import { ArrowDownRight, BookOpenCheck, FileSearch, QrCode, Rss, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +23,7 @@ import {
   WeReadArticleBinding,
   WeReadLoginStatus,
   analyzePendingArticles,
+  parsePendingArticles,
   fetchArticleSources,
   fetchWeReadArticleBinding,
   fetchWeReadArticleQR,
@@ -156,6 +157,20 @@ export function ArticleFetchPage() {
     }
   }
 
+  /** handleParse 仅解析已抓取但缺少正文的文章。 */
+  async function handleParse() {
+    setIsWorking(true);
+    try {
+      const result = await parsePendingArticles(30);
+      notify.success("解析完成", `成功 ${result.parsed_count} 篇，失败 ${result.error_count} 篇。`);
+      await loadData();
+    } catch (error) {
+      notify.errorFrom(error, "解析文章失败");
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
   // 2. 首次加载时使用稳定尺寸的骨架，避免页面跳动。
   if (isLoading && !weRead) {
     return <ArticleFetchSkeleton />;
@@ -168,11 +183,15 @@ export function ArticleFetchPage() {
         <ButtonGroup>
           <Button type="button" variant="outline" size="sm" className="w-28" onClick={() => void handleSync()} disabled={isWorking}>
             {isWorking ? <Spinner /> : <ArrowDownRight className="h-4 w-4" />}
-            抓取新增文章
+            爬取
+          </Button>
+          <Button type="button" variant="outline" size="sm" className="w-28" onClick={() => void handleParse()} disabled={isWorking}>
+            {isWorking ? <Spinner /> : <FileSearch className="h-4 w-4" />}
+            解析
           </Button>
           <Button type="button" size="sm" className="w-28" onClick={() => void handleAnalyze()} disabled={isWorking}>
             {isWorking ? <Spinner /> : <Sparkles className="h-4 w-4" />}
-            分析未分析
+            分析
           </Button>
         </ButtonGroup>
       </div>
@@ -271,6 +290,7 @@ export function ArticleFetchPage() {
                     <TableHead className="w-24 text-right">现有文章</TableHead>
                     <TableHead className="w-24 text-right">今天新增</TableHead>
                     <TableHead className="w-24 text-right">未分析</TableHead>
+                    <TableHead className="w-24 text-right">未解析</TableHead>
                     <TableHead className="min-w-32">最近获取时间</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -281,6 +301,7 @@ export function ArticleFetchPage() {
                       <TableCell className="text-right tabular-nums">{account.article_count}</TableCell>
                       <TableCell className="text-right tabular-nums">{account.today_inserted_count}</TableCell>
                       <TableCell className="text-right tabular-nums">{account.pending_count}</TableCell>
+                      <TableCell className="text-right tabular-nums">{account.unparsed_count}</TableCell>
                       <TableCell className="text-muted-foreground">{formatDate(account.latest_fetched_at)}</TableCell>
                     </TableRow>
                   ))}

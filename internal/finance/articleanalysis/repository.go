@@ -32,6 +32,12 @@ type pendingArticle struct {
 	SourceType  string
 }
 
+type pendingParseArticle struct {
+	ID    int64
+	Title string
+	Link  string
+}
+
 type analysisRow struct {
 	Recommendations []Signal
 	Risks           []Signal
@@ -364,10 +370,10 @@ func (r *Repository) UpsertArticle(ctx context.Context, sourceID int64, entry Fe
 		INSERT INTO investment_article (
 			source_id, article_key, external_id, title, link, author,
 			published_at, summary, content, raw_entry_json, fetch_status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'fetched')
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(article_key) DO NOTHING
 		RETURNING id
-	`, sourceID, entry.ArticleKey, externalID, title, link, author, publishedAt, summary, content, string(rawJSON)).Scan(&articleID)
+	`, sourceID, entry.ArticleKey, externalID, title, link, author, publishedAt, summary, content, string(rawJSON), articleFetchStatus(entry.FetchStatus)).Scan(&articleID)
 	if err == sql.ErrNoRows {
 		if err := r.db.QueryRowContext(ctx,
 			"SELECT id FROM investment_article WHERE article_key = ?", entry.ArticleKey).Scan(&articleID); err != nil {
@@ -379,6 +385,69 @@ func (r *Repository) UpsertArticle(ctx context.Context, sourceID int64, entry Fe
 		return "", 0, fmt.Errorf("写入投资文章: %w", err)
 	}
 	return "inserted", articleID, nil
+}
+
+// pendingParseArticles 读取尚未成功获取正文的文章。
+// 输入：ctx 控制查询，limit 限制本次解析数量。
+// 输出：返回待解析文章；失败时返回错误。
+// 副作用：只读 PostgreSQL。
+func (r *Repository) pendingParseArticles(ctx context.Context, limit int) ([]pendingParseArticle, error) {
+	// 1. 只选择元数据已入库但正文仍待解析的文章。
+	if limit < 1 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, title, link FROM investment_article
+		WHERE fetch_status = 'pending_parse' AND COALESCE(link, '') <> ''
+		ORDER BY COALESCE(published_at, created_at) DESC, id DESC LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("查询待解析投资文章: %w", err)
+	}
+	defer rows.Close()
+	result := make([]pendingParseArticle, 0)
+	for rows.Next() {
+		var item pendingParseArticle
+		if err := rows.Scan(&item.ID, &item.Title, &item.Link); err != nil {
+			return nil, fmt.Errorf("扫描待解析投资文章: %w", err)
+		}
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历待解析投资文章: %w", err)
+	}
+	return result, nil
+}
+
+// UpdateArticleContent 保存文章正文并更新解析状态。
+// 输入：ctx 控制写入，articleID 标识文章，content 是正文，status 是 parsed。
+// 输出：返回写入错误。
+// 副作用：写入 PostgreSQL investment_article。
+func (r *Repository) UpdateArticleContent(ctx context.Context, articleID int64, content, summary, status string) error {
+	// 1. 只有非空正文才允许标记为已解析。
+	if strings.TrimSpace(content) == "" {
+		return fmt.Errorf("文章正文为空")
+	}
+	if status != "parsed" {
+		status = "pending_parse"
+	}
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE investment_article SET content = ?, summary = ?, fetch_status = ?, updated_at = ? WHERE id = ?
+	`, content, nullableArticleText(summary), status, appdatabase.TimestampText(time.Now()), articleID)
+	if err != nil {
+		return fmt.Errorf("保存文章正文: %w", err)
+	}
+	return nil
+}
+
+func articleFetchStatus(value string) string {
+	if value == "pending_parse" {
+		return value
+	}
+	return "parsed"
 }
 
 // UpdateSourceStatus 更新信息源最近抓取结果。
@@ -554,7 +623,8 @@ func (r *Repository) pendingArticles(ctx context.Context, limit int) ([]pendingA
 		FROM investment_article article
 		JOIN investment_article_source source ON source.id = article.source_id
 		LEFT JOIN investment_article_analysis analysis ON analysis.article_id = article.id
-		WHERE analysis.id IS NULL OR analysis.status != 'success'
+		WHERE article.fetch_status <> 'pending_parse'
+		  AND (analysis.id IS NULL OR analysis.status != 'success')
 		ORDER BY COALESCE(article.published_at, article.created_at) DESC, article.id DESC
 		LIMIT ?
 	`, limit)

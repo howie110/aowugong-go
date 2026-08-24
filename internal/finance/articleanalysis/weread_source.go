@@ -570,22 +570,16 @@ func (s *WeReadSource) Fetch(ctx context.Context, sourceID int64, _ string, limi
 		if bound {
 			continue
 		}
-		content, finalURL, contentErr := s.client.FetchArticleContent(ctx, detail.SourceURL)
-		if contentErr != nil {
-			content = strings.TrimSpace(detail.Content)
-			if content == "" {
-				content = weReadDetailContentFallback(detail.Title)
-			}
-			finalURL = detail.SourceURL
-			if content == "" {
-				failures = append(failures, weReadArticleTitle(reference.Title, detail.Title)+": "+contentErr.Error())
-				continue
-			}
+		finalURL := detail.SourceURL
+		content := strings.TrimSpace(detail.Content)
+		fetchStatus := "pending_parse"
+		if content != "" {
+			fetchStatus = "parsed"
 		}
 		items = append(items, client.ArticleItem{
 			ArticleKey: weReadArticleKey(sourceID, reference.ReviewID), ExternalID: reference.ReviewID,
 			Title: weReadArticleTitle(reference.Title, detail.Title), Link: finalURL, Author: strings.TrimSpace(detail.Author),
-			PublishedAt: weReadPublishedAt(detail.PublishedAt), Summary: truncateRunes(content, 300), Content: content,
+			PublishedAt: weReadPublishedAt(detail.PublishedAt), Summary: truncateRunes(content, 300), Content: content, FetchStatus: fetchStatus,
 			RawEntry: map[string]any{"review_id": reference.ReviewID, "account_id": listedArticle.accountID},
 		})
 	}

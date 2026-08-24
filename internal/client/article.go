@@ -25,6 +25,7 @@ type ArticleItem struct {
 	PublishedAt string
 	Summary     string
 	Content     string
+	FetchStatus string
 	RawEntry    map[string]any
 }
 

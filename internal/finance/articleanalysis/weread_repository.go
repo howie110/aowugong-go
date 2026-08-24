@@ -283,7 +283,10 @@ func (r *Repository) listWeReadAccounts(ctx context.Context, enabledOnly bool) (
 		   AND SUBSTR(COALESCE(article.created_at, ''), 1, 10) = SUBSTR(?, 1, 10)),
 		(SELECT COUNT(*) FROM investment_article article
 		 LEFT JOIN investment_article_analysis analysis ON analysis.article_id = article.id AND analysis.status = 'success'
-		 WHERE article.author = weread_article_account.title AND analysis.id IS NULL),
+		 WHERE article.author = weread_article_account.title
+		   AND article.fetch_status <> 'pending_parse' AND analysis.id IS NULL),
+		(SELECT COUNT(*) FROM investment_article article
+		 WHERE article.author = weread_article_account.title AND article.fetch_status = 'pending_parse'),
 		COALESCE((SELECT MAX(article.created_at) FROM investment_article article WHERE article.author = weread_article_account.title), '')
 		FROM weread_article_account`
 	if enabledOnly {
@@ -298,7 +301,7 @@ func (r *Repository) listWeReadAccounts(ctx context.Context, enabledOnly bool) (
 	accounts := make([]WeReadAccount, 0)
 	for rows.Next() {
 		var account WeReadAccount
-		if err := rows.Scan(&account.AccountID, &account.Title, &account.CoverURL, &account.Enabled, &account.FetchIntervalMinutes, &account.FetchLimit, &account.LastCheckedAt, &account.ArticleCount, &account.TodayInsertedCount, &account.PendingCount, &account.LatestFetchedAt); err != nil {
+		if err := rows.Scan(&account.AccountID, &account.Title, &account.CoverURL, &account.Enabled, &account.FetchIntervalMinutes, &account.FetchLimit, &account.LastCheckedAt, &account.ArticleCount, &account.TodayInsertedCount, &account.PendingCount, &account.UnparsedCount, &account.LatestFetchedAt); err != nil {
 			return nil, fmt.Errorf("扫描微信读书公众号: %w", err)
 		}
 		if account.FetchIntervalMinutes < 1 {

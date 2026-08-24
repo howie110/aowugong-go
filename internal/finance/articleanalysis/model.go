@@ -34,6 +34,7 @@ type FeedEntry struct {
 	PublishedAt string
 	Summary     string
 	Content     string
+	FetchStatus string
 	RawEntry    map[string]any
 }
 
@@ -172,6 +173,7 @@ type WeReadAccount struct {
 	ArticleCount         int    `json:"article_count"`
 	TodayInsertedCount   int    `json:"today_inserted_count"`
 	PendingCount         int    `json:"pending_count"`
+	UnparsedCount        int    `json:"unparsed_count"`
 	LatestFetchedAt      string `json:"latest_fetched_at,omitempty"`
 }
 
@@ -216,4 +218,12 @@ type AnalysisBatchResult struct {
 	SkippedCount  int              `json:"skipped_count"`
 	ErrorCount    int              `json:"error_count"`
 	Items         []map[string]any `json:"items"`
+}
+
+// ParseBatchResult 描述一批文章正文解析的处理统计。
+type ParseBatchResult struct {
+	ParsedCount  int              `json:"parsed_count"`
+	SkippedCount int              `json:"skipped_count"`
+	ErrorCount   int              `json:"error_count"`
+	Items        []map[string]any `json:"items"`
 }

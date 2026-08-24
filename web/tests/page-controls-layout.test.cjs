@@ -56,7 +56,7 @@ test("抓取和分析操作按钮使用相同固定宽度", () => {
   const fetchSource = readSource("src/pages/finance/article-fetch.tsx");
   const fixedWidthButtons = fetchSource.match(/className="w-28"/g) || [];
 
-  assert.equal(fixedWidthButtons.length, 2);
+  assert.equal(fixedWidthButtons.length, 3);
 });
 
 test("导入记录在桌面和手机端都隐藏账户与券商", () => {

@@ -90,6 +90,13 @@ export type AnalysisBatchResult = {
   items: Array<Record<string, unknown>>;
 };
 
+export type ParseBatchResult = {
+  parsed_count: number;
+  skipped_count: number;
+  error_count: number;
+  items: Array<Record<string, unknown>>;
+};
+
 export type WeReadArticleAccount = {
   account_id: string;
   title: string;
@@ -101,6 +108,7 @@ export type WeReadArticleAccount = {
   article_count: number;
   today_inserted_count: number;
   pending_count: number;
+  unparsed_count: number;
   latest_fetched_at?: string | null;
 };
 
@@ -226,6 +234,10 @@ export async function analyzePendingArticles(limit = 10, all = false) {
   return requestJson<AnalysisBatchResult>(`/api/v1/finance/article-analysis/analyze?${params.toString()}`, {
     method: "POST",
   });
+}
+
+export async function parsePendingArticles(limit = 30) {
+  return requestJson<ParseBatchResult>(`/api/v1/finance/article-analysis/parse?limit=${limit}`, { method: "POST" });
 }
 
 async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {

@@ -43,6 +43,7 @@ func registerArticleAnalysisRoutes(router chi.Router, authService *auth.Service,
 	fetch.Get("/api/v1/finance/article-analysis/sources", handlers.sources)
 	fetch.Post("/api/v1/finance/article-analysis/sync", handlers.sync)
 	fetch.Post("/api/v1/finance/article-analysis/analyze", handlers.analyze)
+	fetch.Post("/api/v1/finance/article-analysis/parse", handlers.parse)
 	fetch.Get("/api/v1/finance/article-analysis/weread", handlers.weReadBinding)
 	fetch.Post("/api/v1/finance/article-analysis/weread/login", handlers.startWeReadLogin)
 	fetch.Get("/api/v1/finance/article-analysis/weread/login", handlers.pollWeReadLogin)
@@ -361,6 +362,23 @@ func (h articleAnalysisHandlers) analyze(w http.ResponseWriter, request *http.Re
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "分析投资文章失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// parse 手动解析已抓取但缺少正文的文章。
+// 输入：limit 是本次解析数量上限。
+// 输出：写入 ParseBatchResult。
+// 副作用：调用微信读书原文接口并写入 PostgreSQL。
+func (h articleAnalysisHandlers) parse(w http.ResponseWriter, request *http.Request) {
+	limit, ok := boundedQueryInt(w, request, "limit", 30, 1, 100)
+	if !ok {
+		return
+	}
+	result, err := h.service.ParsePending(request.Context(), limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "解析投资文章失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
