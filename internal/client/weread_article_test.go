@@ -198,6 +198,26 @@ func TestWeReadArticleClientExtractsNewWeChatContent(t *testing.T) {
 	}
 }
 
+// TestWeReadArticleClientUsesReadabilityFallback 验证正文节点变化时使用通用正文提取兜底。
+// 输入：页面不包含微信固定正文节点，但主体区域包含足量段落文本。
+// 输出：返回主体文章正文，不返回导航和页脚内容。
+// 副作用：执行一次内存 HTTP 往返，不访问网络。
+func TestWeReadArticleClientUsesReadabilityFallback(t *testing.T) {
+	// 1. 构造没有 js_content 和 rich_media_content 的新版页面结构。
+	body := `<html><body><nav>首页 关注 分享</nav><main><h1>长期投资观察</h1><p>这是第一段正文，用于验证通用正文提取算法能够识别页面主体并保留文章内容。</p><p>这是第二段正文，包含足够的连续文本，避免短页面被误判为导航、错误页或验证页。</p><p>这是第三段正文，说明页面结构发生变化时仍然可以进入解析流程。</p></main><footer>推荐阅读</footer></body></html>`
+	transport := weReadRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return weReadTestResponse(request, http.StatusOK, "text/html; charset=utf-8", body), nil
+	})
+	articleClient := NewWeReadArticleClient(&http.Client{Transport: transport})
+	articleClient.requestGap = 0
+
+	// 2. 核对通用算法提取主体而不是旁路文本。
+	content, _, err := articleClient.FetchArticleContent(context.Background(), "https://mp.weixin.qq.com/s/readability")
+	if err != nil || !strings.Contains(content, "长期投资观察") || strings.Contains(content, "推荐阅读") {
+		t.Fatalf("FetchArticleContent() = %q, %v", content, err)
+	}
+}
+
 // weReadTestResponse 创建绑定到原请求的内存 HTTP 响应。
 // 输入：request、状态、媒体类型和正文。
 // 输出：返回可由标准客户端关闭的响应。

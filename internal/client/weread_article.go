@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	readability "github.com/mackee/go-readability"
 	nethtml "golang.org/x/net/html"
 )
 
@@ -444,17 +445,55 @@ func (c *WeReadArticleClient) FetchArticleContent(ctx context.Context, sourceURL
 		if parseErr != nil {
 			return "", "", fmt.Errorf("解析微信原文 HTML: %w", parseErr)
 		}
-		contentNode := findWeChatContentNode(document)
-		if contentNode == nil {
-			return "", "", fmt.Errorf("微信原文缺少正文节点")
-		}
-		content := strings.TrimSpace(collectWeChatText(contentNode))
+		content, _ := extractWeChatArticleContent(bodyText, document)
 		if content == "" {
-			return "", "", fmt.Errorf("微信原文正文为空")
+			return "", "", fmt.Errorf("微信原文缺少可用正文")
 		}
 		return content, current.String(), nil
 	}
 	return "", "", fmt.Errorf("微信原文重定向未结束")
+}
+
+// extractWeChatArticleContent 按微信专用节点和通用正文算法提取文章正文。
+// 输入：bodyText 是原始 HTML，document 是已经解析的 DOM。
+// 输出：返回正文文本和命中的解析方式；无法通过质量校验时返回空值。
+// 副作用：无，不访问网络。
+func extractWeChatArticleContent(bodyText string, document *nethtml.Node) (string, string) {
+	// 1. 微信专用节点优先，保留公众号页面最准确的原始顺序。
+	if contentNode := findWeChatContentNode(document); contentNode != nil {
+		if content := validateWeChatArticleText(collectWeChatText(contentNode), 1); content != "" {
+			return content, "wechat_node"
+		}
+	}
+
+	// 2. 页面结构变化时使用 Mozilla Readability 的 Go 实现提取主内容。
+	options := readability.DefaultOptions()
+	options.CharThreshold = 120
+	options.NbTopCandidates = 8
+	article, err := readability.Extract(bodyText, options)
+	if err == nil && article.Root != nil {
+		if content := validateWeChatArticleText(readability.ExtractTextContent(article.Root), 80); content != "" {
+			return content, "readability"
+		}
+	}
+	return "", ""
+}
+
+// validateWeChatArticleText 过滤空白、验证页和过短的异常正文。
+// 输入：content 是候选正文。
+// 输出：通过校验返回规范文本，否则返回空值。
+// 副作用：无。
+func validateWeChatArticleText(content string, minimumLength int) string {
+	content = strings.TrimSpace(strings.Join(strings.Fields(content), " "))
+	if len([]rune(content)) < minimumLength {
+		return ""
+	}
+	for _, marker := range []string{"访问过于频繁", "环境异常", "安全验证", "请完成验证", "内容已被发布者删除", "此内容因违规无法查看"} {
+		if strings.Contains(content, marker) {
+			return ""
+		}
+	}
+	return content
 }
 
 type weReadHTTPResponse struct {
