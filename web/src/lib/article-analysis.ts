@@ -124,6 +124,20 @@ export type WeReadLoginStatus = {
   expires_at?: string | null;
 };
 
+export type ArticleAnalysisModelChoice = {
+  id: string;
+  provider: "sub2api" | "deepseek" | string;
+  model: string;
+  label: string;
+  configured: boolean;
+};
+
+export type ArticleAnalysisModelSettings = {
+  selected_model_id: string;
+  selected_model: string;
+  models: ArticleAnalysisModelChoice[];
+};
+
 export type JobRunResult = {
   id: number;
   name: string;
@@ -140,6 +154,17 @@ export async function fetchArticleFetchSummary() {
   return requestJson<{ title: string; description: string; metrics: Array<{ label: string; value: string; detail: string }> }>(
     "/api/v1/finance/article-analysis/fetch-summary",
   );
+}
+
+export async function fetchArticleAnalysisModelSettings() {
+  return requestJson<ArticleAnalysisModelSettings>("/api/v1/finance/article-analysis/model-settings");
+}
+
+export async function saveArticleAnalysisModel(modelId: string) {
+  return requestJson<ArticleAnalysisModelSettings>("/api/v1/finance/article-analysis/model-settings", {
+    method: "PUT",
+    body: JSON.stringify({ model_id: modelId }),
+  });
 }
 
 export async function fetchWeReadArticleBinding() {

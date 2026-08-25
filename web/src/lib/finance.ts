@@ -104,7 +104,7 @@ export const pageMetaMap: Record<FinancePageKey, { title: string; description: s
   },
   articleFetch: {
     title: "投资文章抓取",
-    description: "管理信息源，抓取 RSS 文章，并触发 DeepSeek 结构化分析。",
+    description: "管理信息源，抓取 RSS 文章，并触发结构化模型分析。",
   },
   backtest: {
     title: "回测",

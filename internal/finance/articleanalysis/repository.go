@@ -64,6 +64,46 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// AnalysisModelID 读取持久化的文章分析模型选择。
+// 输入：ctx 控制数据库查询。
+// 输出：没有设置时返回空字符串，查询失败时返回错误。
+// 副作用：只读 PostgreSQL。
+func (r *Repository) AnalysisModelID(ctx context.Context) (string, error) {
+	// 1. 单例设置不存在时使用服务默认值。
+	var modelID string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT model_id
+		FROM investment_article_model_setting
+		WHERE id = 1
+	`).Scan(&modelID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("读取投资文章分析模型设置: %w", err)
+	}
+	return strings.TrimSpace(modelID), nil
+}
+
+// SaveAnalysisModelID 保存文章分析模型选择。
+// 输入：ctx 控制数据库写入，modelID 是服务校验后的模型标识。
+// 输出：写入成功返回 nil，失败返回错误。
+// 副作用：写入 investment_article_model_setting。
+func (r *Repository) SaveAnalysisModelID(ctx context.Context, modelID string) error {
+	// 1. 使用单例主键更新选择，确保定时任务和页面共享同一配置。
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO investment_article_model_setting(id, model_id, updated_at)
+		VALUES(1, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			model_id = excluded.model_id,
+			updated_at = excluded.updated_at
+	`, strings.TrimSpace(modelID), appdatabase.TimestampText(time.Now()))
+	if err != nil {
+		return fmt.Errorf("保存投资文章分析模型设置: %w", err)
+	}
+	return nil
+}
+
 // SignalGroups 读取信号榜使用的全部概念组和别名。
 // 输入：ctx 控制数据库查询。
 // 输出：按概念组和别名主键顺序返回完整映射；失败时返回错误。

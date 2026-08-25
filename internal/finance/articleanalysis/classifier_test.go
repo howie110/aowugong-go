@@ -74,7 +74,8 @@ func TestClassifySignalBatchRetriesMalformedJSON(t *testing.T) {
 	batch := []signalCandidate{{Name: "券商", Type: "sector"}}
 
 	// 2. 当前批次应在第二次响应后成功，而不是让整个任务直接失败。
-	result, err := service.classifySignalBatch(context.Background(), nil, batch)
+	model := service.analysisModels[service.analysisModelOrder[0]]
+	result, err := service.classifySignalBatch(context.Background(), nil, batch, model)
 	if err != nil {
 		t.Fatalf("classifySignalBatch() error = %v", err)
 	}

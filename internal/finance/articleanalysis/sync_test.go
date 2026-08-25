@@ -223,7 +223,7 @@ func TestServiceScheduledSyncFailsWithPendingArticles(t *testing.T) {
 
 	// 2. 执行生产入口并要求 pending 不会被静默吞掉。
 	result, err := service.SyncScheduled(ctx, true)
-	if err == nil || !strings.Contains(err.Error(), "未配置 DEEPSEEK_API_KEY") {
+	if err == nil || !strings.Contains(err.Error(), "未配置可用的文章分析模型") {
 		t.Fatalf("SyncScheduled() error = %v, result = %#v", err, result)
 	}
 	if result.PendingCount != 1 {
@@ -309,7 +309,7 @@ func TestServiceScheduledSyncReportsMissingClassifierForUnknownSignals(t *testin
 	// 2. 执行自动完整同步并要求未知信号触发明确配置错误。
 	service := NewService(NewRepository(db), ServiceOptions{})
 	_, err = service.SyncScheduled(context.Background(), true)
-	if err == nil || !strings.Contains(err.Error(), "未配置 DEEPSEEK_API_KEY") {
+	if err == nil || !strings.Contains(err.Error(), "未配置可用的文章分析模型") {
 		t.Fatalf("SyncScheduled() error = %v, want missing classifier error", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

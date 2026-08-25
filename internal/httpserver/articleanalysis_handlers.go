@@ -24,6 +24,10 @@ type weReadAccountPayload struct {
 	FetchLimit           int `json:"fetch_limit"`
 }
 
+type articleAnalysisModelPayload struct {
+	ModelID string `json:"model_id"`
+}
+
 // registerArticleAnalysisRoutes 注册文章抓取、分析、报告和反馈接口。
 // 输入：router 是 API 路由器，authService 和 rbacService 提供访问控制，service 提供文章业务。
 // 输出：无。
@@ -41,6 +45,8 @@ func registerArticleAnalysisRoutes(router chi.Router, authService *auth.Service,
 	fetch := router.With(authenticate(authService), requirePermission(rbacService, rbac.PermissionFinanceArticleFetch))
 	fetch.Get("/api/v1/finance/article-analysis/fetch-summary", handlers.fetchSummary)
 	fetch.Get("/api/v1/finance/article-analysis/sources", handlers.sources)
+	fetch.Get("/api/v1/finance/article-analysis/model-settings", handlers.analysisModelSettings)
+	fetch.Put("/api/v1/finance/article-analysis/model-settings", handlers.updateAnalysisModelSettings)
 	fetch.Post("/api/v1/finance/article-analysis/sync", handlers.sync)
 	fetch.Post("/api/v1/finance/article-analysis/analyze", handlers.analyze)
 	fetch.Post("/api/v1/finance/article-analysis/parse", handlers.parse)
@@ -55,6 +61,39 @@ func registerArticleAnalysisRoutes(router chi.Router, authService *auth.Service,
 	feedback := router.With(authenticate(authService))
 	feedback.Post("/api/v1/finance/article-analysis/articles/{articleID}/prompt-feedback", handlers.feedback)
 	feedback.Patch("/api/v1/finance/article-analysis/articles/{articleID}/prompt-feedback", handlers.feedback)
+}
+
+// analysisModelSettings 返回文章分析当前模型和可选模型目录。
+// 输入：request 已通过文章抓取权限校验。
+// 输出：写入 AnalysisModelSettings JSON。
+// 副作用：读取 PostgreSQL。
+func (h articleAnalysisHandlers) analysisModelSettings(w http.ResponseWriter, request *http.Request) {
+	// 1. 读取当前有效选择和 Provider 配置状态。
+	result, err := h.service.AnalysisModelSettings(request.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "读取文章分析模型设置失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// updateAnalysisModelSettings 保存后续文章分析使用的模型。
+// 输入：JSON model_id 必须是已配置的模型目录项。
+// 输出：写入更新后的 AnalysisModelSettings JSON。
+// 副作用：写入 PostgreSQL。
+func (h articleAnalysisHandlers) updateAnalysisModelSettings(w http.ResponseWriter, request *http.Request) {
+	// 1. 解码并由服务校验模型是否存在和可用。
+	var payload articleAnalysisModelPayload
+	if err := decodeJSON(w, request, &payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "文章分析模型请求无效")
+		return
+	}
+	result, err := h.service.SetAnalysisModel(request.Context(), payload.ModelID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // weReadBinding 返回微信读书连接和书架公众号状态。
@@ -312,7 +351,7 @@ func (h articleAnalysisHandlers) report(w http.ResponseWriter, request *http.Req
 // sync 手动读取微信读书公众号并可继续执行模型分析。
 // 输入：fetch_limit、analyze 和 analysis_limit 是可选查询参数。
 // 输出：写入 SyncResult。
-// 副作用：调用微信读书、微信公众号原文和 DeepSeek，写入 PostgreSQL 和 HTTP 响应。
+// 副作用：调用微信读书、微信公众号原文和当前分析模型，写入 PostgreSQL 和 HTTP 响应。
 func (h articleAnalysisHandlers) sync(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析批量上限和布尔开关。
 	fetchLimit, ok := boundedQueryInt(w, request, "fetch_limit", 30, 1, 100)
@@ -345,7 +384,7 @@ func (h articleAnalysisHandlers) sync(w http.ResponseWriter, request *http.Reque
 // analyze 手动分析一批待处理文章。
 // 输入：limit 范围 1 到 50。
 // 输出：写入 AnalysisBatchResult。
-// 副作用：调用 DeepSeek、写入 PostgreSQL 和 HTTP 响应。
+// 副作用：调用当前分析模型、写入 PostgreSQL 和 HTTP 响应。
 func (h articleAnalysisHandlers) analyze(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析批量上限并调用统一分析入口。
 	limit, ok := boundedQueryInt(w, request, "limit", 10, 1, 50)

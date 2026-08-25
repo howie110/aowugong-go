@@ -1,4 +1,4 @@
-import { ArrowDownRight, BookOpenCheck, FileSearch, QrCode, Rss, Sparkles } from "lucide-react";
+import { ArrowDownRight, BookOpenCheck, BrainCircuit, FileSearch, QrCode, Rss, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -16,18 +16,22 @@ import {
 } from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
+  ArticleAnalysisModelSettings,
   ArticleSource,
   WeReadArticleBinding,
   WeReadLoginStatus,
   analyzePendingArticles,
-  parsePendingArticles,
+  fetchArticleAnalysisModelSettings,
   fetchArticleSources,
   fetchWeReadArticleBinding,
   fetchWeReadArticleQR,
+  parsePendingArticles,
   pollWeReadArticleLogin,
+  saveArticleAnalysisModel,
   startWeReadArticleLogin,
   syncArticles,
 } from "@/lib/article-analysis";
@@ -38,9 +42,11 @@ export function ArticleFetchPage() {
   // 1. 准备页面数据、操作状态和扫码轮询状态。
   const [sources, setSources] = useState<ArticleSource[]>([]);
   const [weRead, setWeRead] = useState<WeReadArticleBinding | null>(null);
+  const [modelSettings, setModelSettings] = useState<ArticleAnalysisModelSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isWorking, setIsWorking] = useState(false);
   const [isBindingWorking, setIsBindingWorking] = useState(false);
+  const [isModelWorking, setIsModelWorking] = useState(false);
   const [qrOpen, setQROpen] = useState(false);
   const [qrURL, setQRURL] = useState("");
   const [loginStatus, setLoginStatus] = useState<WeReadLoginStatus | null>(null);
@@ -52,17 +58,19 @@ export function ArticleFetchPage() {
     return { activeCount, failedCount };
   }, [sources]);
 
-  /** loadData 并行加载信息源和微信读书绑定状态。 */
+  /** loadData 并行加载信息源、微信读书绑定状态和模型设置。 */
   async function loadData() {
-    // 1. 并行读取两个互不依赖的数据块。
+    // 1. 并行读取三个互不依赖的数据块。
     setIsLoading(true);
     try {
-      const [nextSources, nextWeRead] = await Promise.all([
+      const [nextSources, nextWeRead, nextModelSettings] = await Promise.all([
         fetchArticleSources(),
         fetchWeReadArticleBinding(),
+        fetchArticleAnalysisModelSettings(),
       ]);
       setSources(nextSources);
       setWeRead(nextWeRead);
+      setModelSettings(nextModelSettings);
     } catch (error) {
       notify.errorFrom(error, "投资文章抓取数据加载失败", "加载失败");
     } finally {
@@ -171,6 +179,21 @@ export function ArticleFetchPage() {
     }
   }
 
+  /** handleModelChange 保存后续文章分析和信号归类使用的模型。 */
+  async function handleModelChange(modelId: string) {
+    // 1. 保存服务端设置，成功后以服务端返回值刷新当前选择。
+    setIsModelWorking(true);
+    try {
+      const settings = await saveArticleAnalysisModel(modelId);
+      setModelSettings(settings);
+      notify.success("分析模型已切换", `后续分析使用 ${settings.selected_model}。`);
+    } catch (error) {
+      notify.errorFrom(error, "切换文章分析模型失败");
+    } finally {
+      setIsModelWorking(false);
+    }
+  }
+
   // 2. 首次加载时使用稳定尺寸的骨架，避免页面跳动。
   if (isLoading && !weRead) {
     return <ArticleFetchSkeleton />;
@@ -195,6 +218,36 @@ export function ArticleFetchPage() {
           </Button>
         </ButtonGroup>
       </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+            <div className="min-w-0">
+              <CardTitle className="flex items-center gap-2">
+                <BrainCircuit className="h-4 w-4" />
+                分析模型
+              </CardTitle>
+              <CardDescription>文章分析和投资信号归类使用同一模型。</CardDescription>
+            </div>
+            <Select
+              value={modelSettings?.selected_model_id || ""}
+              onValueChange={(value) => void handleModelChange(value)}
+              disabled={isModelWorking || !modelSettings?.models.length}
+            >
+              <SelectTrigger className="w-full sm:w-72" aria-label="选择文章分析模型">
+                {isModelWorking ? <Spinner /> : <SelectValue placeholder="选择模型" />}
+              </SelectTrigger>
+              <SelectContent>
+                {modelSettings?.models.map((model) => (
+                  <SelectItem key={model.id} value={model.id} disabled={!model.configured}>
+                    {model.label} · {providerLabel(model.provider)}{model.configured ? "" : "（未配置）"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -378,6 +431,18 @@ function formatDate(value?: string | null) {
     return "暂无";
   }
   return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+/** providerLabel 将模型 Provider 转换为页面短标签。 */
+function providerLabel(provider: string) {
+  // 1. 已知 Provider 使用品牌名，未知值保留原文便于定位配置。
+  if (provider === "sub2api") {
+    return "Sub2API";
+  }
+  if (provider === "deepseek") {
+    return "DeepSeek";
+  }
+  return provider;
 }
 
 /** sourceDisplay 根据微信读书连接状态修正来源行的展示文案。 */

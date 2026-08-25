@@ -146,6 +146,22 @@ type PageSummary struct {
 	LatestArticleAt string       `json:"latest_article_at,omitempty"`
 }
 
+// AnalysisModelChoice 描述抓取页可选择的一个文章分析模型。
+type AnalysisModelChoice struct {
+	ID         string `json:"id"`
+	Provider   string `json:"provider"`
+	Model      string `json:"model"`
+	Label      string `json:"label"`
+	Configured bool   `json:"configured"`
+}
+
+// AnalysisModelSettings 描述当前选择和全部可用文章分析模型。
+type AnalysisModelSettings struct {
+	SelectedModelID string                `json:"selected_model_id"`
+	SelectedModel   string                `json:"selected_model"`
+	Models          []AnalysisModelChoice `json:"models"`
+}
+
 // SyncResult 描述一次外部文章同步和可选分析的统计。
 type SyncResult struct {
 	SourceCount          int                 `json:"source_count"`

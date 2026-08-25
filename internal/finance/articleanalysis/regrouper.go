@@ -73,10 +73,10 @@ type SignalGroupRebuildResult struct {
 	Groups             []SignalGroupRebuildGroup `json:"groups"`
 }
 
-// RebuildSignalGroups 使用 DeepSeek 全局收敛现有概念组和未归类标的。
+// RebuildSignalGroups 使用当前分析模型全局收敛现有概念组和未归类标的。
 // 输入：ctx 控制查询和模型调用，days 是统计范围，apply 控制是否替换线上词典。
 // 输出：返回可审查的重组摘要；模型结果不完整或不安全时返回错误。
-// 副作用：调用 DeepSeek；apply 为 true 时在单个事务内重建 PostgreSQL 概念词典。
+// 副作用：调用当前分析模型；apply 为 true 时在单个事务内重建 PostgreSQL 概念词典。
 func (s *Service) RebuildSignalGroups(ctx context.Context, days int, apply bool) (SignalGroupRebuildResult, error) {
 	// 1. 读取完整旧词典和统计范围内的原始信号，构造不丢失来源的全局输入。
 	if days < 1 {
@@ -94,12 +94,16 @@ func (s *Service) RebuildSignalGroups(ctx context.Context, days int, apply bool)
 	if len(sources) == 0 {
 		return SignalGroupRebuildResult{PendingAliases: []string{}, Groups: []SignalGroupRebuildGroup{}}, nil
 	}
-	if s.options.Analyzer == nil || !s.options.Analyzer.Configured() {
-		return SignalGroupRebuildResult{}, fmt.Errorf("未配置 DEEPSEEK_API_KEY，无法执行投资信号全局归类")
+	model, err := s.selectedAnalysisModel(ctx)
+	if err != nil {
+		return SignalGroupRebuildResult{}, err
+	}
+	if model.Analyzer == nil || !model.Analyzer.Configured() {
+		return SignalGroupRebuildResult{}, fmt.Errorf("未配置可用的文章分析模型，无法执行投资信号全局归类")
 	}
 
 	// 2. 重试畸形或过细响应，并由后端验证来源完整性和唯一归属。
-	regrouped, err := s.regroupSignalSources(ctx, sources)
+	regrouped, err := s.regroupSignalSources(ctx, sources, model)
 	if err != nil {
 		return SignalGroupRebuildResult{}, err
 	}
@@ -113,18 +117,18 @@ func (s *Service) RebuildSignalGroups(ctx context.Context, days int, apply bool)
 		return result, nil
 	}
 	groupsForPersistence := signalGroupsForPersistence(regrouped.Groups, regrouped.PendingAliases)
-	if _, err := s.repository.ReplaceSignalGroups(ctx, groupsForPersistence, s.options.Model); err != nil {
+	if _, err := s.repository.ReplaceSignalGroups(ctx, groupsForPersistence, model.Model); err != nil {
 		return SignalGroupRebuildResult{}, err
 	}
 	result.Applied = true
 	return result, nil
 }
 
-// regroupSignalSources 调用 DeepSeek 并重试畸形、不完整或仍然过细的全局结果。
+// regroupSignalSources 调用当前分析模型并重试畸形、不完整或仍然过细的全局结果。
 // 输入：ctx 控制模型调用，sources 是必须唯一覆盖的全部来源。
 // 输出：返回不超过四十组的完整建议；连续失败时返回最后一次业务错误。
-// 副作用：最多调用两次 DeepSeek 外部接口。
-func (s *Service) regroupSignalSources(ctx context.Context, sources []signalGroupSource) (signalRegroupingResult, error) {
+// 副作用：最多调用两次当前分析模型外部接口。
+func (s *Service) regroupSignalSources(ctx context.Context, sources []signalGroupSource, model analysisModelRuntime) (signalRegroupingResult, error) {
 	// 1. 固定基础输入，并在重试时附加上一次后端校验错误作为纠正要求。
 	basePrompt := buildSignalRegroupingPrompt(sources)
 	var lastErr error
@@ -133,7 +137,7 @@ func (s *Service) regroupSignalSources(ctx context.Context, sources []signalGrou
 		if lastErr != nil {
 			prompt += fmt.Sprintf("\n\n上一次输出未通过后端校验：%s。请完整重新输出修正后的 JSON。", lastErr.Error())
 		}
-		content, err := s.options.Analyzer.SimpleChat(ctx, prompt, signalRegroupingMaxTokens)
+		content, err := model.Analyzer.SimpleChat(ctx, prompt, signalRegroupingMaxTokens)
 		if err == nil {
 			var result signalRegroupingResult
 			result, err = parseSignalRegroupingJSON(content, sources)
@@ -151,7 +155,7 @@ func (s *Service) regroupSignalSources(ctx context.Context, sources []signalGrou
 	}
 
 	// 2. 保留最终校验原因供任务失败通知定位。
-	return signalRegroupingResult{}, fmt.Errorf("DeepSeek 连续 %d 次返回无效全局归类: %w", signalClassificationMaxAttempts, lastErr)
+	return signalRegroupingResult{}, fmt.Errorf("模型 %s 连续 %d 次返回无效全局归类: %w", model.Model, signalClassificationMaxAttempts, lastErr)
 }
 
 // buildSignalGroupSources 把现有概念组和未归类原始标的转换为全局归类来源。

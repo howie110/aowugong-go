@@ -50,10 +50,10 @@ type signalClassificationBatchResult struct {
 	Pending []signalCandidate
 }
 
-// classifySignalAliases 使用 DeepSeek 批量归类指定范围内的未知信号名称。
+// classifySignalAliases 使用当前文章分析模型批量归类指定范围内的未知信号名称。
 // 输入：ctx 控制数据库和模型调用，days 是至少一天的文章范围。
 // 输出：返回本次新增别名数量；查询、分类或写入失败时返回错误。
-// 副作用：调用 DeepSeek，并写入 PostgreSQL 概念组和别名表。
+// 副作用：调用当前分析模型，并写入 PostgreSQL 概念组和别名表。
 func (s *Service) classifySignalAliases(ctx context.Context, days int) (int, error) {
 	// 1. 读取统计范围、已有概念词典并提取未知名称。
 	if days < 1 {
@@ -71,8 +71,12 @@ func (s *Service) classifySignalAliases(ctx context.Context, days int) (int, err
 	if len(candidates) == 0 {
 		return 0, nil
 	}
-	if s.options.Analyzer == nil || !s.options.Analyzer.Configured() {
-		return 0, fmt.Errorf("未配置 DEEPSEEK_API_KEY，仍有 %d 个投资信号等待分类", len(candidates))
+	model, err := s.selectedAnalysisModel(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if model.Analyzer == nil || !model.Analyzer.Configured() {
+		return 0, fmt.Errorf("未配置可用的文章分析模型，仍有 %d 个投资信号等待分类", len(candidates))
 	}
 
 	// 2. 分批分类，每批写入后刷新词典供下一批优先复用。
@@ -83,7 +87,7 @@ func (s *Service) classifySignalAliases(ctx context.Context, days int) (int, err
 			end = len(candidates)
 		}
 		batch := candidates[start:end]
-		classification, err := s.classifySignalBatch(ctx, groups, batch)
+		classification, err := s.classifySignalBatch(ctx, groups, batch, model)
 		if err != nil {
 			return inserted, fmt.Errorf("处理第 %d 批投资信号分类: %w", start/signalClassificationBatchSize+1, err)
 		}
@@ -91,7 +95,7 @@ func (s *Service) classifySignalAliases(ctx context.Context, days int) (int, err
 		for _, candidate := range classification.Pending {
 			pendingNames = append(pendingNames, candidate.Name)
 		}
-		count, err := s.repository.SaveSignalGroups(ctx, signalGroupsForPersistence(classification.Groups, pendingNames), s.options.Model)
+		count, err := s.repository.SaveSignalGroups(ctx, signalGroupsForPersistence(classification.Groups, pendingNames), model.Model)
 		if err != nil {
 			return inserted, err
 		}
@@ -106,18 +110,18 @@ func (s *Service) classifySignalAliases(ctx context.Context, days int) (int, err
 	return inserted, nil
 }
 
-// classifySignalBatch 调用 DeepSeek 分类单批未知名称，并重试畸形响应。
+// classifySignalBatch 调用当前模型分类单批未知名称，并重试畸形响应。
 // 输入：ctx 控制模型调用，groups 是现有词典，batch 是本批未知名称。
 // 输出：返回只含高置信度别名的分类；连续失败时返回最后一次错误。
-// 副作用：最多调用两次 DeepSeek 外部接口。
-func (s *Service) classifySignalBatch(ctx context.Context, groups []SignalGroup, batch []signalCandidate) (signalClassificationBatchResult, error) {
+// 副作用：最多调用两次当前分析模型外部接口。
+func (s *Service) classifySignalBatch(ctx context.Context, groups []SignalGroup, batch []signalCandidate, model analysisModelRuntime) (signalClassificationBatchResult, error) {
 	// 1. 固定本批提示词，避免重试时改变统计语义。
 	prompt := buildSignalClassificationPrompt(groups, batch)
 	var lastErr error
 
 	// 2. 模型调用或 JSON 校验失败时重试一次，成功后立即返回稳定结果。
 	for attempt := 1; attempt <= signalClassificationMaxAttempts; attempt++ {
-		content, err := s.options.Analyzer.SimpleChat(ctx, prompt, 4000)
+		content, err := model.Analyzer.SimpleChat(ctx, prompt, 4000)
 		if err == nil {
 			result, parseErr := parseSignalClassificationJSON(content, batch, groups)
 			if parseErr == nil {
@@ -132,7 +136,7 @@ func (s *Service) classifySignalBatch(ctx context.Context, groups []SignalGroup,
 	}
 
 	// 3. 保留最后一次业务上下文，便于任务失败通知定位具体原因。
-	return signalClassificationBatchResult{}, fmt.Errorf("DeepSeek 连续 %d 次返回无效分类: %w", signalClassificationMaxAttempts, lastErr)
+	return signalClassificationBatchResult{}, fmt.Errorf("模型 %s 连续 %d 次返回无效分类: %w", model.Model, signalClassificationMaxAttempts, lastErr)
 }
 
 // buildSignalClassificationPrompt 构造未知信号名称的严格分组提示词。
@@ -208,7 +212,7 @@ func collectUnknownSignalCandidates(rows []analysisRow, groups []SignalGroup) []
 	return result
 }
 
-// parseSignalClassificationJSON 解码并校验 DeepSeek 的增量归类决策。
+// parseSignalClassificationJSON 解码并校验模型的增量归类决策。
 // 输入：content 是模型文本，candidates 是本轮名称，groups 是允许复用的现有概念组。
 // 输出：返回待保存概念组和待归类名称；遗漏、重复或越权决策会返回错误。
 // 副作用：无。

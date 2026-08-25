@@ -155,7 +155,8 @@ func TestRegroupSignalSourcesRetriesWhenResultStillHasTooManyGroups(t *testing.T
 
 	// 2. 首次组数超限必须触发带原因的第二次请求。
 	service := NewService(nil, ServiceOptions{Analyzer: gateway})
-	result, err := service.regroupSignalSources(context.Background(), sources)
+	model := service.analysisModels[service.analysisModelOrder[0]]
+	result, err := service.regroupSignalSources(context.Background(), sources, model)
 	if err != nil {
 		t.Fatalf("regroupSignalSources() error = %v", err)
 	}
@@ -190,7 +191,8 @@ func TestRegroupSignalSourcesRetriesWhenSingletonGroupsDominate(t *testing.T) {
 
 	// 2. 组数虽低于四十，但单别名占比过高仍必须重试。
 	service := NewService(nil, ServiceOptions{Analyzer: gateway})
-	result, err := service.regroupSignalSources(context.Background(), sources)
+	model := service.analysisModels[service.analysisModelOrder[0]]
+	result, err := service.regroupSignalSources(context.Background(), sources, model)
 	if err != nil {
 		t.Fatalf("regroupSignalSources() error = %v", err)
 	}

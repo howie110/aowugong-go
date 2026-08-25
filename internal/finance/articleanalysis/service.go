@@ -37,20 +37,35 @@ type AnalysisGateway interface {
 	SimpleChat(ctx context.Context, prompt string, maxTokens int) (string, error)
 }
 
+// AnalysisModelConfig 把一个页面模型选项绑定到对应的模型客户端。
+type AnalysisModelConfig struct {
+	ID       string
+	Provider string
+	Model    string
+	Label    string
+	Analyzer AnalysisGateway
+}
+
+type analysisModelRuntime struct {
+	AnalysisModelConfig
+}
+
 // ServiceOptions 描述投资文章服务的当前进程文章来源和模型配置。
 type ServiceOptions struct {
-	Model    string
-	FeedURL  string
-	Articles ArticleGateway
-	WeRead   *WeReadSource
-	Analyzer AnalysisGateway
-	Now      func() time.Time
+	Model                  string
+	FeedURL                string
+	Articles               ArticleGateway
+	WeRead                 *WeReadSource
+	Analyzer               AnalysisGateway
+	AnalysisModels         []AnalysisModelConfig
+	DefaultAnalysisModelID string
+	Now                    func() time.Time
 }
 
 // SyncNow 立即抓取全部启用文章来源，供页面手动按钮使用。
 // 输入：ctx 控制处理，fetchLimit 是每来源上限，analyze 控制是否分析，analysisLimit 是分析上限。
 // 输出：返回来源、抓取、写入和分析统计；基础数据库失败时返回错误。
-// 副作用：立即读取外部文章，按需调用 DeepSeek，并写入 PostgreSQL。
+// 副作用：立即读取外部文章，按需调用当前分析模型，并写入 PostgreSQL。
 func (s *Service) SyncNow(ctx context.Context, fetchLimit int, analyze bool, analysisLimit int) (SyncResult, error) {
 	// 1. 通过上下文标记跳过公众号定时频率判断，正式定时任务仍走原有节流逻辑。
 	return s.Sync(context.WithValue(ctx, forceArticleFetchContextKey{}, true), fetchLimit, analyze, analysisLimit)
@@ -59,7 +74,7 @@ func (s *Service) SyncNow(ctx context.Context, fetchLimit int, analyze bool, ana
 // Sync 抓取全部启用来源，并按选项继续分析待处理文章。
 // 输入：ctx 控制处理，fetchLimit 是每来源上限，analyze 控制是否分析，analysisLimit 是分析上限。
 // 输出：返回来源、抓取、写入和分析统计；基础数据库失败时返回错误。
-// 副作用：读取外部文章，按需调用 DeepSeek，并写入 PostgreSQL。
+// 副作用：读取外部文章，按需调用当前分析模型，并写入 PostgreSQL。
 func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analysisLimit int) (SyncResult, error) {
 	// 1. 读取启用来源并初始化稳定空数组结果。
 	sources, err := s.repository.sourceRecords(ctx)
@@ -213,7 +228,7 @@ func errorText(err error, fallback string) string {
 // SyncScheduled 执行生产任务使用的完整抓取和分批分析流程。
 // 输入：ctx 控制处理，classifySignals 控制是否补齐六十天信号概念映射。
 // 输出：返回累计同步统计；来源失败、模型缺失或仍有待分析文章时返回错误。
-// 副作用：调用微信读书、微信公众号原文、DeepSeek，并写入 PostgreSQL。
+// 副作用：调用微信读书、微信公众号原文、当前分析模型，并写入 PostgreSQL。
 func (s *Service) SyncScheduled(ctx context.Context, classifySignals bool) (SyncResult, error) {
 	// 1. 抓取全部来源的当前文章，来源失败时保留明细并立即升级为任务错误。
 	result, err := s.Sync(ctx, scheduledFetchLimit, false, 0)
@@ -234,8 +249,14 @@ func (s *Service) SyncScheduled(ctx context.Context, classifySignals bool) (Sync
 		return result, fmt.Errorf("读取文章分析进度: %w", err)
 	}
 	result.PendingCount = counts.PendingCount
-	if result.PendingCount > 0 && (s.options.Analyzer == nil || !s.options.Analyzer.Configured()) {
-		return result, fmt.Errorf("未配置 DEEPSEEK_API_KEY，仍有 %d 篇投资文章等待分析", result.PendingCount)
+	if result.PendingCount > 0 {
+		model, modelErr := s.selectedAnalysisModel(ctx)
+		if modelErr != nil {
+			return result, modelErr
+		}
+		if model.Analyzer == nil || !model.Analyzer.Configured() {
+			return result, fmt.Errorf("未配置可用的文章分析模型，仍有 %d 篇投资文章等待分析", result.PendingCount)
+		}
 	}
 
 	// 3. 最多执行十个五十篇批次，持续累计并在没有成功进展时停止重试。
@@ -342,7 +363,7 @@ func formatFailedSources(sources []map[string]string) string {
 // AnalyzePending 调用模型分析最近待处理文章。
 // 输入：ctx 控制处理，limit 是 1 到 50 的文章上限。
 // 输出：返回成功、跳过、错误及逐篇结果；数据库失败时返回错误。
-// 副作用：调用 DeepSeek 并写入 PostgreSQL 分析表。
+// 副作用：调用当前分析模型并写入 PostgreSQL 分析表。
 func (s *Service) AnalyzePending(ctx context.Context, limit int) (AnalysisBatchResult, error) {
 	// 1. 读取待分析文章并准备非 nil 结果数组。
 	articles, err := s.repository.pendingArticles(ctx, limit)
@@ -350,10 +371,17 @@ func (s *Service) AnalyzePending(ctx context.Context, limit int) (AnalysisBatchR
 		return AnalysisBatchResult{}, fmt.Errorf("读取待分析文章: %w", err)
 	}
 	result := AnalysisBatchResult{Items: []map[string]any{}}
+	if len(articles) == 0 {
+		return result, nil
+	}
+	model, err := s.selectedAnalysisModel(ctx)
+	if err != nil {
+		return AnalysisBatchResult{}, err
+	}
 
 	// 2. 每篇独立分析和落库，模型错误不阻断下一篇。
 	for _, article := range articles {
-		item, status, err := s.analyzeOne(ctx, article)
+		item, status, err := s.analyzeOne(ctx, article, model)
 		if err != nil {
 			return AnalysisBatchResult{}, err
 		}
@@ -374,7 +402,7 @@ func (s *Service) AnalyzePending(ctx context.Context, limit int) (AnalysisBatchR
 // AnalyzeAllPending 连续分析待处理文章，供页面手动补齐历史文章使用。
 // 输入：ctx 控制处理；每批固定五十篇，最多处理十批。
 // 输出：返回所有已执行批次的累计结果；数据库失败时返回错误。
-// 副作用：调用 DeepSeek 并写入 PostgreSQL 分析表。
+// 副作用：调用当前分析模型并写入 PostgreSQL 分析表。
 func (s *Service) AnalyzeAllPending(ctx context.Context) (AnalysisBatchResult, error) {
 	// 1. 循环复用单批入口，遇到没有进展时停止，避免错误状态反复占用模型额度。
 	result := AnalysisBatchResult{Items: []map[string]any{}}
@@ -397,36 +425,36 @@ func (s *Service) AnalyzeAllPending(ctx context.Context) (AnalysisBatchResult, e
 // analyzeOne 分析单篇文章并持久化最终状态。
 // 输入：ctx 控制模型请求，article 是待分析文章。
 // 输出：返回页面结果项、业务状态和仅数据库失败时使用的错误。
-// 副作用：调用 DeepSeek 并写入 PostgreSQL。
-func (s *Service) analyzeOne(ctx context.Context, article pendingArticle) (map[string]any, string, error) {
+// 副作用：调用当前分析模型并写入 PostgreSQL。
+func (s *Service) analyzeOne(ctx context.Context, article pendingArticle, model analysisModelRuntime) (map[string]any, string, error) {
 	// 1. 未配置模型时保留 pending，便于配置后重试。
-	if s.options.Analyzer == nil || !s.options.Analyzer.Configured() {
-		message := "未配置 DEEPSEEK_API_KEY"
-		if err := s.repository.SaveAnalysis(ctx, article.ID, "pending", AnalysisResult{}, message, s.options.Model, PromptVersion); err != nil {
+	if model.Analyzer == nil || !model.Analyzer.Configured() {
+		message := "未配置可用的文章分析模型"
+		if err := s.repository.SaveAnalysis(ctx, article.ID, "pending", AnalysisResult{}, message, model.Model, PromptVersion); err != nil {
 			return nil, "", err
 		}
 		return map[string]any{"article_id": article.ID, "status": "skipped", "message": message}, "skipped", nil
 	}
 
 	// 2. 调用模型并解析、规范化严格 JSON。
-	content, err := s.options.Analyzer.SimpleChat(ctx, buildAnalysisPrompt(article), 1600)
+	content, err := model.Analyzer.SimpleChat(ctx, buildAnalysisPrompt(article), 1600)
 	if err != nil {
 		message := err.Error()
-		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", AnalysisResult{}, message, s.options.Model, PromptVersion); saveErr != nil {
+		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", AnalysisResult{}, message, model.Model, PromptVersion); saveErr != nil {
 			return nil, "", saveErr
 		}
 		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", nil
 	}
 	parsed, err := parseAnalysisJSON(content)
 	if err != nil {
-		message := "DeepSeek JSON 解析失败：" + err.Error()
-		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", AnalysisResult{}, message, s.options.Model, PromptVersion); saveErr != nil {
+		message := "模型 JSON 解析失败：" + err.Error()
+		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", AnalysisResult{}, message, model.Model, PromptVersion); saveErr != nil {
 			return nil, "", saveErr
 		}
 		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", nil
 	}
 	normalized := NormalizeAnalysis(parsed)
-	if err := s.repository.SaveAnalysis(ctx, article.ID, "success", normalized, "", s.options.Model, PromptVersion); err != nil {
+	if err := s.repository.SaveAnalysis(ctx, article.ID, "success", normalized, "", model.Model, PromptVersion); err != nil {
 		return nil, "", err
 	}
 	return map[string]any{"article_id": article.ID, "status": "success"}, "success", nil
@@ -466,8 +494,11 @@ func feedEntryFromClient(item client.ArticleItem) FeedEntry {
 
 // Service 提供文章页面、任务和手动接口复用的业务入口。
 type Service struct {
-	repository *Repository
-	options    ServiceOptions
+	repository             *Repository
+	options                ServiceOptions
+	analysisModels         map[string]analysisModelRuntime
+	analysisModelOrder     []string
+	defaultAnalysisModelID string
 }
 
 // NewService 创建投资文章分析服务。
@@ -475,12 +506,124 @@ type Service struct {
 // 输出：返回文章服务。
 // 副作用：无。
 func NewService(repository *Repository, options ServiceOptions) *Service {
-	// 1. 应用当前模型默认值并保存依赖。
+	// 1. 兼容只传旧 Analyzer 的测试和调用方，并构造稳定模型目录。
 	if options.Model == "" {
 		options.Model = "deepseek-v4-pro"
 	}
 	options.FeedURL = strings.TrimSpace(options.FeedURL)
-	return &Service{repository: repository, options: options}
+	models := append([]AnalysisModelConfig(nil), options.AnalysisModels...)
+	if len(models) == 0 && options.Analyzer != nil {
+		models = append(models, AnalysisModelConfig{
+			ID: "legacy:" + options.Model, Provider: "deepseek", Model: options.Model,
+			Label: options.Model, Analyzer: options.Analyzer,
+		})
+	}
+	runtimes := make(map[string]analysisModelRuntime, len(models))
+	order := make([]string, 0, len(models))
+	for _, model := range models {
+		model.ID = strings.TrimSpace(model.ID)
+		model.Model = strings.TrimSpace(model.Model)
+		if model.ID == "" || model.Model == "" || model.Analyzer == nil {
+			continue
+		}
+		if model.Label == "" {
+			model.Label = model.Model
+		}
+		if _, exists := runtimes[model.ID]; exists {
+			continue
+		}
+		runtimes[model.ID] = analysisModelRuntime{AnalysisModelConfig: model}
+		order = append(order, model.ID)
+	}
+	defaultID := strings.TrimSpace(options.DefaultAnalysisModelID)
+	if _, exists := runtimes[defaultID]; !exists && len(order) > 0 {
+		defaultID = order[0]
+	}
+	return &Service{
+		repository: repository, options: options, analysisModels: runtimes,
+		analysisModelOrder: order, defaultAnalysisModelID: defaultID,
+	}
+}
+
+// AnalysisModelSettings 返回当前模型选择和完整模型目录。
+// 输入：ctx 控制 PostgreSQL 查询。
+// 输出：返回当前有效模型及各模型配置状态。
+// 副作用：只读 PostgreSQL。
+func (s *Service) AnalysisModelSettings(ctx context.Context) (AnalysisModelSettings, error) {
+	// 1. 解析持久化选择；无设置或旧设置无效时使用当前默认模型。
+	selected, err := s.selectedAnalysisModel(ctx)
+	if err != nil {
+		return AnalysisModelSettings{}, err
+	}
+
+	// 2. 按配置顺序输出目录，未配置 Key 的保留显示但不可选择。
+	choices := make([]AnalysisModelChoice, 0, len(s.analysisModelOrder))
+	for _, id := range s.analysisModelOrder {
+		model := s.analysisModels[id]
+		choices = append(choices, AnalysisModelChoice{
+			ID: id, Provider: model.Provider, Model: model.Model, Label: model.Label,
+			Configured: model.Analyzer.Configured(),
+		})
+	}
+	return AnalysisModelSettings{
+		SelectedModelID: selected.ID, SelectedModel: selected.Model, Models: choices,
+	}, nil
+}
+
+// SetAnalysisModel 保存后续文章分析和信号归类使用的模型。
+// 输入：ctx 控制写入，modelID 必须来自当前模型目录且已配置。
+// 输出：返回更新后的模型设置；模型不可用时返回错误。
+// 副作用：写入 PostgreSQL 模型设置。
+func (s *Service) SetAnalysisModel(ctx context.Context, modelID string) (AnalysisModelSettings, error) {
+	// 1. 拒绝目录外或缺少凭据的模型，避免页面保存一个必然失败的选项。
+	model, exists := s.analysisModels[strings.TrimSpace(modelID)]
+	if !exists {
+		return AnalysisModelSettings{}, fmt.Errorf("文章分析模型不存在")
+	}
+	if !model.Analyzer.Configured() {
+		return AnalysisModelSettings{}, fmt.Errorf("文章分析模型 %s 尚未配置凭据", model.Label)
+	}
+	if err := s.repository.SaveAnalysisModelID(ctx, model.ID); err != nil {
+		return AnalysisModelSettings{}, err
+	}
+	return s.AnalysisModelSettings(ctx)
+}
+
+// selectedAnalysisModel 解析当前持久化选择并回退到第一个已配置模型。
+// 输入：ctx 控制 PostgreSQL 查询。
+// 输出：返回本次调用固定使用的模型运行时；没有模型目录时返回空运行时。
+// 副作用：只读 PostgreSQL。
+func (s *Service) selectedAnalysisModel(ctx context.Context) (analysisModelRuntime, error) {
+	// 1. 单模型兼容模式无需额外查询，避免改变旧测试和简单调用行为。
+	if len(s.analysisModelOrder) == 1 {
+		return s.analysisModels[s.analysisModelOrder[0]], nil
+	}
+	selectedID := ""
+	if len(s.analysisModelOrder) > 1 {
+		var err error
+		selectedID, err = s.repository.AnalysisModelID(ctx)
+		if err != nil {
+			return analysisModelRuntime{}, err
+		}
+	}
+	if selected, exists := s.analysisModels[selectedID]; exists && selected.Analyzer.Configured() {
+		return selected, nil
+	}
+	if fallback, exists := s.analysisModels[s.defaultAnalysisModelID]; exists && fallback.Analyzer.Configured() {
+		return fallback, nil
+	}
+	for _, id := range s.analysisModelOrder {
+		if candidate := s.analysisModels[id]; candidate.Analyzer.Configured() {
+			return candidate, nil
+		}
+	}
+	if fallback, exists := s.analysisModels[s.defaultAnalysisModelID]; exists {
+		return fallback, nil
+	}
+	if len(s.analysisModelOrder) > 0 {
+		return s.analysisModels[s.analysisModelOrder[0]], nil
+	}
+	return analysisModelRuntime{}, nil
 }
 
 // AnalysisSummary 构建投资文章分析页面摘要。
@@ -500,7 +643,7 @@ func (s *Service) AnalysisSummary(ctx context.Context) (PageSummary, error) {
 		Description: "统计最近资讯里的标的信号、市场氛围和涨跌预测。",
 		Metrics: []PageMetric{
 			{Label: "文章", Value: strconv.Itoa(counts.ArticleCount), Detail: "已入库文章", Status: "normal"},
-			{Label: "已分析", Value: strconv.Itoa(counts.AnalyzedCount), Detail: "DeepSeek 结构化结果", Status: "normal"},
+			{Label: "已分析", Value: strconv.Itoa(counts.AnalyzedCount), Detail: "结构化模型结果", Status: "normal"},
 		},
 		LatestArticleAt: counts.LatestAt,
 	}, nil
@@ -520,12 +663,12 @@ func (s *Service) FetchSummary(ctx context.Context) (PageSummary, error) {
 	// 2. 组装抓取页状态卡片。
 	return PageSummary{
 		Title:       "投资文章抓取",
-		Description: "管理微信读书公众号，读取新文章并触发 DeepSeek 结构化分析。",
+		Description: "管理微信读书公众号，读取新文章并触发结构化模型分析。",
 		Metrics: []PageMetric{
 			{Label: "来源", Value: strconv.Itoa(counts.SourceCount), Detail: "启用的信息源", Status: "normal"},
 			{Label: "文章", Value: strconv.Itoa(counts.ArticleCount), Detail: "已入库文章", Status: "normal"},
 			{Label: "待分析", Value: strconv.Itoa(counts.PendingCount), Detail: "抓取后等待模型处理", Status: "normal"},
-			{Label: "已分析", Value: strconv.Itoa(counts.AnalyzedCount), Detail: "DeepSeek 结构化结果", Status: "normal"},
+			{Label: "已分析", Value: strconv.Itoa(counts.AnalyzedCount), Detail: "结构化模型结果", Status: "normal"},
 		},
 		LatestArticleAt: counts.LatestAt,
 	}, nil
@@ -592,9 +735,13 @@ func (s *Service) Report(ctx context.Context, targetDays, marketDays int) (Repor
 		return Report{}, err
 	}
 
-	// 2. 聚合推荐、风险及市场枚举并附带模型说明。
+	// 2. 聚合推荐、风险及市场枚举并附带当前模型说明。
+	model, err := s.selectedAnalysisModel(ctx)
+	if err != nil {
+		return Report{}, err
+	}
 	return Report{
-		AnalysisModel:          s.options.Model,
+		AnalysisModel:          model.Model,
 		AnalysisPrompt:         AnalysisPromptTemplate(),
 		PromptVersion:          PromptVersion,
 		Signals:                buildSignalStats(targetRows, groups),
@@ -824,7 +971,7 @@ func AnalysisPromptTemplate() string {
 	})
 }
 
-// buildAnalysisPrompt 根据文章内容生成 DeepSeek 结构化提示词。
+// buildAnalysisPrompt 根据文章内容生成结构化分析提示词。
 // 输入：article 是待分析文章。
 // 输出：返回严格 JSON 输出约束提示词。
 // 副作用：无。

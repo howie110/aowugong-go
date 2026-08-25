@@ -8,7 +8,7 @@
 - 前端：React、TypeScript、Vite、shadcn/ui、Tailwind CSS
 - 数据库：PostgreSQL 15+，连接池默认 `8/4`，时区 `Asia/Shanghai`
 - 调度：`robfig/cron/v3`，任务统一经过并发锁、超时、panic 恢复、日志、结果入库和失败微信通知
-- 外部服务：微信读书、微信公众号原文、Miniflux、DeepSeek、Tushare、OpeniLink Hub、阿里云 OCR
+- 外部服务：微信读书、微信公众号原文、Miniflux、Sub2API、DeepSeek、Tushare、OpeniLink Hub、阿里云 OCR
 - 生产：Linux amd64 发布产物、systemd；Go 服务无需 Go、Node、Python 或 MySQL，公网 TLS 复用 Vaultwarden 的 Caddy 容器与 IP 证书
 
 ## 目录

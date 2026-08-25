@@ -50,6 +50,10 @@ func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 		cfg.Clients.Email.Host != "smtp.qq.com" || cfg.Clients.Email.Port != 465 {
 		t.Errorf("VaultwardenBackup defaults = %#v email=%#v", cfg.VaultwardenBackup, cfg.Clients.Email)
 	}
+	if cfg.Clients.Sub2API.BaseURL != "http://64.186.230.213:8080/v1" ||
+		cfg.Clients.Sub2API.DefaultModel != "gpt-5.6-luna" || len(cfg.Clients.Sub2API.Models) != 4 {
+		t.Errorf("Sub2API defaults = %#v", cfg.Clients.Sub2API)
+	}
 }
 
 // TestEnvironmentExampleUsesPostgresRuntimeSettings 验证环境示例以 PostgreSQL 作为运行时数据库。
@@ -70,6 +74,7 @@ func TestEnvironmentExampleUsesPostgresRuntimeSettings(t *testing.T) {
 		"MINIFLUX_BASE_URL=", "MINIFLUX_MONITOR_URL=", "MINIFLUX_API_TOKEN=", "MINIFLUX_CATEGORY=",
 		"GITHUB_BACKUP_ENABLED=", "GITHUB_BACKUP_TOKEN=", "GITHUB_BACKUP_REQUIRED_REPOSITORIES=KES-IT/KES-SCM,KES-IT/KES-BIS",
 		"VAULTWARDEN_BACKUP_EMAIL_ENABLED=", "VAULTWARDEN_BACKUP_RECOVERY_SCRIPTS_DIR=", "VAULTWARDEN_BACKUP_AGE_RECIPIENT=", "SMTP_EMAIL=", "SMTP_PASSWORD=",
+		"SUB2API_BASE_URL=", "SUB2API_API_KEY=", "SUB2API_MODELS=", "SUB2API_DEFAULT_MODEL=gpt-5.6-luna",
 	} {
 		if !strings.Contains(string(content), key) {
 			t.Errorf(".env.example missing %s", key)
