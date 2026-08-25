@@ -289,8 +289,8 @@ export function ArticleFetchPage() {
                     <TableHead className="min-w-40">公众号</TableHead>
                     <TableHead className="w-24 text-right">现有文章</TableHead>
                     <TableHead className="w-24 text-right">今天新增</TableHead>
-                    <TableHead className="w-24 text-right">未分析</TableHead>
                     <TableHead className="w-24 text-right">未解析</TableHead>
+                    <TableHead className="w-24 text-right">未分析</TableHead>
                     <TableHead className="min-w-32">最近获取时间</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -300,8 +300,8 @@ export function ArticleFetchPage() {
                       <TableCell className="font-medium">{account.title}</TableCell>
                       <TableCell className="text-right tabular-nums">{account.article_count}</TableCell>
                       <TableCell className="text-right tabular-nums">{account.today_inserted_count}</TableCell>
-                      <TableCell className="text-right tabular-nums">{account.pending_count}</TableCell>
                       <TableCell className="text-right tabular-nums">{account.unparsed_count}</TableCell>
+                      <TableCell className="text-right tabular-nums">{account.pending_count}</TableCell>
                       <TableCell className="text-muted-foreground">{formatDate(account.latest_fetched_at)}</TableCell>
                     </TableRow>
                   ))}
