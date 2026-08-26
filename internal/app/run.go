@@ -223,7 +223,7 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 
 	// 6. 构造 finance 页面、仓位、分析、文章、行情和统一通知服务。
 	financeService := financeservice.NewDashboardService(db, financeservice.DashboardOptions{
-		HTTPAddress: cfg.HTTP.Address, OpenILinkConfigured: cfg.Clients.OpenILink.AppToken != "",
+		HTTPAddress: cfg.HTTP.Address, WeComBotConfigured: client.NewWeComBotClient(cfg.Clients.WeComBot, nil).Configured(),
 		SchedulerEnabled: cfg.Scheduler.Enabled, GitHubBackupEnabled: cfg.GitHubBackup.Enabled,
 		VaultwardenBackupEnabled: cfg.VaultwardenBackup.Enabled, RealTradeEnabled: cfg.Finance.EnableRealTrade,
 		QMTConfigured: cfg.Finance.QMTAccount != "", BinanceConfigured: cfg.Finance.BinanceAPIKey != "",
@@ -304,7 +304,7 @@ func newTaskServices(cfg config.Config, db *sql.DB) taskServices {
 		data: financedata.NewService(financedata.NewRepository(db), client.NewTushareClient(cfg.Clients.Tushare, nil), financedata.SyncOptions{
 			LookbackDays: 60, Delay: time.Second,
 		}),
-		notification: notification.NewService(notification.NewRepository(db), client.NewOpenILinkClient(cfg.Clients.OpenILink, nil)),
+		notification: notification.NewService(notification.NewRepository(db), client.NewWeComBotClient(cfg.Clients.WeComBot, nil)),
 	}
 	if cfg.GitHubBackup.Enabled {
 		services.githubBackup = githubbackup.NewService(

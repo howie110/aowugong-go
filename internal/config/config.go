@@ -115,7 +115,7 @@ type Clients struct {
 	Sub2API               Sub2API
 	DeepSeek              DeepSeek
 	Tushare               Tushare
-	OpenILink             OpenILink
+	WeComBot              WeComBot
 	ServiceMonitorTargets string
 	PositionOCR           PositionOCR
 	Email                 Email
@@ -165,13 +165,9 @@ type Tushare struct {
 	Token   string
 }
 
-// OpenILink 描述微信通知和链路监控配置。
-type OpenILink struct {
-	HubURL     string
-	MonitorURL string
-	AppToken   string
-	DefaultTo  string
-	DBPath     string
+// WeComBot 描述企业微信群机器人文本通知配置。
+type WeComBot struct {
+	WebhookURL string
 }
 
 // PositionOCR 描述仓位截图 OCR 配置。
@@ -246,11 +242,6 @@ func Load(lookup LookupEnv) (Config, error) {
 			},
 			DeepSeek: DeepSeek{BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"},
 			Tushare:  Tushare{BaseURL: "https://api.tushare.pro"},
-			OpenILink: OpenILink{
-				HubURL:     "http://127.0.0.1:9800",
-				MonitorURL: "http://8.138.123.59:9800/",
-				DBPath:     "/var/lib/openilink-hub/openilink.db",
-			},
 			PositionOCR: PositionOCR{
 				Provider:    "aliyun",
 				UploadMaxMB: 10,
@@ -315,11 +306,7 @@ func Load(lookup LookupEnv) (Config, error) {
 	loadString(lookup, "DEEPSEEK_MODEL", &cfg.Clients.DeepSeek.Model)
 	loadString(lookup, "TUSHARE_BASE_URL", &cfg.Clients.Tushare.BaseURL)
 	loadString(lookup, "TUSHARE_TOKEN", &cfg.Clients.Tushare.Token)
-	loadString(lookup, "OPENILINK_HUB_URL", &cfg.Clients.OpenILink.HubURL)
-	loadString(lookup, "OPENILINK_MONITOR_URL", &cfg.Clients.OpenILink.MonitorURL)
-	loadString(lookup, "OPENILINK_APP_TOKEN", &cfg.Clients.OpenILink.AppToken)
-	loadString(lookup, "OPENILINK_DEFAULT_TO", &cfg.Clients.OpenILink.DefaultTo)
-	loadString(lookup, "OPENILINK_DB_PATH", &cfg.Clients.OpenILink.DBPath)
+	loadString(lookup, "WECOM_BOT_WEBHOOK_URL", &cfg.Clients.WeComBot.WebhookURL)
 	loadString(lookup, "SERVICE_MONITOR_TARGETS", &cfg.Clients.ServiceMonitorTargets)
 	loadString(lookup, "POSITION_OCR_PROVIDER", &cfg.Clients.PositionOCR.Provider)
 	loadString(lookup, "ALIYUN_OCR_ACCESS_KEY_ID", &cfg.Clients.PositionOCR.AccessKeyID)

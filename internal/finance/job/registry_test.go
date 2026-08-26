@@ -99,7 +99,7 @@ type fakeNotification struct{}
 // 输入：上下文、标题、正文和接收人。
 // 输出：返回 nil。
 // 副作用：无。
-func (fakeNotification) Text(context.Context, []string, string, string) error {
+func (fakeNotification) Text(context.Context, []string, string) error {
 	// 1. 返回发送成功。
 	return nil
 }
@@ -140,7 +140,7 @@ type captureNotification struct {
 // 输入：上下文、标题、正文和接收人。
 // 输出：始终返回 nil。
 // 副作用：覆盖测试替身保存的正文。
-func (n *captureNotification) Text(_ context.Context, _ []string, body, _ string) error {
+func (n *captureNotification) Text(_ context.Context, _ []string, body string) error {
 	// 1. 保存正文供断言。
 	n.body = body
 	return nil
@@ -164,19 +164,18 @@ func TestRegisterAllAddsNineProductionJobs(t *testing.T) {
 		},
 	}
 
-	// 2. 注册并核对八项固定名称、频率和仅手动属性。
+	// 2. 注册并核对七项固定名称、频率和仅手动属性。
 	if err := RegisterAll(registry, dependencies); err != nil {
 		t.Fatalf("RegisterAll() error = %v", err)
 	}
 	definitions := registry.Definitions()
-	if len(definitions) != 8 {
-		t.Fatalf("definition count = %d, want 8", len(definitions))
+	if len(definitions) != 7 {
+		t.Fatalf("definition count = %d, want 7", len(definitions))
 	}
 	wanted := map[string]string{
 		"test_crontab": "0 9 * * *", "update_tushare_daily_data": "",
 		"sync_investment_articles": "", "check_service_monitors": "0 22 * * *",
-		"check_subscription_expiry_notify": "30 9 * * *", "openilink_reply_reminder": "0 10 * * *",
-		"backup_postgres":                  "30 3 * * *",
+		"check_subscription_expiry_notify": "30 9 * * *", "backup_postgres": "30 3 * * *",
 		"rebuild_investment_signal_groups": "",
 	}
 	for _, definition := range definitions {
@@ -227,7 +226,7 @@ func TestRegisterAllAddsOptionalGitHubBackupJob(t *testing.T) {
 			}
 		}
 	}
-	if !found || len(registry.Definitions()) != 9 {
+	if !found || len(registry.Definitions()) != 8 {
 		t.Errorf("definitions = %+v", registry.Definitions())
 	}
 }
@@ -262,7 +261,7 @@ func TestRegisterAllAddsOptionalVaultwardenEmailJob(t *testing.T) {
 			}
 		}
 	}
-	if !found || len(registry.Definitions()) != 9 {
+	if !found || len(registry.Definitions()) != 8 {
 		t.Errorf("definitions = %+v", registry.Definitions())
 	}
 }

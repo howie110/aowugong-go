@@ -55,7 +55,7 @@ type JobFunc func(ctx context.Context) (string, error)
 
 // Notifier 定义任务包装器需要的统一文本通知能力。
 type Notifier interface {
-	Text(ctx context.Context, titleParts []string, body, to string) error
+	Text(ctx context.Context, titleParts []string, body string) error
 }
 
 // Definition 描述注册任务的名称、Cron、手动属性、业务互斥键、超时和入口。
@@ -379,7 +379,7 @@ func (r *Registry) notifyFailure(name string, executionID int64, failedAt time.T
 		name, failedAt.Format("2006-01-02 15:04:05"), runErr.Error())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := r.notifier.Text(ctx, []string{"AOWUGONG", "JOB", "ERROR", name}, body, ""); err != nil {
+	if err := r.notifier.Text(ctx, []string{"AOWUGONG", "JOB", "ERROR", name}, body); err != nil {
 		r.logger.Error("发送任务失败通知失败", "job", name, "error", err)
 	}
 }

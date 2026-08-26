@@ -139,7 +139,7 @@ func (s *Service) Summary(ctx context.Context) (Summary, error) {
 // checkTarget 探测单个目标并返回标准结果。
 // 输入：ctx 是调用上下文，target 是目标定义。
 // 输出：返回 up/down 结果，不把业务异常向上抛出。
-// 副作用：调用外部 HTTP/API 或只读访问 OpeniLink DB。
+// 副作用：调用外部 HTTP/API。
 func (s *Service) checkTarget(ctx context.Context, target Target) Result {
 	// 1. 优先选择不对外展示的内部探测地址，并准备统一结果字段。
 	probeURL := strings.TrimSpace(target.ProbeURL)
@@ -152,14 +152,7 @@ func (s *Service) checkTarget(ctx context.Context, target Target) Result {
 		Status: "down", CheckedAt: &checkedAt,
 	}
 
-	// 2. OpeniLink 优先读本机自身的 SQLite，缺少文件时才做空内容 HTTP 探测。
-	if target.Code == "openilink-hub" {
-		checkCtx, cancel := context.WithTimeout(ctx, monitorProbeTimeout)
-		defer cancel()
-		return s.checkOpenILink(checkCtx, probeURL, base)
-	}
-
-	// 3. 普通服务失败后复检一次，连续两次失败才判定异常。
+	// 2. 普通服务失败后复检一次，连续两次失败才判定异常。
 	probe := s.probeURLWithRetry(ctx, probeURL)
 	base.HTTPStatus = probe.HTTPStatus
 	base.LatencyMS = intValuePointer(probe.LatencyMS)
@@ -189,33 +182,6 @@ func (s *Service) probeURLWithRetry(ctx context.Context, probeURL string) client
 
 	// 2. 连续失败时保留第二次结果，作为页面和通知中的最终依据。
 	return result
-}
-
-// checkOpenILink 静默验证 OpeniLink 是否具备发送能力。
-// 输入：ctx 是调用上下文，probeURL 是内部探测地址，base 是标准结果基础字段。
-// 输出：返回 up/down 结果。
-// 副作用：调用空内容外部 HTTP API，不发送有效消息。
-func (s *Service) checkOpenILink(ctx context.Context, probeURL string, base Result) Result {
-	// 1. 必要配置缺失时直接返回可读异常。
-	if s.config.OpenILink.AppToken == "" {
-		base.ErrorMessage = textPointer("未配置 OPENILINK_APP_TOKEN，无法验证微信通知链路")
-		return base
-	}
-	if s.config.OpenILink.DefaultTo == "" {
-		base.ErrorMessage = textPointer("未配置 OPENILINK_DEFAULT_TO，无法验证微信通知链路")
-		return base
-	}
-
-	// 2. 发空内容探测，预期请求在投递前因缺少正文被拒绝。
-	probe := s.client.ProbeOpenILink(ctx, probeURL, s.config.OpenILink.AppToken)
-	base.HTTPStatus = probe.HTTPStatus
-	base.LatencyMS = intValuePointer(probe.LatencyMS)
-	if probe.Healthy {
-		base.Status = "up"
-	} else {
-		base.ErrorMessage = textPointer(probe.Message)
-	}
-	return base
 }
 
 // intValuePointer 把探测耗时转换为可空字段。

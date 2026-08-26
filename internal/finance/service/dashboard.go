@@ -14,7 +14,7 @@ const unknownLatest = "未知"
 // DashboardOptions 描述 finance 摘要所需的运行时开关，不包含任何密钥明文。
 type DashboardOptions struct {
 	HTTPAddress              string
-	OpenILinkConfigured      bool
+	WeComBotConfigured       bool
 	SchedulerEnabled         bool
 	GitHubBackupEnabled      bool
 	VaultwardenBackupEnabled bool
@@ -136,8 +136,8 @@ func (s *DashboardService) Overview(ctx context.Context) (Overview, error) {
 		return Overview{}, fmt.Errorf("读取控制台数据进度: %w", err)
 	}
 
-	// 2. 根据当前 Go 服务和 OpeniLink 配置构建运行指标。
-	notifyValue, notifyStatus := configuredState(s.options.OpenILinkConfigured)
+	// 2. 根据当前 Go 服务和企业微信配置构建运行指标。
+	notifyValue, notifyStatus := configuredState(s.options.WeComBotConfigured)
 	result := Overview{
 		Title:       "控制台",
 		Description: "集中查看投资研究、内容服务、定时任务和系统运维状态。",
@@ -145,7 +145,7 @@ func (s *DashboardService) Overview(ctx context.Context) (Overview, error) {
 			{Label: "Web 服务", Value: displayPort(s.options.HTTPAddress), Detail: "Go + React", Status: "normal"},
 			{Label: "文章同步", Value: "仅手动", Detail: "等待新文章源", Status: "warning"},
 			{Label: "服务监控", Value: "22:00", Detail: "项目连通性检测", Status: "normal"},
-			{Label: "通知通道", Value: notifyValue, Detail: "OpeniLink 微信 Bot", Status: notifyStatus},
+			{Label: "通知通道", Value: notifyValue, Detail: "企业微信群机器人", Status: notifyStatus},
 		},
 		Modules: moduleList(),
 	}
@@ -203,15 +203,15 @@ func (s *DashboardService) DataSummary(ctx context.Context) (DataPage, error) {
 
 // JobsSummary 返回 Go 进程内注册的固定任务频率。
 // 输入：无。
-// 输出：返回八项任务、统一执行入口和失败通知状态。
+// 输出：返回七项任务、统一执行入口和失败通知状态。
 // 副作用：无。
 func (s *DashboardService) JobsSummary() JobsPage {
-	// 1. 根据调度器和 OpeniLink 配置生成运行状态。
+	// 1. 根据调度器和企业微信配置生成运行状态。
 	jobStatus := "disabled"
 	if s.options.SchedulerEnabled {
 		jobStatus = "active"
 	}
-	failNotify, _ := configuredState(s.options.OpenILinkConfigured)
+	failNotify, _ := configuredState(s.options.WeComBotConfigured)
 
 	// 2. 建立固定任务，并按运行配置追加可选备份任务。
 	jobs := []Item{
@@ -221,7 +221,6 @@ func (s *DashboardService) JobsSummary() JobsPage {
 		{Name: "rebuild_investment_signal_groups", Schedule: "仅手动", Description: "全局重建投资信号概念组", Command: "scheduler.Run(rebuild_investment_signal_groups)", Status: "manual"},
 		{Name: "check_service_monitors", Schedule: "0 22 * * *", Description: "检查服务连通性", Command: "scheduler.Run(check_service_monitors)", Status: jobStatus},
 		{Name: "check_subscription_expiry_notify", Schedule: "30 9 * * *", Description: "检查订阅到期并提醒", Command: "scheduler.Run(check_subscription_expiry_notify)", Status: jobStatus},
-		{Name: "openilink_reply_reminder", Schedule: "0 10 * * *", Description: "检查 OpeniLink 待回复消息", Command: "scheduler.Run(openilink_reply_reminder)", Status: jobStatus},
 		{Name: "backup_postgres", Schedule: "30 3 * * *", Description: "创建 PostgreSQL 一致性备份", Command: "scheduler.Run(backup_postgres)", Status: jobStatus},
 	}
 	if s.options.GitHubBackupEnabled {
@@ -270,21 +269,21 @@ func (s *DashboardService) TradingSummary() TradingPage {
 	}
 }
 
-// NotificationsSummary 返回统一 OpeniLink 通知渠道状态。
+// NotificationsSummary 返回统一企业微信通知渠道状态。
 // 输入：无。
 // 输出：返回渠道配置状态和接收方数量。
 // 副作用：无，不发送通知。
 func (s *DashboardService) NotificationsSummary() NotificationsPage {
-	// 1. 只保留项目最终使用的 OpeniLink 微信通道。
-	value := configuredValue(s.options.OpenILinkConfigured)
+	// 1. 只保留项目最终使用的企业微信群机器人通道。
+	value := configuredValue(s.options.WeComBotConfigured)
 	receiverCount := 0
-	if s.options.OpenILinkConfigured {
+	if s.options.WeComBotConfigured {
 		receiverCount = 1
 	}
 	return NotificationsPage{
 		Title:         "通知",
-		Description:   "OpeniLink 统一发送任务失败提醒和业务消息。",
-		Channels:      []Item{{Name: "微信", Value: value, Description: "OpeniLink Hub 通知"}},
+		Description:   "企业微信群机器人统一发送纯文本任务提醒。",
+		Channels:      []Item{{Name: "微信", Value: value, Description: "企业微信 Webhook 纯文本通知"}},
 		ReceiverCount: receiverCount,
 	}
 }
@@ -326,7 +325,7 @@ func moduleList() []Item {
 		{Name: "量化工具", Description: "回测、数据和交易能力入口", Status: "3 个页面"},
 		{Name: "内容服务", Description: "微信读书和工作导航", Status: "2 个页面"},
 		{Name: "系统运维", Description: "监控、定时任务、通知和权限管理", Status: "4 个页面"},
-		{Name: "外部联动", Description: "RSS、DeepSeek、OpeniLink 和阿里 OCR", Status: "已接入"},
+		{Name: "外部联动", Description: "RSS、Sub2API、DeepSeek、企业微信和阿里 OCR", Status: "已接入"},
 	}
 }
 

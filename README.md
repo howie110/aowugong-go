@@ -8,7 +8,7 @@
 - 前端：React、TypeScript、Vite、shadcn/ui、Tailwind CSS
 - 数据库：PostgreSQL 15+，连接池默认 `8/4`，时区 `Asia/Shanghai`
 - 调度：`robfig/cron/v3`，任务统一经过并发锁、超时、panic 恢复、日志、结果入库和失败微信通知
-- 外部服务：微信读书、微信公众号原文、Miniflux、Sub2API、DeepSeek、Tushare、OpeniLink Hub、阿里云 OCR
+- 外部服务：微信读书、微信公众号原文、Miniflux、Sub2API、DeepSeek、Tushare、企业微信群机器人、阿里云 OCR
 - 生产：Linux amd64 发布产物、systemd；Go 服务无需 Go、Node、Python 或 MySQL，公网 TLS 复用 Vaultwarden 的 Caddy 容器与 IP 证书
 
 ## 目录
@@ -91,7 +91,6 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 | 09:00 | `test_crontab` | 每日任务链路测试 |
 | 22:00 | `check_service_monitors` | 服务连通性检查 |
 | 09:30 | `check_subscription_expiry_notify` | 订阅到期提醒 |
-| 10:00 | `openilink_reply_reminder` | OpeniLink 待回复提醒 |
 | 03:30 | `backup_postgres` | PostgreSQL 一致性备份 |
 | 周日 04:00 | `backup_github_code` | 启用后备份账号自有仓库及两个固定组织仓库 |
 | 周日 05:00 | `email_vaultwarden_backup` | 加密最新 Vaultwarden 备份并发送到异地邮箱 |
@@ -104,7 +103,7 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 /opt/aowugong-go/current/aowugong job email_vaultwarden_backup
 ```
 
-任务失败通知固定包含“任务、时间、状态、信息”，并统一通过 OpeniLink Hub 发送。
+任务失败通知固定包含“任务、时间、状态、信息”，并统一通过企业微信群机器人发送纯文本，兼容企业微信的微信插件查看。
 
 GitHub 代码备份默认关闭，通过 GitHub API 自动发现认证账号拥有的全部公有和私有仓库，再额外包含 `GITHUB_BACKUP_REQUIRED_REPOSITORIES` 中的组织仓库，当前固定为 `KES-IT/KES-SCM` 和 `KES-IT/KES-BIS`，不会枚举其他组织项目。每个项目保存为裸 Git 仓库，更新前的分支和标签保留在内部历史引用中；仓库失去权限或不再被发现时只记录状态，不删除最后副本。备份默认写入 `AOWUGONG_BACKUP_DIR/github`。
 

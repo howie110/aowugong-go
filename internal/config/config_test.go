@@ -75,6 +75,7 @@ func TestEnvironmentExampleUsesPostgresRuntimeSettings(t *testing.T) {
 		"GITHUB_BACKUP_ENABLED=", "GITHUB_BACKUP_TOKEN=", "GITHUB_BACKUP_REQUIRED_REPOSITORIES=KES-IT/KES-SCM,KES-IT/KES-BIS",
 		"VAULTWARDEN_BACKUP_EMAIL_ENABLED=", "VAULTWARDEN_BACKUP_RECOVERY_SCRIPTS_DIR=", "VAULTWARDEN_BACKUP_AGE_RECIPIENT=", "SMTP_EMAIL=", "SMTP_PASSWORD=",
 		"SUB2API_BASE_URL=", "SUB2API_API_KEY=", "SUB2API_MODELS=", "SUB2API_DEFAULT_MODEL=gpt-5.6-luna",
+		"WECOM_BOT_WEBHOOK_URL=",
 	} {
 		if !strings.Contains(string(content), key) {
 			t.Errorf(".env.example missing %s", key)
@@ -241,6 +242,18 @@ func TestLoadUsesMinifluxOverrides(t *testing.T) {
 		cfg.Clients.Miniflux.MonitorURL != "http://8.138.123.59:5000/" ||
 		cfg.Clients.Miniflux.APIToken != "test-token" || cfg.Clients.Miniflux.Category != "投资文章" {
 		t.Errorf("Clients.Miniflux = %#v", cfg.Clients.Miniflux)
+	}
+}
+
+// TestLoadUsesWeComBotWebhook 验证企业微信群机器人只从项目环境读取 Webhook。
+func TestLoadUsesWeComBotWebhook(t *testing.T) {
+	const webhook = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key"
+	cfg, err := Load(newLookup(map[string]string{"WECOM_BOT_WEBHOOK_URL": webhook}))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Clients.WeComBot.WebhookURL != webhook {
+		t.Errorf("WeComBot.WebhookURL = %q", cfg.Clients.WeComBot.WebhookURL)
 	}
 }
 

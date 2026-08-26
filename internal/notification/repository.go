@@ -1,4 +1,4 @@
-// Package notification 提供统一业务通知、OpeniLink 调用和发送日志。
+// Package notification 提供统一业务通知、企业微信调用和发送日志。
 package notification
 
 import (

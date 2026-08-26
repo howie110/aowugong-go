@@ -66,7 +66,7 @@ func TestManualOnlyDefinitionRejectsSchedulerSource(t *testing.T) {
 // 输入：上下文、标题、正文和接收人。
 // 输出：始终返回 nil。
 // 副作用：修改测试通知器的 body 字段。
-func (n *fakeNotifier) Text(_ context.Context, _ []string, body, _ string) error {
+func (n *fakeNotifier) Text(_ context.Context, _ []string, body string) error {
 	// 1. 保存正文供断言四段格式。
 	n.body = body
 	n.count++

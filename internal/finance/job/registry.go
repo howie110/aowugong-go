@@ -42,7 +42,7 @@ type SubscriptionLister interface {
 
 // NotificationSender 定义业务任务需要的统一文本通知入口。
 type NotificationSender interface {
-	Text(ctx context.Context, titleParts []string, body, to string) error
+	Text(ctx context.Context, titleParts []string, body string) error
 }
 
 // GitHubCodeBackuper 定义固定白名单仓库的代码冷备份入口。
@@ -104,7 +104,6 @@ func RegisterAll(registry *scheduler.Registry, dependencies Dependencies) error 
 		{Name: "rebuild_investment_signal_groups", Description: "全局重建投资信号概念组", ManualOnly: true, ConcurrencyKey: "investment_signal_groups", Timeout: 30 * time.Minute, Run: taskSet.rebuildInvestmentSignalGroups},
 		{Name: "check_service_monitors", Description: "检查服务连通性", Schedule: "0 22 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkServiceMonitors},
 		{Name: "check_subscription_expiry_notify", Description: "检查订阅到期并提醒", Schedule: "30 9 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkSubscriptionExpiryNotify},
-		{Name: "openilink_reply_reminder", Description: "提醒回复 OpeniLink Bot", Schedule: "0 10 * * *", Timeout: 5 * time.Minute, Run: taskSet.openILinkReplyReminder},
 		{Name: "backup_postgres", Description: "创建 PostgreSQL 一致性备份", Schedule: "30 3 * * *", Timeout: 2 * time.Hour, Run: taskSet.backupPostgres},
 	}
 	if dependencies.GitHubBackup != nil {
@@ -222,23 +221,10 @@ func (t *tasks) checkSubscriptionExpiryNotify(ctx context.Context) (string, erro
 
 	// 2. 使用统一通知服务发送一条合并提醒。
 	body := buildSubscriptionBody(records, t.dependencies.Now())
-	if err := t.dependencies.Notification.Text(ctx, []string{"AOWUGONG", "SUBSCRIPTION", "EXPIRY"}, body, ""); err != nil {
+	if err := t.dependencies.Notification.Text(ctx, []string{"AOWUGONG", "SUBSCRIPTION", "EXPIRY"}, body); err != nil {
 		return "", fmt.Errorf("发送订阅到期提醒: %w", err)
 	}
 	return fmt.Sprintf("已提醒 %d 个十天后到期的订阅", len(records)), nil
-}
-
-// openILinkReplyReminder 发送每日 OpeniLink 回复保活提醒。
-// 输入：ctx 是任务超时上下文。
-// 输出：发送成功返回摘要，失败时返回错误。
-// 副作用：调用统一通知服务发送微信并写 PostgreSQL 日志。
-func (t *tasks) openILinkReplyReminder(ctx context.Context) (string, error) {
-	// 1. 发送固定短提醒以维持微信消息窗口。
-	body := "OpeniLink 每日保活提醒：请回复机器人任意一句，保持微信通知通道可用。"
-	if err := t.dependencies.Notification.Text(ctx, []string{"AOWUGONG", "OPENILINK", "REMINDER"}, body, ""); err != nil {
-		return "", fmt.Errorf("发送 OpeniLink 回复提醒: %w", err)
-	}
-	return "OpeniLink 回复提醒已发送", nil
 }
 
 // backupPostgres 创建应用数据库一致性备份并执行保留策略。
@@ -277,7 +263,7 @@ func (t *tasks) backupGitHubCode(ctx context.Context) (string, error) {
 		"- 信息：" + message,
 	}, "\n")
 	if err := t.dependencies.Notification.Text(ctx,
-		[]string{"AOWUGONG", "GITHUB", "BACKUP"}, body, ""); err != nil {
+		[]string{"AOWUGONG", "GITHUB", "BACKUP"}, body); err != nil {
 		return message, fmt.Errorf("发送 GitHub 代码备份成功通知: %w", err)
 	}
 	return message, nil

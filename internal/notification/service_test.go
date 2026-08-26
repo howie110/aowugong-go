@@ -17,32 +17,14 @@ type fakeSender struct {
 // 输入：上下文、正文和接收人。
 // 输出：成功时返回 ok 响应，失败时返回预设错误。
 // 副作用：修改测试发送器的 text 字段。
-func (s *fakeSender) SendText(_ context.Context, content, _ string) (map[string]any, error) {
+func (s *fakeSender) SendText(_ context.Context, content string) error {
 	// 1. 保存正文并返回预设结果。
 	s.text = content
-	return map[string]any{"ok": s.error == nil}, s.error
-}
-
-// SendFile 模拟发送本地文件。
-// 输入：上下文、路径和接收人。
-// 输出：成功时返回 ok 响应，失败时返回预设错误。
-// 副作用：无。
-func (s *fakeSender) SendFile(_ context.Context, _, _ string) (map[string]any, error) {
-	// 1. 返回预设结果。
-	return map[string]any{"ok": s.error == nil}, s.error
-}
-
-// SendImage 模拟发送本地图片。
-// 输入：上下文、路径和接收人。
-// 输出：成功时返回 ok 响应，失败时返回预设错误。
-// 副作用：无。
-func (s *fakeSender) SendImage(_ context.Context, _, _ string) (map[string]any, error) {
-	// 1. 返回预设结果。
-	return map[string]any{"ok": s.error == nil}, s.error
+	return s.error
 }
 
 // TestServiceFormatsTextAndWritesNotificationLog 验证统一标题格式和发送日志。
-// 输入：三级标题、正文和成功的模拟 OpeniLink 发送器。
+// 输入：三级标题、正文和成功的模拟企业微信发送器。
 // 输出：发送统一文本，并在 SQLite 写入 success 日志。
 // 副作用：创建并写入隔离 SQLite 测试 schema。
 func TestServiceFormatsTextAndWritesNotificationLog(t *testing.T) {
@@ -53,7 +35,7 @@ func TestServiceFormatsTextAndWritesNotificationLog(t *testing.T) {
 	service := NewService(NewRepository(db), sender)
 
 	// 2. 发送通知并核对统一文本。
-	if err := service.Text(ctx, []string{"AOWUGONG", "JOB", "ERROR"}, "任务失败", ""); err != nil {
+	if err := service.Text(ctx, []string{"AOWUGONG", "JOB", "ERROR"}, "任务失败"); err != nil {
 		t.Fatalf("Text() error = %v", err)
 	}
 	if sender.text != "【AOWUGONG / JOB / ERROR】\n\n任务失败" {
@@ -81,7 +63,7 @@ func TestServiceLogsSendFailureAndReturnsError(t *testing.T) {
 	service := NewService(NewRepository(db), &fakeSender{error: errors.New("hub unavailable")})
 
 	// 2. 发送并确认错误传播及失败日志。
-	if err := service.Text(ctx, []string{"TEST"}, "失败", ""); err == nil {
+	if err := service.Text(ctx, []string{"TEST"}, "失败"); err == nil {
 		t.Fatal("Text() error = nil, want send error")
 	}
 	var status, errorMessage string

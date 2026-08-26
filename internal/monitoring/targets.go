@@ -42,22 +42,6 @@ func BuildTargets(cfg config.Clients) []Target {
 			ProbeURL: endpointURL(minifluxProbeURL, "/healthcheck"), Description: textPointer("投资文章订阅与聚合服务"),
 		})
 	}
-	openILinkURL := strings.TrimSpace(cfg.OpenILink.MonitorURL)
-	if openILinkURL == "" {
-		openILinkURL = strings.TrimSpace(cfg.OpenILink.HubURL)
-	}
-	openILinkProbeURL := strings.TrimSpace(cfg.OpenILink.HubURL)
-	if openILinkProbeURL == "" {
-		openILinkProbeURL = openILinkURL
-	}
-	if openILinkURL != "" {
-		targets = append(targets, Target{
-			Code: "openilink-hub", Name: "openilink/openilink-hub", URL: openILinkURL,
-			ProbeURL:    endpointURL(openILinkProbeURL, "/bot/v1/message/send"),
-			Description: textPointer("静默验证微信通知链路"),
-		})
-	}
-
 	// 3. 合并有效额外目标并保留 code 第一次出现的目标。
 	targets = append(targets, parseExtraTargets(cfg.ServiceMonitorTargets)...)
 	seen := make(map[string]struct{}, len(targets))
