@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -163,23 +164,31 @@ func (s *Service) Summary(ctx context.Context) (Summary, error) {
 	}, nil
 }
 
-// ListExpiring 返回正好在指定天数后到期的有效订阅。
-// 输入：ctx 是调用上下文，reminderDays 是提前提醒天数。
-// 输出：返回匹配记录。
+// ListActive 返回所有当前有效订阅。
+// 输入：ctx 是调用上下文。
+// 输出：返回按到期日升序排列的有效记录。
 // 副作用：读取 PostgreSQL，空表时写入默认记录。
-func (s *Service) ListExpiring(ctx context.Context, reminderDays int) ([]Record, error) {
+func (s *Service) ListActive(ctx context.Context) ([]Record, error) {
 	// 1. 复用列表中的实时状态和天数计算。
 	records, err := s.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	expiring := make([]Record, 0)
+	active := make([]Record, 0)
 	for _, record := range records {
-		if record.CurrentStatus == "订阅中" && record.DaysUntilExpiry == reminderDays {
-			expiring = append(expiring, record)
+		if record.CurrentStatus == "订阅中" && record.DaysUntilExpiry >= 0 {
+			active = append(active, record)
 		}
 	}
-	return expiring, nil
+
+	// 2. 最先到期的服务排在前面，同日按服务名稳定排序。
+	sort.SliceStable(active, func(left, right int) bool {
+		if active[left].ExpiresOn == active[right].ExpiresOn {
+			return active[left].ServiceName < active[right].ServiceName
+		}
+		return active[left].ExpiresOn < active[right].ExpiresOn
+	})
+	return active, nil
 }
 
 // normalizeRequest 统一清洗订阅文本、金额和日期。

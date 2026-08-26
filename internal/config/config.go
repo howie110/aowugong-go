@@ -12,6 +12,7 @@ import (
 const (
 	defaultEnvironment        = "development"
 	defaultHTTPAddress        = "0.0.0.0:2345"
+	defaultPublicURL          = "https://8.138.123.59:2345"
 	defaultPostgresURL        = "postgres://aowugong@127.0.0.1:5432/aowugong?sslmode=disable"
 	defaultPostgresMaxOpen    = 8
 	defaultPostgresMaxIdle    = 4
@@ -50,6 +51,7 @@ type Config struct {
 // HTTP 描述 HTTP 服务配置。
 type HTTP struct {
 	Address   string
+	PublicURL string
 	StaticDir string
 }
 
@@ -203,6 +205,7 @@ func Load(lookup LookupEnv) (Config, error) {
 		SQLiteSourcePath: defaultSQLitePath,
 		HTTP: HTTP{
 			Address:   defaultHTTPAddress,
+			PublicURL: defaultPublicURL,
 			StaticDir: defaultStaticDir,
 		},
 		Database: Database{
@@ -258,6 +261,8 @@ func Load(lookup LookupEnv) (Config, error) {
 	if value, ok := lookup("AOWUGONG_HTTP_ADDRESS"); ok && strings.TrimSpace(value) != "" {
 		cfg.HTTP.Address = strings.TrimSpace(value)
 	}
+	loadString(lookup, "AOWUGONG_PUBLIC_URL", &cfg.HTTP.PublicURL)
+	cfg.HTTP.PublicURL = strings.TrimRight(cfg.HTTP.PublicURL, "/")
 	if value, ok := lookup("AOWUGONG_STATIC_DIR"); ok && strings.TrimSpace(value) != "" {
 		cfg.HTTP.StaticDir = strings.TrimSpace(value)
 	}

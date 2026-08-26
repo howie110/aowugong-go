@@ -90,7 +90,7 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 | 08:00、20:00 | `sync_investment_articles` | 从微信读书书架公众号增量抓取并分析投资文章 |
 | 09:00 | `test_crontab` | 每日任务链路测试 |
 | 22:00 | `check_service_monitors` | 服务连通性检查 |
-| 09:30 | `check_subscription_expiry_notify` | 订阅到期提醒 |
+| 每月 1 日 09:30 | `check_subscription_expiry_notify` | 汇总所有有效订阅，按到期日从近到远发送月报 |
 | 03:30 | `backup_postgres` | PostgreSQL 一致性备份 |
 | 周日 04:00 | `backup_github_code` | 启用后备份账号自有仓库及两个固定组织仓库 |
 | 周日 05:00 | `email_vaultwarden_backup` | 加密最新 Vaultwarden 备份并发送到异地邮箱 |

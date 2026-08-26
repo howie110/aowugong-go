@@ -105,6 +105,7 @@ configure_runtime_env() {
   set_env_value "$file" AOWUGONG_POSITION_TEMP_DIR "$APP_ROOT/shared/storage/temp/positions"
   set_env_value "$file" VPN_SOURCE_DIR "$APP_ROOT/shared/storage/private/vpn"
   set_env_value "$file" VPN_PUBLIC_URL "$VPN_PUBLIC_URL"
+  set_env_value "$file" AOWUGONG_PUBLIC_URL "$VPN_PUBLIC_URL"
   set_env_value "$file" AOWUGONG_SCHEDULER_ENABLED "$SCHEDULER_ENABLED"
   chown "$RUN_USER:$RUN_GROUP" "$file"
 }

@@ -23,8 +23,8 @@ func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 	if cfg.Environment != "development" {
 		t.Errorf("Environment = %q, want development", cfg.Environment)
 	}
-	if cfg.HTTP.Address != "0.0.0.0:2345" {
-		t.Errorf("HTTP.Address = %q, want 0.0.0.0:2345", cfg.HTTP.Address)
+	if cfg.HTTP.Address != "0.0.0.0:2345" || cfg.HTTP.PublicURL != "https://8.138.123.59:2345" {
+		t.Errorf("HTTP = %#v", cfg.HTTP)
 	}
 
 	// 3. 断言令牌有效期和默认 PostgreSQL 连接参数。
@@ -69,7 +69,7 @@ func TestEnvironmentExampleUsesPostgresRuntimeSettings(t *testing.T) {
 
 	// 2. 断言示例包含 PostgreSQL、一次性 SQLite 来源和 Miniflux API。
 	for _, key := range []string{
-		"AOWUGONG_DATABASE_URL=", "AOWUGONG_DATABASE_MAX_OPEN_CONNS=",
+		"AOWUGONG_PUBLIC_URL=", "AOWUGONG_DATABASE_URL=", "AOWUGONG_DATABASE_MAX_OPEN_CONNS=",
 		"AOWUGONG_DATABASE_CONN_MAX_LIFETIME_MINUTES=", "AOWUGONG_SQLITE_SOURCE_PATH=",
 		"MINIFLUX_BASE_URL=", "MINIFLUX_MONITOR_URL=", "MINIFLUX_API_TOKEN=", "MINIFLUX_CATEGORY=",
 		"GITHUB_BACKUP_ENABLED=", "GITHUB_BACKUP_TOKEN=", "GITHUB_BACKUP_REQUIRED_REPOSITORIES=KES-IT/KES-SCM,KES-IT/KES-BIS",

@@ -220,7 +220,7 @@ func (s *DashboardService) JobsSummary() JobsPage {
 		{Name: "sync_investment_articles", Schedule: "仅手动", Description: "手动同步并分析投资文章", Command: "scheduler.Run(sync_investment_articles)", Status: "manual"},
 		{Name: "rebuild_investment_signal_groups", Schedule: "仅手动", Description: "全局重建投资信号概念组", Command: "scheduler.Run(rebuild_investment_signal_groups)", Status: "manual"},
 		{Name: "check_service_monitors", Schedule: "0 22 * * *", Description: "检查服务连通性", Command: "scheduler.Run(check_service_monitors)", Status: jobStatus},
-		{Name: "check_subscription_expiry_notify", Schedule: "30 9 * * *", Description: "检查订阅到期并提醒", Command: "scheduler.Run(check_subscription_expiry_notify)", Status: jobStatus},
+		{Name: "check_subscription_expiry_notify", Schedule: "30 9 1 * *", Description: "每月汇总所有有效订阅", Command: "scheduler.Run(check_subscription_expiry_notify)", Status: jobStatus},
 		{Name: "backup_postgres", Schedule: "30 3 * * *", Description: "创建 PostgreSQL 一致性备份", Command: "scheduler.Run(backup_postgres)", Status: jobStatus},
 	}
 	if s.options.GitHubBackupEnabled {

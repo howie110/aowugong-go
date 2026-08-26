@@ -17,8 +17,6 @@ import (
 	"github.com/howiedata/aowugong-go/internal/vaultwardenbackup"
 )
 
-const subscriptionReminderDays = 10
-
 // DataUpdater 定义日线更新任务使用的业务入口。
 type DataUpdater interface {
 	UpdateDaily(ctx context.Context) (financedata.SyncResult, error)
@@ -37,7 +35,7 @@ type Monitor interface {
 
 // SubscriptionLister 定义订阅提醒任务使用的到期筛选入口。
 type SubscriptionLister interface {
-	ListExpiring(ctx context.Context, reminderDays int) ([]subscription.Record, error)
+	ListActive(ctx context.Context) ([]subscription.Record, error)
 }
 
 // NotificationSender 定义业务任务需要的统一文本通知入口。
@@ -70,6 +68,7 @@ type Dependencies struct {
 	VaultwardenBackup VaultwardenBackupMailer
 	BackupDir         string
 	BackupRetention   int
+	SubscriptionURL   string
 	Now               func() time.Time
 	Backup            BackupFunc
 }
@@ -103,7 +102,7 @@ func RegisterAll(registry *scheduler.Registry, dependencies Dependencies) error 
 		{Name: "sync_investment_articles", Description: "手动同步并分析投资文章", ManualOnly: true, ConcurrencyKey: "investment_signal_groups", Timeout: 3 * time.Hour, Run: taskSet.syncInvestmentArticles},
 		{Name: "rebuild_investment_signal_groups", Description: "全局重建投资信号概念组", ManualOnly: true, ConcurrencyKey: "investment_signal_groups", Timeout: 30 * time.Minute, Run: taskSet.rebuildInvestmentSignalGroups},
 		{Name: "check_service_monitors", Description: "检查服务连通性", Schedule: "0 22 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkServiceMonitors},
-		{Name: "check_subscription_expiry_notify", Description: "检查订阅到期并提醒", Schedule: "30 9 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkSubscriptionExpiryNotify},
+		{Name: "check_subscription_expiry_notify", Description: "发送有效订阅月报", Schedule: "30 9 1 * *", Timeout: 10 * time.Minute, Run: taskSet.checkSubscriptionExpiryNotify},
 		{Name: "backup_postgres", Description: "创建 PostgreSQL 一致性备份", Schedule: "30 3 * * *", Timeout: 2 * time.Hour, Run: taskSet.backupPostgres},
 	}
 	if dependencies.GitHubBackup != nil {
@@ -205,26 +204,26 @@ func (t *tasks) checkServiceMonitors(ctx context.Context) (string, error) {
 	return message, nil
 }
 
-// checkSubscriptionExpiryNotify 检查正好十天后到期的订阅并发送微信提醒。
+// checkSubscriptionExpiryNotify 汇总所有当前有效订阅并发送微信月报。
 // 输入：ctx 是任务超时上下文。
 // 输出：返回检查或提醒数量；查询和发送失败时返回错误。
 // 副作用：读取 PostgreSQL，命中记录时调用统一通知服务发送微信并写日志。
 func (t *tasks) checkSubscriptionExpiryNotify(ctx context.Context) (string, error) {
-	// 1. 复用订阅服务的业务日期和精确到期筛选。
-	records, err := t.dependencies.Subscriptions.ListExpiring(ctx, subscriptionReminderDays)
+	// 1. 复用订阅服务按到期时间排列的有效订阅结果。
+	records, err := t.dependencies.Subscriptions.ListActive(ctx)
 	if err != nil {
 		return "", fmt.Errorf("检查订阅到期: %w", err)
 	}
 	if len(records) == 0 {
-		return "没有距离到期 10 天的订阅", nil
+		return "当前没有有效订阅", nil
 	}
 
 	// 2. 使用统一通知服务发送一条合并提醒。
-	body := buildSubscriptionBody(records, t.dependencies.Now())
+	body := buildSubscriptionBody(records, t.dependencies.Now(), t.dependencies.SubscriptionURL)
 	if err := t.dependencies.Notification.Text(ctx, []string{"AOWUGONG", "SUBSCRIPTION", "EXPIRY"}, body); err != nil {
 		return "", fmt.Errorf("发送订阅到期提醒: %w", err)
 	}
-	return fmt.Sprintf("已提醒 %d 个十天后到期的订阅", len(records)), nil
+	return fmt.Sprintf("已发送有效订阅月报，共 %d 个", len(records)), nil
 }
 
 // backupPostgres 创建应用数据库一致性备份并执行保留策略。
@@ -285,16 +284,19 @@ func (t *tasks) emailVaultwardenBackup(ctx context.Context) (string, error) {
 }
 
 // buildSubscriptionBody 组装订阅到期微信提醒正文。
-// 输入：records 是十天后到期记录，now 是通知时间。
+// 输入：records 是当前有效订阅，now 是通知时间。
 // 输出：返回按记录逐行展示的正文。
 // 副作用：无。
-func buildSubscriptionBody(records []subscription.Record, now time.Time) string {
+func buildSubscriptionBody(records []subscription.Record, now time.Time, subscriptionURL string) string {
 	// 1. 写入时间、状态并逐条追加费用与剩余天数。
 	lines := []string{
 		"- 时间：" + now.Format("2006-01-02 15:04:05"),
-		fmt.Sprintf("- 状态：发现 %d 个订阅将在 %d 天后到期", len(records), subscriptionReminderDays),
-		"",
+		fmt.Sprintf("- 状态：当前共有 %d 个有效订阅", len(records)),
 	}
+	if strings.TrimSpace(subscriptionURL) != "" {
+		lines = append(lines, "- 管理："+strings.TrimSpace(subscriptionURL))
+	}
+	lines = append(lines, "")
 	for _, record := range records {
 		lines = append(lines, fmt.Sprintf("- %s：%s 到期，剩余 %d 天，年费 %s，月费 %s",
 			record.ServiceName, record.ExpiresOn, record.DaysUntilExpiry, record.AnnualFee, record.MonthlyFee))

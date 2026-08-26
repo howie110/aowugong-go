@@ -65,22 +65,40 @@ func TestServiceCRUDAndDerivedStatus(t *testing.T) {
 	}
 }
 
-// TestServiceListExpiringUsesExactReminderDay 验证到期提醒只匹配正好提前指定天数的记录。
-// 输入：固定业务日期和多个不同到期日订阅。
-// 输出：只返回精确命中提醒日的记录。
+// TestServiceListActiveUsesAllFutureRecordsAndAscendingOrder 验证月报包含全部有效订阅并按到期时间排列。
+// 输入：固定业务日期以及当天、近期、远期和已过期订阅。
+// 输出：返回所有未过期订阅，并按到期日升序排列。
 // 副作用：创建并写入临时 SQLite。
-func TestServiceListExpiringUsesExactReminderDay(t *testing.T) {
-	// 1. 使用默认六条订阅并把当前日期固定在一条记录到期前十天。
+func TestServiceListActiveUsesAllFutureRecordsAndAscendingOrder(t *testing.T) {
+	// 1. 固定 11 月 1 日，并补充当天、远期和过期记录。
 	service := newTestService(t)
-	service.today = func() time.Time { return time.Date(2027, time.February, 25, 0, 0, 0, 0, time.Local) }
-
-	// 2. 只应返回 2027-03-07 到期的阿里云服务器。
-	records, err := service.ListExpiring(context.Background(), 10)
-	if err != nil {
-		t.Fatalf("ListExpiring() error = %v", err)
+	service.today = func() time.Time { return time.Date(2026, time.November, 1, 0, 0, 0, 0, time.Local) }
+	if _, err := service.List(context.Background()); err != nil {
+		t.Fatalf("seed defaults: %v", err)
 	}
-	if len(records) != 1 || records[0].ServiceName != "阿里云服务器" {
-		t.Errorf("records = %#v, want 阿里云服务器", records)
+	for _, request := range []WriteRequest{
+		{ServiceName: "当天到期", Category: "IT", ExpiresOn: "2026-11-01"},
+		{ServiceName: "远期订阅", Category: "IT", ExpiresOn: "2028-05-02"},
+		{ServiceName: "已经过期", Category: "IT", ExpiresOn: "2026-10-31"},
+	} {
+		if _, err := service.Create(context.Background(), request, "admin"); err != nil {
+			t.Fatalf("Create(%s) error = %v", request.ServiceName, err)
+		}
+	}
+
+	// 2. 远期、默认两项和当天记录均应返回，已过期记录不得出现。
+	records, err := service.ListActive(context.Background())
+	if err != nil {
+		t.Fatalf("ListActive() error = %v", err)
+	}
+	want := []string{"当天到期", "阿里云服务器", "B站", "阿里云域名aowugong.top", "远期订阅"}
+	if len(records) != len(want) {
+		t.Fatalf("records = %#v, want %v", records, want)
+	}
+	for index, name := range want {
+		if records[index].ServiceName != name {
+			t.Errorf("records[%d] = %q, want %q", index, records[index].ServiceName, name)
+		}
 	}
 }
 

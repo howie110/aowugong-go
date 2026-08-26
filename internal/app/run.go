@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/auth"
@@ -376,7 +377,8 @@ func newJobRegistry(cfg config.Config, db *sql.DB, services taskServices) (*sche
 		DB: db, Data: services.data, Articles: services.articles,
 		Monitoring: services.monitoring, Subscriptions: services.subscriptions, Notification: services.notification,
 		BackupDir: backupDir, BackupRetention: backupRetention,
-		Backup: database.NewPostgresBackuper(cfg.Database.URL).Backup,
+		SubscriptionURL: strings.TrimRight(cfg.HTTP.PublicURL, "/") + "/subscriptions",
+		Backup:          database.NewPostgresBackuper(cfg.Database.URL).Backup,
 	}
 	// 3. 指针先判空再赋给接口，避免 typed nil 被误判为已启用的可选任务。
 	if services.githubBackup != nil {

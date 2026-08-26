@@ -82,15 +82,13 @@ func (fakeMonitor) CheckAll(context.Context) (monitoring.CheckResult, error) {
 	return monitoring.CheckResult{}, nil
 }
 
-type fakeSubscription struct{}
+type fakeSubscription struct {
+	records []subscription.Record
+}
 
-// ListExpiring 返回空到期订阅列表。
-// 输入：上下文和提醒天数。
-// 输出：返回空列表。
-// 副作用：无。
-func (fakeSubscription) ListExpiring(context.Context, int) ([]subscription.Record, error) {
-	// 1. 返回无需提醒的测试结果。
-	return []subscription.Record{}, nil
+// ListActive 返回测试指定的有效订阅列表。
+func (s fakeSubscription) ListActive(context.Context) ([]subscription.Record, error) {
+	return s.records, nil
 }
 
 type fakeNotification struct{}
@@ -175,7 +173,7 @@ func TestRegisterAllAddsNineProductionJobs(t *testing.T) {
 	wanted := map[string]string{
 		"test_crontab": "0 9 * * *", "update_tushare_daily_data": "",
 		"sync_investment_articles": "", "check_service_monitors": "0 22 * * *",
-		"check_subscription_expiry_notify": "30 9 * * *", "backup_postgres": "30 3 * * *",
+		"check_subscription_expiry_notify": "30 9 1 * *", "backup_postgres": "30 3 * * *",
 		"rebuild_investment_signal_groups": "",
 	}
 	for _, definition := range definitions {
@@ -285,6 +283,38 @@ func TestEmailVaultwardenBackupReturnsSummary(t *testing.T) {
 		if !strings.Contains(message, fragment) {
 			t.Errorf("message = %q, missing %q", message, fragment)
 		}
+	}
+}
+
+// TestCheckSubscriptionExpiryNotifySendsMonthlySummary 验证每月有效订阅汇总的正文顺序。
+func TestCheckSubscriptionExpiryNotifySendsMonthlySummary(t *testing.T) {
+	notification := &captureNotification{}
+	taskSet := &tasks{dependencies: Dependencies{
+		Subscriptions: fakeSubscription{
+			records: []subscription.Record{
+				{ServiceName: "较早到期", ExpiresOn: "2026-09-15", DaysUntilExpiry: 14, AnnualFee: "60.00", MonthlyFee: "5.00"},
+				{ServiceName: "较晚到期", ExpiresOn: "2028-03-01", DaysUntilExpiry: 546, AnnualFee: "120.00", MonthlyFee: "10.00"},
+			},
+		},
+		Notification:    notification,
+		SubscriptionURL: "https://aowugong.example.test/subscriptions",
+		Now:             func() time.Time { return time.Date(2026, 9, 1, 9, 30, 0, 0, time.Local) },
+	}}
+
+	message, err := taskSet.checkSubscriptionExpiryNotify(context.Background())
+	if err != nil {
+		t.Fatalf("checkSubscriptionExpiryNotify() error = %v", err)
+	}
+	if message != "已发送有效订阅月报，共 2 个" {
+		t.Errorf("message = %q", message)
+	}
+	for _, fragment := range []string{"当前共有 2 个有效订阅", "管理：https://aowugong.example.test/subscriptions", "较晚到期", "较早到期"} {
+		if !strings.Contains(notification.body, fragment) {
+			t.Errorf("notification = %q, missing %q", notification.body, fragment)
+		}
+	}
+	if strings.Index(notification.body, "较早到期") > strings.Index(notification.body, "较晚到期") {
+		t.Errorf("notification order = %q", notification.body)
 	}
 }
 
