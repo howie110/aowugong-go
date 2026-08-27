@@ -1,9 +1,7 @@
 import type { ArticleItem, TargetSignalStat } from "@/lib/article-analysis";
 
-export type AccountStat = {
-  name: string;
-  count: number;
-};
+export type SignalSortField = "net" | "total";
+export type SignalSortDirection = "asc" | "desc";
 
 export function formatShortDate(value?: string | null) {
   if (!value) {
@@ -36,18 +34,70 @@ export function formatSignalMembers(members: string[]) {
   return members.map((name) => name.trim()).filter(Boolean).join(" / ");
 }
 
-export function buildAccountStats(articles: ArticleItem[]) {
-  const counts = new Map<string, number>();
-  for (const article of articles) {
-    const name = getArticleAccountName(article);
-    if (!name) {
-      continue;
+/** sortSignals 按净数或总数排序全部概念组，并以名称稳定处理同值项。 */
+export function sortSignals(signals: TargetSignalStat[], field: SignalSortField, direction: SignalSortDirection) {
+  const valueOf = (signal: TargetSignalStat) =>
+    field === "net" ? signal.recommendation_count - signal.risk_count : signal.count;
+  return [...signals].sort((left, right) => {
+    const difference = valueOf(left) - valueOf(right);
+    if (difference) {
+      return direction === "asc" ? difference : -difference;
     }
-    counts.set(name, (counts.get(name) || 0) + 1);
+    return left.name.localeCompare(right.name, "zh-CN");
+  });
+}
+
+/** withSignalNetHistory 为旧版报告补算概念组每日推荐减风险净数，服务端已有数据时原样保留。 */
+export function withSignalNetHistory(
+  signals: TargetSignalStat[],
+  articles: ArticleItem[],
+  days: number,
+  endDate = new Date(),
+) {
+  // 1. 生成固定天数的本地日期序列，并为每个概念组建立原始标的索引。
+  const dates = buildDateRange(days, endDate);
+  const dateKeys = new Set(dates);
+  const signalByMember = new Map<string, number>();
+  signals.forEach((signal, signalIndex) => {
+    for (const member of signal.members || []) {
+      const key = normalizeSignalName(member);
+      if (key && !signalByMember.has(key)) {
+        signalByMember.set(key, signalIndex);
+      }
+    }
+  });
+  const dailyCounts = signals.map(() => new Map<string, number>());
+
+  // 2. 使用页面已经加载的完整文章列表累计每日推荐和风险，不额外请求接口。
+  const addSignals = (date: string, names: string[], delta: number) => {
+    if (!dateKeys.has(date)) {
+      return;
+    }
+    for (const name of names) {
+      const signalIndex = signalByMember.get(normalizeSignalName(name));
+      if (signalIndex === undefined) {
+        continue;
+      }
+      const counts = dailyCounts[signalIndex];
+      counts.set(date, (counts.get(date) || 0) + delta);
+    }
+  };
+  for (const article of articles) {
+    const date = articleDate(article);
+    addSignals(date, article.recommendation_names || [], 1);
+    addSignals(date, article.risk_names || [], -1);
   }
-  return Array.from(counts.entries())
-    .map(([name, count]) => ({ name, count }))
-    .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name, "zh-CN"));
+
+  // 3. 仅为缺少新版字段的报告补数据，确保后端正式口径上线后由后端优先。
+  return signals.map((signal, signalIndex) => {
+    if (signal.net_history?.length) {
+      return signal;
+    }
+    return {
+      ...signal,
+      net_history: dates.map((date) => ({ date, net_count: dailyCounts[signalIndex].get(date) || 0 })),
+    };
+  });
 }
 
 export function isSameSignal(left: TargetSignalStat | null, right: TargetSignalStat) {
@@ -58,19 +108,28 @@ export function getSignalToneClass(tone: "recommend" | "risk") {
   return tone === "recommend" ? "border-transparent bg-red-50 text-red-700" : "border-transparent bg-emerald-50 text-emerald-700";
 }
 
-function getArticleAccountName(article: ArticleItem) {
-  const title = article.title.trim();
-  const matched = title.match(/^[\[【]([^\]】]{1,20})[\]】]/);
-  if (matched?.[1]) {
-    return firstCharacter(matched[1]);
-  }
-  const author = (article.author || "").trim();
-  if (author && author !== article.source_name) {
-    return firstCharacter(author);
-  }
-  return "";
+function buildDateRange(days: number, endDate: Date) {
+  const safeDays = Math.max(1, Math.trunc(days));
+  const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+  return Array.from({ length: safeDays }, (_, index) => {
+    const date = new Date(end);
+    date.setDate(end.getDate() - (safeDays - index - 1));
+    return formatLocalDate(date);
+  });
 }
 
-function firstCharacter(value: string) {
-  return Array.from(value.trim())[0] || "";
+function formatLocalDate(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function articleDate(article: ArticleItem) {
+  const value = (article.published_at || article.created_at || "").trim();
+  return value.length >= 10 ? value.slice(0, 10) : value;
+}
+
+function normalizeSignalName(value: string) {
+  return value.trim().toLocaleLowerCase("zh-CN");
 }

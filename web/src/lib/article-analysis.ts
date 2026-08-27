@@ -47,11 +47,17 @@ export type ArticleDetail = ArticleItem & {
   analysis?: ArticleAnalysis | null;
 };
 
+export type SignalNetPoint = {
+  date: string;
+  net_count: number;
+};
+
 export type TargetSignalStat = {
   name: string;
   type: string;
   members: string[];
   member_net_counts?: Record<string, number>;
+  net_history?: SignalNetPoint[];
   recommendation_count: number;
   risk_count: number;
   count: number;
@@ -136,6 +142,8 @@ export type ArticleAnalysisModelChoice = {
 export type ArticleAnalysisModelSettings = {
   selected_model_id: string;
   selected_model: string;
+  analysis_prompt: string;
+  prompt_version: string;
   models: ArticleAnalysisModelChoice[];
 };
 

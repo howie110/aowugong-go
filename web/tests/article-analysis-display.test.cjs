@@ -6,11 +6,13 @@ const vm = require("node:vm");
 const ts = require("../node_modules/typescript");
 
 const pageUtilsPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/page-utils.ts");
-const pageSizePath = path.resolve(__dirname, "../src/pages/finance/article-analysis/use-responsive-table-page-size.ts");
 const signalRankPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/signal-rank-card.tsx");
+const signalNetTrendPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/signal-net-trend.tsx");
 const articleAnalysisPagePath = path.resolve(__dirname, "../src/pages/finance/article-analysis/index.tsx");
 const articlesCardPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/articles-card.tsx");
 const articleDrawerPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/article-detail-drawer.tsx");
+const articleFetchPagePath = path.resolve(__dirname, "../src/pages/finance/article-fetch.tsx");
+const summaryCardsPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/summary-cards.tsx");
 
 /** 编译并加载不含运行时外部依赖的文章页面工具。 */
 function loadPageUtils() {
@@ -23,22 +25,21 @@ function loadPageUtils() {
   return module.exports;
 }
 
-test("监控公众号列表只展示作者首字", () => {
-  const { buildAccountStats } = loadPageUtils();
-  const articles = [
-    { title: "普通标题", author: "长江证券研究所", source_name: "公众号聚合" },
-    { title: "另一标题", author: "长江证券研究所", source_name: "公众号聚合" },
-  ];
+test("分析页移除监控公众号并把提示词放入抓取页分析模型", () => {
+  const analysisPage = fs.readFileSync(articleAnalysisPagePath, "utf8");
+  const summaryCards = fs.readFileSync(summaryCardsPath, "utf8");
+  const fetchPage = fs.readFileSync(articleFetchPagePath, "utf8");
 
-  const stats = Array.from(buildAccountStats(articles));
-  assert.equal(stats.length, 1);
-  assert.equal(stats[0].name, "长");
-  assert.equal(stats[0].count, 2);
-});
-
-test("桌面信号榜默认保留十五行位置", () => {
-  const source = fs.readFileSync(pageSizePath, "utf8");
-  assert.match(source, /DEFAULT_DENSE_TABLE_PAGE_SIZE\s*=\s*15\s*;/);
+  assert.doesNotMatch(`${analysisPage}\n${summaryCards}`, /监控公众号|模型和提示词|MonitoredAccountsCard|ModelPromptCard/);
+  assert.match(fetchPage, /fetchArticleAnalysisModelSettings\(\)/);
+  assert.match(fetchPage, /fetchArticleReport\(1, 1\)/);
+  assert.match(fetchPage, /withPromptDetails\(nextModelSettings\)/);
+  assert.match(fetchPage, /当前提示词/);
+  assert.match(fetchPage, /<CollapsibleContent className="border-t">/);
+  assert.match(fetchPage, /whitespace-pre-wrap break-words px-3 py-4 text-sm leading-6/);
+  assert.doesNotMatch(fetchPage, /PopoverContent/);
+  assert.match(fetchPage, /modelSettings\?\.prompt_version/);
+  assert.match(fetchPage, /modelSettings\?\.analysis_prompt/);
 });
 
 test("概念组按全部成员筛选并支持精确筛选具体标的", () => {
@@ -73,8 +74,9 @@ test("信号榜使用 Accordion 展开可点击的具体标的", () => {
   assert.match(source, /<Accordion/);
   assert.match(source, /<AccordionTrigger/);
   assert.match(source, /<AccordionContent/);
-  assert.match(source, /<TableCell colSpan=\{4\}/);
-  assert.match(source, /absolute right-0 top-0/);
+  assert.match(source, /<TableCell colSpan=\{5\}/);
+  assert.match(source, /absolute right-1 top-14/);
+  assert.doesNotMatch(source, /absolute right-1 top-1\/2/);
   assert.match(source, /item\.members\.map/);
   assert.match(source, /onSelectMember\(item, member\)/);
   assert.match(source, /selectedMember === member/);
@@ -87,37 +89,92 @@ test("信号榜标的群标签显示各自净数", () => {
   assert.match(source, /<SignalNetCell[^>]*compact/);
 });
 
-test("概念组成员换行后分页只测真实行并允许降低行数", () => {
-  const pageSizeSource = fs.readFileSync(pageSizePath, "utf8");
+test("信号榜净数和总数列名旁提供升降序按钮", () => {
+  const cardSource = fs.readFileSync(signalRankPath, "utf8");
+  const pageSource = fs.readFileSync(articleAnalysisPagePath, "utf8");
+  assert.match(cardSource, /<SignalSortHeader label="净数" field="net"/);
+  assert.match(cardSource, /<SignalSortHeader label="总数" field="total"/);
+  assert.match(cardSource, /ArrowDown, ArrowUp, ArrowUpDown/);
+  assert.match(pageSource, /field: "total",\s*direction: "desc"/);
+  assert.match(pageSource, /setSignalPage\(1\)/);
+});
+
+test("信号榜排序作用于分页前的全部概念组", () => {
+  const { sortSignals } = loadPageUtils();
+  const signals = [
+    { name: "甲", recommendation_count: 3, risk_count: 1, count: 4 },
+    { name: "乙", recommendation_count: 1, risk_count: 5, count: 6 },
+    { name: "丙", recommendation_count: 4, risk_count: 1, count: 5 },
+  ];
+  assert.equal(Array.from(sortSignals(signals, "total", "desc"), (item) => item.name).join(""), "乙丙甲");
+  assert.equal(Array.from(sortSignals(signals, "net", "asc"), (item) => item.name).join(""), "乙甲丙");
+});
+
+test("信号榜占位行保持稳定行高", () => {
   const signalRankSource = fs.readFileSync(signalRankPath, "utf8");
-  assert.match(pageSizeSource, /MIN_DENSE_TABLE_PAGE_SIZE\s*=\s*3\s*;/);
-  assert.match(pageSizeSource, /tbody tr:not\(\[data-placeholder-row/);
   assert.match(signalRankSource, /data-placeholder-row="true"/);
 });
 
-test("桌面信号榜为完整成员和计数保留最小宽度", () => {
+test("信号榜和文章列表改为上下结构", () => {
   const source = fs.readFileSync(articleAnalysisPagePath, "utf8");
-  assert.match(source, /xl:grid-cols-\[minmax\(20rem,0\.7fr\)_minmax\(0,1\.3fr\)\]/);
+  const signalIndex = source.indexOf("<SignalRankCard");
+  const articlesIndex = source.indexOf("<ArticlesCard");
+  assert.ok(signalIndex >= 0 && articlesIndex > signalIndex);
+  assert.match(source, /<div className="space-y-4 \[&>\*\]:min-w-0">/);
+  assert.doesNotMatch(source, /xl:grid-cols-\[minmax\(20rem,0\.7fr\)_minmax\(0,1\.3fr\)\]/);
 });
 
-test("信号榜缩短标的列并为三位数字预留稳定列宽", () => {
+test("信号榜为每日净数图保留最大列宽和稳定行高", () => {
   const source = fs.readFileSync(signalRankPath, "utf8");
-  assert.match(source, /w-\[42%\]/);
-  assert.match(source, /w-\[25%\]/);
-  assert.match(source, /w-\[15%\]/);
   assert.match(source, /w-\[18%\]/);
-  assert.match(source, /grid-cols-\[42fr_25fr_15fr_18fr\]/);
-  assert.match(source, /pr-9 text-right/);
+  assert.match(source, /w-\[11%\]/);
+  assert.match(source, /w-\[7%\]/);
+  assert.match(source, /w-\[6%\]/);
+  assert.match(source, /w-\[58%\]/);
+  assert.match(source, /grid-cols-\[18fr_11fr_7fr_6fr_58fr\]/);
+  assert.match(source, /min-h-28/);
+  assert.match(source, /<SignalNetTrend points=\{item\.net_history \|\| \[\]\}/);
 });
 
-test("手机端信号榜缩小数字并使用更紧凑的独立列比例", () => {
+test("旧版报告可由文章列表补算六十天净数趋势", () => {
+  const { withSignalNetHistory } = loadPageUtils();
+  const signals = [
+    {
+      name: "证券行业",
+      type: "sector",
+      members: ["券商", "中信证券"],
+      recommendation_count: 1,
+      risk_count: 1,
+      count: 2,
+    },
+  ];
+  const articles = [
+    { published_at: "2026-08-26", recommendation_names: ["券商"], risk_names: [] },
+    { published_at: "2026-08-27", recommendation_names: [], risk_names: ["中信证券"] },
+  ];
+
+  const result = withSignalNetHistory(signals, articles, 3, new Date(2026, 7, 27));
+  assert.equal(
+    Array.from(result[0].net_history, (point) => `${point.date}:${point.net_count}`).join(","),
+    "2026-08-25:0,2026-08-26:1,2026-08-27:-1",
+  );
+});
+
+test("小屏信号榜保持图表宽度并允许横向滚动", () => {
   const source = fs.readFileSync(signalRankPath, "utf8");
-  assert.match(source, /grid-cols-\[45fr_22fr_14fr_19fr\]\s+sm:grid-cols-\[42fr_25fr_15fr_18fr\]/);
-  assert.match(source, /w-\[45%\][^"\n]*sm:w-\[42%\]/);
-  assert.match(source, /gap-0\.5[^"\n]*sm:gap-1/);
-  assert.match(source, /text-sm[^"\n]*sm:text-lg/);
-  assert.match(source, /pr-8[^"\n]*sm:pr-9/);
-  assert.match(source, /CardContent className="[^"\n]*px-3[^"\n]*sm:px-5/);
+  assert.match(source, /overflow-x-auto/);
+  assert.match(source, /min-w-\[64rem\]/);
+});
+
+test("净数变化图悬停显示日期和净数坐标", () => {
+  const source = fs.readFileSync(signalNetTrendPath, "utf8");
+  assert.match(source, /block h-24 w-\[30rem\] max-w-full/);
+  assert.doesNotMatch(source, /h-24 w-full/);
+  assert.match(source, /onPointerMove=\{handlePointerMove\}/);
+  assert.match(source, /onPointerLeave=\{\(\) => setHoveredIndex\(null\)\}/);
+  assert.match(source, /\{active\.date\}/);
+  assert.match(source, /净数 \{formatSigned\(active\.net_count\)\}/);
+  assert.match(source, /strokeDasharray="3 3"/);
 });
 
 test("文章筛选加载完整六十天窗口而不是旧的两百篇", () => {
@@ -125,11 +182,19 @@ test("文章筛选加载完整六十天窗口而不是旧的两百篇", () => {
   assert.match(source, /fetchArticles\(TARGET_DAYS,\s*5000\)/);
 });
 
-test("超长概念成员在桌面信号榜内可以纵向滚动", () => {
+test("信号榜固定每页八行以容纳清晰趋势图", () => {
+  const pageSource = fs.readFileSync(articleAnalysisPagePath, "utf8");
   const source = fs.readFileSync(signalRankPath, "utf8");
-  assert.match(source, /xl:overflow-y-auto/);
-  assert.match(source, /xl:\[scrollbar-gutter:stable\]/);
-  assert.doesNotMatch(source, /xl:h-full xl:overflow-hidden/);
+  assert.match(pageSource, /SIGNAL_PAGE_SIZE\s*=\s*8/);
+  assert.match(source, /h-28/);
+  assert.doesNotMatch(source, /xl:overflow-y-auto/);
+});
+
+test("文章列表固定每页二十行", () => {
+  const source = fs.readFileSync(articleAnalysisPagePath, "utf8");
+  assert.match(source, /ARTICLE_PAGE_SIZE\s*=\s*20/);
+  assert.match(source, /filteredArticles\.slice\(start, start \+ ARTICLE_PAGE_SIZE\)/);
+  assert.match(source, /pageSize=\{ARTICLE_PAGE_SIZE\}/);
 });
 
 test("文章列表移除标的群并用 Breadcrumb 展示筛选位置", () => {

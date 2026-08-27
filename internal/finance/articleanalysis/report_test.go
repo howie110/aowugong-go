@@ -126,6 +126,59 @@ func TestBuildSignalStatsReturnsEachMemberNetCount(t *testing.T) {
 	}
 }
 
+// TestBuildSignalStatsReturnsContinuousDailyNetHistory 验证概念组净数曲线按自然日补零。
+// 输入：同一概念在首尾日期分别净推荐和净风险，中间日期只有其他概念。
+// 输出：返回日期升序的 +1、0、-1 三个点。
+// 副作用：无。
+func TestBuildSignalStatsReturnsContinuousDailyNetHistory(t *testing.T) {
+	groups := []SignalGroup{
+		{ID: 1, Name: "证券行业", Type: "sector", Aliases: []string{"券商", "中信证券"}},
+		{ID: 2, Name: "黄金", Type: "commodity", Aliases: []string{"黄金"}},
+	}
+	rows := []analysisRow{
+		{Recommendations: []Signal{{Name: "券商"}}, OccurredAt: "2026-07-20 09:00:00"},
+		{Recommendations: []Signal{{Name: "黄金"}}, OccurredAt: "2026-07-19 09:00:00"},
+		{Risks: []Signal{{Name: "中信证券"}}, OccurredAt: "2026-07-18 09:00:00"},
+	}
+
+	result := buildSignalStats(rows, groups)
+	if len(result) != 2 {
+		t.Fatalf("signals = %#v, want two groups", result)
+	}
+	var history []SignalNetPoint
+	for _, item := range result {
+		if item.Name == "证券行业" {
+			history = item.NetHistory
+		}
+	}
+	want := []SignalNetPoint{{Date: "2026-07-18", NetCount: -1}, {Date: "2026-07-19", NetCount: 0}, {Date: "2026-07-20", NetCount: 1}}
+	if len(history) != len(want) {
+		t.Fatalf("history = %#v, want %#v", history, want)
+	}
+	for index := range want {
+		if history[index] != want[index] {
+			t.Fatalf("history[%d] = %#v, want %#v", index, history[index], want[index])
+		}
+	}
+}
+
+// TestBuildSignalStatsUsesRequestedHistoryRange 验证报告日期窗口首尾无信号时仍返回零点。
+func TestBuildSignalStatsUsesRequestedHistoryRange(t *testing.T) {
+	groups := []SignalGroup{{ID: 1, Name: "证券行业", Type: "sector", Aliases: []string{"券商"}}}
+	rows := []analysisRow{{Recommendations: []Signal{{Name: "券商"}}, OccurredAt: "2026-07-19 09:00:00"}}
+
+	result := buildSignalStatsForDateRange(rows, groups, "2026-07-18", "2026-07-20")
+	if len(result) != 1 {
+		t.Fatalf("signals = %#v, want one group", result)
+	}
+	want := []SignalNetPoint{{Date: "2026-07-18", NetCount: 0}, {Date: "2026-07-19", NetCount: 1}, {Date: "2026-07-20", NetCount: 0}}
+	for index := range want {
+		if result[0].NetHistory[index] != want[index] {
+			t.Fatalf("history[%d] = %#v, want %#v", index, result[0].NetHistory[index], want[index])
+		}
+	}
+}
+
 // TestBuildSignalStatsPreservesRawAliasSpellings 验证概念成员保留实际出现的大小写写法。
 // 输入：同一概念中规范化后相同的“AI硬件”和“ai硬件”。
 // 输出：统计合并为一行，成员列表仍完整保留两种原文供页面筛选。

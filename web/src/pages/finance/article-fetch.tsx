@@ -1,10 +1,11 @@
-import { ArrowDownRight, BookOpenCheck, BrainCircuit, FileSearch, QrCode, Rss, Sparkles } from "lucide-react";
+import { ArrowDownRight, BookOpenCheck, BrainCircuit, ChevronDown, FileSearch, QrCode, Rss, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogClose,
@@ -25,6 +26,7 @@ import {
   WeReadArticleBinding,
   WeReadLoginStatus,
   analyzePendingArticles,
+  fetchArticleReport,
   fetchArticleAnalysisModelSettings,
   fetchArticleSources,
   fetchWeReadArticleBinding,
@@ -58,7 +60,7 @@ export function ArticleFetchPage() {
     return { activeCount, failedCount };
   }, [sources]);
 
-  /** loadData 并行加载信息源、微信读书绑定状态和模型设置。 */
+  /** loadData 并行加载信息源、微信读书绑定状态和模型提示词设置。 */
   async function loadData() {
     // 1. 并行读取三个互不依赖的数据块。
     setIsLoading(true);
@@ -70,7 +72,7 @@ export function ArticleFetchPage() {
       ]);
       setSources(nextSources);
       setWeRead(nextWeRead);
-      setModelSettings(nextModelSettings);
+      setModelSettings(await withPromptDetails(nextModelSettings));
     } catch (error) {
       notify.errorFrom(error, "投资文章抓取数据加载失败", "加载失败");
     } finally {
@@ -188,7 +190,11 @@ export function ArticleFetchPage() {
     setIsModelWorking(true);
     try {
       const settings = await saveArticleAnalysisModel(modelId);
-      setModelSettings(settings);
+      setModelSettings((current) => ({
+        ...settings,
+        analysis_prompt: settings.analysis_prompt?.trim() || current?.analysis_prompt || "",
+        prompt_version: settings.prompt_version?.trim() || current?.prompt_version || "",
+      }));
       notify.success("分析模型已切换", `后续分析使用 ${settings.selected_model}。`);
     } catch (error) {
       notify.errorFrom(error, "切换文章分析模型失败");
@@ -250,6 +256,28 @@ export function ArticleFetchPage() {
             </Select>
           </div>
         </CardHeader>
+        <CardContent>
+          <Collapsible className="group/prompt overflow-hidden rounded-md border">
+            <div className="flex items-center justify-between gap-3 px-3 py-2">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">当前提示词</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {modelSettings?.prompt_version || "暂无版本信息"}
+                </div>
+              </div>
+              <CollapsibleTrigger asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0" aria-label="展开或收起当前提示词">
+                  <ChevronDown className="h-4 w-4 transition-transform group-data-[state=open]/prompt:rotate-180" />
+                </Button>
+              </CollapsibleTrigger>
+            </div>
+            <CollapsibleContent className="border-t">
+              <pre className="whitespace-pre-wrap break-words px-3 py-4 text-sm leading-6 text-muted-foreground">
+                {modelSettings?.analysis_prompt || "暂无提示词信息。"}
+              </pre>
+            </CollapsibleContent>
+          </Collapsible>
+        </CardContent>
       </Card>
 
       <Card>
@@ -399,6 +427,22 @@ export function ArticleFetchPage() {
       </Dialog>
     </div>
   );
+}
+
+async function withPromptDetails(settings: ArticleAnalysisModelSettings) {
+  if (settings.analysis_prompt?.trim() && settings.prompt_version?.trim()) {
+    return settings;
+  }
+  try {
+    const report = await fetchArticleReport(1, 1);
+    return {
+      ...settings,
+      analysis_prompt: settings.analysis_prompt?.trim() || report.analysis_prompt || "",
+      prompt_version: settings.prompt_version?.trim() || report.prompt_version || "",
+    };
+  } catch {
+    return settings;
+  }
 }
 
 /** ArticleFetchSkeleton 展示文章抓取页面加载占位，无副作用。 */

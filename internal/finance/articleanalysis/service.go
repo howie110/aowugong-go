@@ -675,7 +675,9 @@ func (s *Service) AnalysisModelSettings(ctx context.Context) (AnalysisModelSetti
 		})
 	}
 	return AnalysisModelSettings{
-		SelectedModelID: selected.ID, SelectedModel: selected.Model, Models: choices,
+		SelectedModelID: selected.ID, SelectedModel: selected.Model,
+		AnalysisPrompt: AnalysisPromptTemplate(), PromptVersion: PromptVersion,
+		Models: choices,
 	}, nil
 }
 
@@ -849,11 +851,14 @@ func (s *Service) Report(ctx context.Context, targetDays, marketDays int) (Repor
 	if err != nil {
 		return Report{}, err
 	}
+	historyEnd := dateOnly(shanghaiNowText())
+	historyEndTime, _ := time.Parse("2006-01-02", historyEnd)
+	historyStart := historyEndTime.AddDate(0, 0, -(targetDays - 1)).Format("2006-01-02")
 	return Report{
 		AnalysisModel:          model.Model,
 		AnalysisPrompt:         AnalysisPromptTemplate(),
 		PromptVersion:          PromptVersion,
-		Signals:                buildSignalStats(targetRows, groups),
+		Signals:                buildSignalStatsForDateRange(targetRows, groups, historyStart, historyEnd),
 		MoodDistribution:       buildDistribution(marketRows, true),
 		PredictionDistribution: buildDistribution(marketRows, false),
 	}, nil
@@ -877,6 +882,14 @@ type aggregatedSignal struct {
 // 输出：按总次数和最近出现时间倒序返回信号榜。
 // 副作用：无。
 func buildSignalStats(rows []analysisRow, groups []SignalGroup) []SignalStat {
+	return buildSignalStatsForDateRange(rows, groups, "", "")
+}
+
+// buildSignalStatsForDateRange 按概念组聚合信号，并可固定每日趋势的起止日期。
+// 输入：rows 和 groups 构成排行榜，historyStart 与 historyEnd 为空时使用数据自身边界。
+// 输出：返回带连续每日净数曲线的信号榜。
+// 副作用：无。
+func buildSignalStatsForDateRange(rows []analysisRow, groups []SignalGroup, historyStart, historyEnd string) []SignalStat {
 	// 1. 建立别名索引，并沿用旧服务顺序分别聚合推荐、风险。
 	groupIndex := buildSignalGroupIndex(groups)
 	recommendations := aggregateSignals(rows, true)
@@ -887,18 +900,7 @@ func buildSignalStats(rows []analysisRow, groups []SignalGroup) []SignalStat {
 	ordered := make([]*signalAccumulator, 0, len(recommendations)+len(risks))
 	merge := func(signals []aggregatedSignal, recommendation bool) {
 		for _, signal := range signals {
-			groupKey := "pending"
-			groupName, groupType := pendingSignalGroupName, pendingSignalGroupType
-			if group, exists := groupIndex[normalizeSignalAlias(signal.Name)]; exists {
-				// 已持久化的待归类别名与尚未映射信号必须进入同一特殊分组。
-				if group.Name != pendingSignalGroupName && group.Type != pendingSignalGroupType {
-					groupKey = fmt.Sprintf("group:%d:%s", group.ID, normalizeSignalAlias(group.Name))
-					groupName = group.Name
-					if strings.TrimSpace(group.Type) != "" {
-						groupType = group.Type
-					}
-				}
-			}
+			groupKey, groupName, groupType := signalGroupIdentity(signal.Name, groupIndex)
 			item, exists := grouped[groupKey]
 			if !exists {
 				item = &signalAccumulator{
@@ -936,6 +938,7 @@ func buildSignalStats(rows []analysisRow, groups []SignalGroup) []SignalStat {
 	}
 	merge(recommendations, true)
 	merge(risks, false)
+	applySignalNetHistory(rows, groupIndex, grouped, historyStart, historyEnd)
 
 	// 3. 稳定排序保证完全相同的总数和日期保留聚合插入顺序。
 	sort.SliceStable(ordered, func(left, right int) bool {
@@ -952,6 +955,93 @@ func buildSignalStats(rows []analysisRow, groups []SignalGroup) []SignalStat {
 		results = append(results, item.SignalStat)
 	}
 	return results
+}
+
+// signalGroupIdentity 返回原始标的所属的稳定概念组键和展示信息。
+// 输入：name 是原始标的名，groupIndex 是别名映射。
+// 输出：返回内部聚合键、概念组名和类型；未映射名称返回统一兜底组。
+// 副作用：无。
+func signalGroupIdentity(name string, groupIndex map[string]SignalGroup) (string, string, string) {
+	// 1. 未映射名称和旧待归类别名沿用同一兜底身份。
+	groupKey := "pending"
+	groupName, groupType := pendingSignalGroupName, pendingSignalGroupType
+	group, exists := groupIndex[normalizeSignalAlias(name)]
+	if !exists || group.Name == pendingSignalGroupName || group.Type == pendingSignalGroupType {
+		return groupKey, groupName, groupType
+	}
+
+	// 2. 正式概念组使用数据库 ID 和规范名称组成稳定键。
+	groupKey = fmt.Sprintf("group:%d:%s", group.ID, normalizeSignalAlias(group.Name))
+	groupName = group.Name
+	if strings.TrimSpace(group.Type) != "" {
+		groupType = group.Type
+	}
+	return groupKey, groupName, groupType
+}
+
+// applySignalNetHistory 为每个概念组生成按自然日连续的推荐减风险净数。
+// 输入：rows 是文章信号行，groupIndex 和 grouped 使用排行榜映射，日期参数可固定展示窗口。
+// 输出：无返回值，直接补充每个排行榜项的 NetHistory。
+// 副作用：修改 grouped 中的内存统计，不读写数据库。
+func applySignalNetHistory(
+	rows []analysisRow,
+	groupIndex map[string]SignalGroup,
+	grouped map[string]*signalAccumulator,
+	historyStart string,
+	historyEnd string,
+) {
+	// 1. 逐篇按发生日期累计概念组推荐和风险净数，并记录有效日期边界。
+	daily := make(map[string]map[string]int)
+	minDate, maxDate := "", ""
+	addSignals := func(date string, signals []Signal, delta int) {
+		for _, signal := range signals {
+			if strings.TrimSpace(signal.Name) == "" {
+				continue
+			}
+			groupKey, _, _ := signalGroupIdentity(signal.Name, groupIndex)
+			if _, exists := grouped[groupKey]; !exists {
+				continue
+			}
+			if daily[groupKey] == nil {
+				daily[groupKey] = make(map[string]int)
+			}
+			daily[groupKey][date] += delta
+		}
+	}
+	for _, row := range rows {
+		date := dateOnly(row.OccurredAt)
+		if _, err := time.Parse("2006-01-02", date); err != nil {
+			continue
+		}
+		if minDate == "" || date < minDate {
+			minDate = date
+		}
+		if maxDate == "" || date > maxDate {
+			maxDate = date
+		}
+		addSignals(date, row.Recommendations, 1)
+		addSignals(date, row.Risks, -1)
+	}
+	if _, err := time.Parse("2006-01-02", historyStart); err == nil {
+		minDate = historyStart
+	}
+	if _, err := time.Parse("2006-01-02", historyEnd); err == nil {
+		maxDate = historyEnd
+	}
+	if minDate == "" || maxDate == "" || minDate > maxDate {
+		return
+	}
+
+	// 2. 补齐日期范围内没有信号的自然日，避免曲线把跨天事件误画成连续发生。
+	start, _ := time.Parse("2006-01-02", minDate)
+	end, _ := time.Parse("2006-01-02", maxDate)
+	for groupKey, item := range grouped {
+		item.NetHistory = make([]SignalNetPoint, 0, int(end.Sub(start).Hours()/24)+1)
+		for current := start; !current.After(end); current = current.AddDate(0, 0, 1) {
+			date := current.Format("2006-01-02")
+			item.NetHistory = append(item.NetHistory, SignalNetPoint{Date: date, NetCount: daily[groupKey][date]})
+		}
+	}
 }
 
 // buildSignalGroupIndex 把概念组别名转换为规范化名称索引。

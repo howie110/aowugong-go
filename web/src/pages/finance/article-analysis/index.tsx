@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { getProfile, type UserProfile } from "@/lib/auth";
@@ -15,10 +15,19 @@ import { notify } from "@/lib/notify";
 import { ArticleDetailDrawer } from "./article-detail-drawer";
 import { ArticlesCard } from "./articles-card";
 import { MARKET_DAYS, TARGET_DAYS } from "./page-constants";
-import { buildAccountStats, filterArticlesBySignal, isSameSignal } from "./page-utils";
+import {
+  filterArticlesBySignal,
+  isSameSignal,
+  sortSignals,
+  withSignalNetHistory,
+  type SignalSortDirection,
+  type SignalSortField,
+} from "./page-utils";
 import { SignalRankCard } from "./signal-rank-card";
-import { MarketPanel, ModelPromptCard, MonitoredAccountsCard } from "./summary-cards";
-import { useResponsiveTablePageSize } from "./use-responsive-table-page-size";
+import { MarketPanel } from "./summary-cards";
+
+const SIGNAL_PAGE_SIZE = 8;
+const ARTICLE_PAGE_SIZE = 20;
 
 export function ArticleAnalysisPage() {
   const [report, setReport] = useState<ArticleAnalysisReport | null>(null);
@@ -30,35 +39,38 @@ export function ArticleAnalysisPage() {
   const [selectedArticleSignal, setSelectedArticleSignal] = useState<TargetSignalStat | null>(null);
   const [selectedArticleMember, setSelectedArticleMember] = useState<string | null>(null);
   const [signalPage, setSignalPage] = useState(1);
+  const [signalSort, setSignalSort] = useState<{ field: SignalSortField; direction: SignalSortDirection }>({
+    field: "total",
+    direction: "desc",
+  });
   const [articlePage, setArticlePage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
 
   const signalItems = report?.signals || [];
-  const signalTable = useResponsiveTablePageSize([signalItems.length]);
-  const signalPageCount = Math.max(1, Math.ceil(signalItems.length / signalTable.pageSize));
+  const sortedSignalItems = useMemo(
+    () => sortSignals(signalItems, signalSort.field, signalSort.direction),
+    [signalItems, signalSort.direction, signalSort.field],
+  );
+  const signalTableRef = useRef<HTMLDivElement>(null);
+  const articleTableRef = useRef<HTMLDivElement>(null);
+  const signalPageCount = Math.max(1, Math.ceil(sortedSignalItems.length / SIGNAL_PAGE_SIZE));
   const safeSignalPage = Math.min(signalPage, signalPageCount);
   const paginatedSignals = useMemo(() => {
-    const start = (safeSignalPage - 1) * signalTable.pageSize;
-    return signalItems.slice(start, start + signalTable.pageSize);
-  }, [signalItems, safeSignalPage, signalTable.pageSize]);
+    const start = (safeSignalPage - 1) * SIGNAL_PAGE_SIZE;
+    return sortedSignalItems.slice(start, start + SIGNAL_PAGE_SIZE);
+  }, [safeSignalPage, sortedSignalItems]);
 
   const filteredArticles = useMemo(
     () => filterArticlesBySignal(articles, selectedArticleSignal, selectedArticleMember),
     [articles, selectedArticleMember, selectedArticleSignal],
   );
-  const articleTable = useResponsiveTablePageSize([
-    filteredArticles.length,
-    selectedArticleSignal?.name,
-    selectedArticleMember,
-  ]);
-  const articlePageCount = Math.max(1, Math.ceil(filteredArticles.length / articleTable.pageSize));
+  const articlePageCount = Math.max(1, Math.ceil(filteredArticles.length / ARTICLE_PAGE_SIZE));
   const safeArticlePage = Math.min(articlePage, articlePageCount);
   const paginatedArticles = useMemo(() => {
-    const start = (safeArticlePage - 1) * articleTable.pageSize;
-    return filteredArticles.slice(start, start + articleTable.pageSize);
-  }, [filteredArticles, safeArticlePage, articleTable.pageSize]);
+    const start = (safeArticlePage - 1) * ARTICLE_PAGE_SIZE;
+    return filteredArticles.slice(start, start + ARTICLE_PAGE_SIZE);
+  }, [filteredArticles, safeArticlePage]);
 
-  const monitoredAccounts = useMemo(() => buildAccountStats(articles), [articles]);
   const canEditPromptFeedback = Boolean(user?.roles.includes("admin"));
 
   async function loadData() {
@@ -69,7 +81,7 @@ export function ArticleAnalysisPage() {
         fetchArticles(TARGET_DAYS, 5000),
         getProfile(),
       ]);
-      setReport(nextReport);
+      setReport({ ...nextReport, signals: withSignalNetHistory(nextReport.signals || [], nextArticles, TARGET_DAYS) });
       setArticles(nextArticles);
       setUser(nextUser);
       if (selectedArticle && !nextArticles.some((article) => article.id === selectedArticle.id)) {
@@ -123,6 +135,14 @@ export function ArticleAnalysisPage() {
     setArticlePage(1);
   }
 
+  function handleSignalSort(field: SignalSortField) {
+    setSignalSort((current) => ({
+      field,
+      direction: current.field === field && current.direction === "desc" ? "asc" : "desc",
+    }));
+    setSignalPage(1);
+  }
+
   // handleSelectRankMember 从信号榜概念组内筛选具体标的，并同步文章当前位置。
   // 输入：signal 是所属概念组，member 是用户点击的具体标的。
   // 输出：无。
@@ -165,39 +185,32 @@ export function ArticleAnalysisPage() {
   if (isLoading && !report) {
     return (
       <div className="space-y-4">
-        <div className="grid gap-4 xl:grid-cols-3">
-          <Skeleton className="h-36" />
-          <Skeleton className="h-36" />
-          <Skeleton className="h-36" />
-        </div>
-        <div className="grid gap-4 xl:grid-cols-[0.7fr_1.3fr]">
-          <Skeleton className="h-[32rem]" />
-          <Skeleton className="h-[32rem]" />
-        </div>
+        <Skeleton className="h-36" />
+        <Skeleton className="h-[64rem]" />
+        <Skeleton className="h-[32rem]" />
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 [&>*]:min-w-0 sm:gap-4 xl:grid-cols-[1fr_0.42fr_0.5fr]">
-        <MarketPanel report={report} />
-        <MonitoredAccountsCard accounts={monitoredAccounts} articleCount={articles.length} />
-        <ModelPromptCard report={report} />
-      </div>
+      <MarketPanel report={report} />
 
-      <div className="grid gap-4 [&>*]:min-w-0 xl:h-[calc(100dvh-8rem)] xl:min-h-[28rem] xl:max-h-[calc(100dvh-8rem)] xl:grid-cols-[minmax(20rem,0.7fr)_minmax(0,1.3fr)] xl:overflow-hidden xl:[&>*]:min-h-0">
+      <div className="space-y-4 [&>*]:min-w-0">
         <SignalRankCard
           title={`信号榜 · ${TARGET_DAYS}天`}
           items={paginatedSignals}
           totalCount={signalItems.length}
           currentPage={safeSignalPage}
           totalPages={signalPageCount}
-          pageSize={signalTable.pageSize}
-          tableRef={signalTable.tableRef}
+          pageSize={SIGNAL_PAGE_SIZE}
+          tableRef={signalTableRef}
           selectedSignal={selectedRankSignal}
           selectedMember={selectedRankMember}
+          sortField={signalSort.field}
+          sortDirection={signalSort.direction}
           onPageChange={setSignalPage}
+          onSort={handleSignalSort}
           onSelect={handleSelectRankSignal}
           onSelectMember={handleSelectRankMember}
         />
@@ -206,8 +219,8 @@ export function ArticleAnalysisPage() {
           totalCount={filteredArticles.length}
           currentPage={safeArticlePage}
           totalPages={articlePageCount}
-          pageSize={articleTable.pageSize}
-          tableRef={articleTable.tableRef}
+          pageSize={ARTICLE_PAGE_SIZE}
+          tableRef={articleTableRef}
           selectedArticleId={selectedArticle?.id}
           selectedSignal={selectedArticleSignal}
           selectedMember={selectedArticleMember}

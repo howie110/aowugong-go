@@ -91,12 +91,13 @@ test("订阅删除使用 AlertDialog 确认", () => {
   assert.doesNotMatch(subscriptions, /window\.confirm/);
 });
 
-test("文章汇总和分页使用 shadcn 交互组件", () => {
+test("文章汇总、模型提示词和分页使用 shadcn 交互组件", () => {
   const summary = readSource("pages/finance/article-analysis/summary-cards.tsx");
+  const fetch = readSource("pages/finance/article-fetch.tsx");
   const pagination = readSource("pages/finance/article-analysis/article-pagination.tsx");
-  assert.match(summary, /CollapsibleTrigger/);
-  assert.match(summary, /PopoverContent/);
   assert.match(summary, /<Progress/);
+  assert.match(fetch, /CollapsibleContent/);
+  assert.doesNotMatch(fetch, /PopoverContent/);
   assert.match(pagination, /components\/ui\/pagination/);
   assert.doesNotMatch(pagination, /lucide-react/);
 });

@@ -26,6 +26,9 @@ func TestServicePersistsArticleAnalysisModelSelection(t *testing.T) {
 	if err != nil || settings.SelectedModelID != "sub2api:gpt-5.6-luna" || len(settings.Models) != 2 {
 		t.Fatalf("initial settings = %#v, %v", settings, err)
 	}
+	if settings.PromptVersion != PromptVersion || settings.AnalysisPrompt != AnalysisPromptTemplate() {
+		t.Fatalf("prompt settings = %#v", settings)
+	}
 
 	// 2. 保存 DeepSeek 并通过新的读取确认数据库选择生效。
 	settings, err = service.SetAnalysisModel(ctx, "deepseek:deepseek-v4-pro")

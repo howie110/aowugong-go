@@ -104,15 +104,22 @@ type ArticleDetail struct {
 	Analysis       *Analysis `json:"analysis,omitempty"`
 }
 
+// SignalNetPoint 描述概念组在一个自然日的推荐减风险净数。
+type SignalNetPoint struct {
+	Date     string `json:"date"`
+	NetCount int    `json:"net_count"`
+}
+
 // SignalStat 描述信号榜的一行合并统计。
 type SignalStat struct {
-	Name                string         `json:"name"`
-	Type                string         `json:"type"`
-	Members             []string       `json:"members"`
-	MemberNetCounts     map[string]int `json:"member_net_counts"`
-	RecommendationCount int            `json:"recommendation_count"`
-	RiskCount           int            `json:"risk_count"`
-	Count               int            `json:"count"`
+	Name                string           `json:"name"`
+	Type                string           `json:"type"`
+	Members             []string         `json:"members"`
+	MemberNetCounts     map[string]int   `json:"member_net_counts"`
+	NetHistory          []SignalNetPoint `json:"net_history"`
+	RecommendationCount int              `json:"recommendation_count"`
+	RiskCount           int              `json:"risk_count"`
+	Count               int              `json:"count"`
 }
 
 // DistributionItem 描述市场枚举的计数分布。
@@ -160,6 +167,8 @@ type AnalysisModelChoice struct {
 type AnalysisModelSettings struct {
 	SelectedModelID string                `json:"selected_model_id"`
 	SelectedModel   string                `json:"selected_model"`
+	AnalysisPrompt  string                `json:"analysis_prompt"`
+	PromptVersion   string                `json:"prompt_version"`
 	Models          []AnalysisModelChoice `json:"models"`
 }
 
