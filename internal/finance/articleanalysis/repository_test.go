@@ -315,7 +315,7 @@ func TestRepositoryAndReportPreserveArticleContracts(t *testing.T) {
 		len(report.Signals[0].Members) != 1 || report.Signals[0].Members[0] != "贵州茅台" {
 		t.Errorf("signals = %#v", report.Signals)
 	}
-	if len(report.MoodDistribution) != 1 || report.MoodDistribution[0].Name != "optimistic" {
+	if len(report.MoodDistribution) != len(moodDistributionNames) || report.MoodDistribution[1].Name != "optimistic" || report.MoodDistribution[1].Count != 1 {
 		t.Errorf("mood distribution = %#v", report.MoodDistribution)
 	}
 }

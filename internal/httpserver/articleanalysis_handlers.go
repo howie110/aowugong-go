@@ -324,13 +324,13 @@ func (h articleAnalysisHandlers) feedback(w http.ResponseWriter, request *http.R
 	writeJSON(w, http.StatusOK, result)
 }
 
-// report 返回 60 天信号榜和 3 天市场判断分布。
+// report 返回 90 天信号榜和 3 天市场判断分布。
 // 输入：target_days 范围 1 到 365，market_days 范围 1 到 30。
 // 输出：写入 Report JSON。
 // 副作用：读取 PostgreSQL 并写入 HTTP 响应。
 func (h articleAnalysisHandlers) report(w http.ResponseWriter, request *http.Request) {
 	// 1. 独立解析两个统计范围。
-	targetDays, ok := boundedQueryInt(w, request, "target_days", 60, 1, 365)
+	targetDays, ok := boundedQueryInt(w, request, "target_days", articleanalysis.DefaultTargetDays, 1, 365)
 	if !ok {
 		return
 	}

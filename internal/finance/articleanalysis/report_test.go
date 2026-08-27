@@ -5,21 +5,25 @@ import (
 	"testing"
 )
 
-// TestBuildDistributionPreservesFirstSeenOrderForEqualCounts 验证同次数市场判断沿用旧接口的首次出现顺序。
-// 输入：依次出现且次数相同的 unknown 和 down 预测。
-// 输出：unknown 保持在 down 之前。
+// TestBuildDistributionReturnsEveryPredictionCategory 验证市场判断始终返回完整固定分类。
+// 输入：只有 unknown 和 down 预测。
+// 输出：up、range、down、unknown 按固定顺序返回，缺少类别计数为零。
 // 副作用：无。
-func TestBuildDistributionPreservesFirstSeenOrderForEqualCounts(t *testing.T) {
-	// 1. 以仓储查询的倒序结果模拟旧接口字典首次插入顺序。
+func TestBuildDistributionReturnsEveryPredictionCategory(t *testing.T) {
 	rows := []analysisRow{
 		{Prediction: "unknown"},
 		{Prediction: "down"},
 	}
 
-	// 2. 同次数时不能改成名称字母序。
 	result := buildDistribution(rows, false)
-	if len(result) != 2 || result[0].Name != "unknown" || result[1].Name != "down" {
-		t.Fatalf("distribution = %#v, want unknown before down", result)
+	want := []DistributionItem{{Name: "up", Count: 0}, {Name: "range", Count: 0}, {Name: "down", Count: 1}, {Name: "unknown", Count: 1}}
+	if len(result) != len(want) {
+		t.Fatalf("distribution = %#v, want %#v", result, want)
+	}
+	for index := range want {
+		if result[index] != want[index] {
+			t.Fatalf("distribution[%d] = %#v, want %#v", index, result[index], want[index])
+		}
 	}
 }
 
@@ -126,9 +130,9 @@ func TestBuildSignalStatsReturnsEachMemberNetCount(t *testing.T) {
 	}
 }
 
-// TestBuildSignalStatsReturnsContinuousDailyNetHistory 验证概念组净数曲线按自然日补零。
+// TestBuildSignalStatsReturnsContinuousDailyNetHistory 验证概念组累计净数曲线按自然日延续。
 // 输入：同一概念在首尾日期分别净推荐和净风险，中间日期只有其他概念。
-// 输出：返回日期升序的 +1、0、-1 三个点。
+// 输出：返回日期升序的 -1、-1、0 三个累计点，末点等于排行榜净数。
 // 副作用：无。
 func TestBuildSignalStatsReturnsContinuousDailyNetHistory(t *testing.T) {
 	groups := []SignalGroup{
@@ -151,7 +155,7 @@ func TestBuildSignalStatsReturnsContinuousDailyNetHistory(t *testing.T) {
 			history = item.NetHistory
 		}
 	}
-	want := []SignalNetPoint{{Date: "2026-07-18", NetCount: -1}, {Date: "2026-07-19", NetCount: 0}, {Date: "2026-07-20", NetCount: 1}}
+	want := []SignalNetPoint{{Date: "2026-07-18", NetCount: -1}, {Date: "2026-07-19", NetCount: -1}, {Date: "2026-07-20", NetCount: 0}}
 	if len(history) != len(want) {
 		t.Fatalf("history = %#v, want %#v", history, want)
 	}
@@ -160,9 +164,12 @@ func TestBuildSignalStatsReturnsContinuousDailyNetHistory(t *testing.T) {
 			t.Fatalf("history[%d] = %#v, want %#v", index, history[index], want[index])
 		}
 	}
+	if history[len(history)-1].NetCount != result[0].RecommendationCount-result[0].RiskCount {
+		t.Fatalf("last history net = %d, rank net = %d", history[len(history)-1].NetCount, result[0].RecommendationCount-result[0].RiskCount)
+	}
 }
 
-// TestBuildSignalStatsUsesRequestedHistoryRange 验证报告日期窗口首尾无信号时仍返回零点。
+// TestBuildSignalStatsUsesRequestedHistoryRange 验证报告日期窗口无信号日延续累计净数。
 func TestBuildSignalStatsUsesRequestedHistoryRange(t *testing.T) {
 	groups := []SignalGroup{{ID: 1, Name: "证券行业", Type: "sector", Aliases: []string{"券商"}}}
 	rows := []analysisRow{{Recommendations: []Signal{{Name: "券商"}}, OccurredAt: "2026-07-19 09:00:00"}}
@@ -171,11 +178,34 @@ func TestBuildSignalStatsUsesRequestedHistoryRange(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("signals = %#v, want one group", result)
 	}
-	want := []SignalNetPoint{{Date: "2026-07-18", NetCount: 0}, {Date: "2026-07-19", NetCount: 1}, {Date: "2026-07-20", NetCount: 0}}
+	want := []SignalNetPoint{{Date: "2026-07-18", NetCount: 0}, {Date: "2026-07-19", NetCount: 1}, {Date: "2026-07-20", NetCount: 1}}
 	for index := range want {
 		if result[0].NetHistory[index] != want[index] {
 			t.Fatalf("history[%d] = %#v, want %#v", index, result[0].NetHistory[index], want[index])
 		}
+	}
+}
+
+// TestBuildSignalStatsReconcilesUndatedSignals 验证无法落到具体日期的信号仍计入趋势基数。
+func TestBuildSignalStatsReconcilesUndatedSignals(t *testing.T) {
+	groups := []SignalGroup{{ID: 1, Name: "证券行业", Type: "sector", Aliases: []string{"券商"}}}
+	rows := []analysisRow{
+		{Recommendations: []Signal{{Name: "券商"}}, OccurredAt: "2026-07-19 09:00:00"},
+		{Risks: []Signal{{Name: "券商"}}, OccurredAt: "invalid-date"},
+	}
+
+	result := buildSignalStatsForDateRange(rows, groups, "2026-07-18", "2026-07-20")
+	want := []SignalNetPoint{{Date: "2026-07-18", NetCount: -1}, {Date: "2026-07-19", NetCount: 0}, {Date: "2026-07-20", NetCount: 0}}
+	if len(result) != 1 || len(result[0].NetHistory) != len(want) {
+		t.Fatalf("signals = %#v, want one group with %#v", result, want)
+	}
+	for index := range want {
+		if result[0].NetHistory[index] != want[index] {
+			t.Fatalf("history[%d] = %#v, want %#v", index, result[0].NetHistory[index], want[index])
+		}
+	}
+	if result[0].NetHistory[len(want)-1].NetCount != result[0].RecommendationCount-result[0].RiskCount {
+		t.Fatalf("last history net must equal rank net")
 	}
 }
 

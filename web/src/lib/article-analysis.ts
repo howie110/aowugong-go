@@ -207,11 +207,11 @@ export async function saveWeReadArticleAccountSettings(accountId: string, fetchI
   });
 }
 
-export async function fetchArticleReport(targetDays = 60, marketDays = 3) {
+export async function fetchArticleReport(targetDays = 90, marketDays = 3) {
   return requestJson<ArticleAnalysisReport>(`/api/v1/finance/article-analysis/report?target_days=${targetDays}&market_days=${marketDays}`);
 }
 
-export async function fetchArticles(days = 60, limit = 50) {
+export async function fetchArticles(days = 90, limit = 50) {
   return requestJson<ArticleItem[]>(`/api/v1/finance/article-analysis/articles?days=${days}&limit=${limit}`);
 }
 

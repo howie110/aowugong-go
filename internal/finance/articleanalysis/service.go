@@ -822,7 +822,7 @@ func (s *Service) UpdatePromptFeedback(ctx context.Context, articleID int64, fee
 }
 
 // Report 构建信号榜和短期市场分布。
-// 输入：ctx 控制查询，targetDays 默认 60，marketDays 默认 3。
+// 输入：ctx 控制查询，targetDays 默认 90，marketDays 默认 3。
 // 输出：返回完整分析报告；失败时返回错误。
 // 副作用：只读 PostgreSQL。
 func (s *Service) Report(ctx context.Context, targetDays, marketDays int) (Report, error) {
@@ -979,7 +979,7 @@ func signalGroupIdentity(name string, groupIndex map[string]SignalGroup) (string
 	return groupKey, groupName, groupType
 }
 
-// applySignalNetHistory 为每个概念组生成按自然日连续的推荐减风险净数。
+// applySignalNetHistory 为每个概念组生成按自然日连续的累计推荐减风险净数。
 // 输入：rows 是文章信号行，groupIndex 和 grouped 使用排行榜映射，日期参数可固定展示窗口。
 // 输出：无返回值，直接补充每个排行榜项的 NetHistory。
 // 副作用：修改 grouped 中的内存统计，不读写数据库。
@@ -1032,14 +1032,22 @@ func applySignalNetHistory(
 		return
 	}
 
-	// 2. 补齐日期范围内没有信号的自然日，避免曲线把跨天事件误画成连续发生。
+	// 2. 逐日累加净变化；无信号日期延续前一天净数，末点与排行榜当前净数一致。
 	start, _ := time.Parse("2006-01-02", minDate)
 	end, _ := time.Parse("2006-01-02", maxDate)
 	for groupKey, item := range grouped {
 		item.NetHistory = make([]SignalNetPoint, 0, int(end.Sub(start).Hours()/24)+1)
+		visibleNetChange := 0
+		for date, netChange := range daily[groupKey] {
+			if date >= minDate && date <= maxDate {
+				visibleNetChange += netChange
+			}
+		}
+		runningNetCount := item.RecommendationCount - item.RiskCount - visibleNetChange
 		for current := start; !current.After(end); current = current.AddDate(0, 0, 1) {
 			date := current.Format("2006-01-02")
-			item.NetHistory = append(item.NetHistory, SignalNetPoint{Date: date, NetCount: daily[groupKey][date]})
+			runningNetCount += daily[groupKey][date]
+			item.NetHistory = append(item.NetHistory, SignalNetPoint{Date: date, NetCount: runningNetCount})
 		}
 	}
 }
@@ -1128,36 +1136,33 @@ func aggregateSignals(rows []analysisRow, recommendation bool) []aggregatedSigna
 	return results
 }
 
-// buildDistribution 统计市场氛围或涨跌预测分布。
+var moodDistributionNames = []string{"very_optimistic", "optimistic", "neutral", "pessimistic", "very_pessimistic", "unknown"}
+var predictionDistributionNames = []string{"up", "range", "down", "unknown"}
+
+// buildDistribution 统计市场氛围或涨跌预测分布，并保留计数为零的固定类别。
 // 输入：rows 是市场天数内分析行，mood 控制统计字段。
-// 输出：按次数倒序、名称正序返回分布。
+// 输出：按固定业务顺序返回完整分布。
 // 副作用：无。
 func buildDistribution(rows []analysisRow, mood bool) []DistributionItem {
-	// 1. 规范化枚举并累计次数，同时记录仓储倒序结果中的首次出现顺序。
+	// 1. 规范化枚举并累计次数。
 	counts := make(map[string]int)
-	firstSeen := make(map[string]int)
 	for _, row := range rows {
 		key := normalizePrediction(row.Prediction)
 		if mood {
 			key = normalizeMood(row.MarketMood)
 		}
-		if _, exists := counts[key]; !exists {
-			firstSeen[key] = len(firstSeen)
-		}
 		counts[key]++
 	}
-	results := make([]DistributionItem, 0, len(counts))
-	for name, count := range counts {
-		results = append(results, DistributionItem{Name: name, Count: count})
+	names := predictionDistributionNames
+	if mood {
+		names = moodDistributionNames
 	}
 
-	// 2. 保持高频项优先，同次数时沿用旧接口的首次出现顺序。
-	sort.Slice(results, func(left, right int) bool {
-		if results[left].Count == results[right].Count {
-			return firstSeen[results[left].Name] < firstSeen[results[right].Name]
-		}
-		return results[left].Count > results[right].Count
-	})
+	// 2. 固定类别即使计数为零也返回，避免页面布局随文章内容变化。
+	results := make([]DistributionItem, 0, len(names))
+	for _, name := range names {
+		results = append(results, DistributionItem{Name: name, Count: counts[name]})
+	}
 	return results
 }
 

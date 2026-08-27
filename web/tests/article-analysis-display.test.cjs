@@ -13,6 +13,7 @@ const articlesCardPath = path.resolve(__dirname, "../src/pages/finance/article-a
 const articleDrawerPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/article-detail-drawer.tsx");
 const articleFetchPagePath = path.resolve(__dirname, "../src/pages/finance/article-fetch.tsx");
 const summaryCardsPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/summary-cards.tsx");
+const pageConstantsPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/page-constants.ts");
 
 /** 编译并加载不含运行时外部依赖的文章页面工具。 */
 function loadPageUtils() {
@@ -40,6 +41,34 @@ test("分析页移除监控公众号并把提示词放入抓取页分析模型",
   assert.doesNotMatch(fetchPage, /PopoverContent/);
   assert.match(fetchPage, /modelSettings\?\.prompt_version/);
   assert.match(fetchPage, /modelSettings\?\.analysis_prompt/);
+});
+
+test("短期市场判断始终补齐全部氛围和涨跌类别", () => {
+  const { completeDistribution, formatDistributionValue, MARKET_MOOD_CATEGORIES, MARKET_PREDICTION_CATEGORIES } = loadPageUtils();
+  const moods = completeDistribution([{ name: "neutral", count: 3 }], MARKET_MOOD_CATEGORIES);
+  const predictions = completeDistribution([{ name: "up", count: 2 }], MARKET_PREDICTION_CATEGORIES);
+
+  assert.equal(Array.from(moods, (item) => `${item.name}:${item.count}`).join(","), "very_optimistic:0,optimistic:0,neutral:3,pessimistic:0,very_pessimistic:0,unknown:0");
+  assert.equal(Array.from(predictions, (item) => `${item.name}:${item.count}`).join(","), "up:2,range:0,down:0,unknown:0");
+  assert.equal(formatDistributionValue(3, 6), "3/6 50%");
+  assert.equal(formatDistributionValue(0, 6), "0/6 0%");
+  assert.equal(formatDistributionValue(0, 0), "0/0 0%");
+
+  const summary = fs.readFileSync(summaryCardsPath, "utf8");
+  assert.match(summary, /completeDistribution\(report\?\.mood_distribution \|\| \[\], MARKET_MOOD_CATEGORIES\)/);
+  assert.match(summary, /completeDistribution\(report\?\.prediction_distribution \|\| \[\], MARKET_PREDICTION_CATEGORIES\)/);
+  assert.match(summary, /formatDistributionValue\(item\.count, total\)/);
+  assert.match(summary, /transition-colors hover:bg-muted/);
+});
+
+test("信号榜和文章窗口统一统计最近九十天", () => {
+  const constants = fs.readFileSync(pageConstantsPath, "utf8");
+  const page = fs.readFileSync(articleAnalysisPagePath, "utf8");
+
+  assert.match(constants, /TARGET_DAYS\s*=\s*90/);
+  assert.match(page, /fetchArticleReport\(TARGET_DAYS, MARKET_DAYS\)/);
+  assert.match(page, /fetchArticles\(TARGET_DAYS, 5000\)/);
+  assert.match(page, /title=\{`信号榜 · \$\{TARGET_DAYS\}天`\}/);
 });
 
 test("概念组按全部成员筛选并支持精确筛选具体标的", () => {
@@ -136,7 +165,7 @@ test("信号榜为每日净数图保留最大列宽和稳定行高", () => {
   assert.match(source, /<SignalNetTrend points=\{item\.net_history \|\| \[\]\}/);
 });
 
-test("旧版报告可由文章列表补算六十天净数趋势", () => {
+test("旧版报告可由文章列表补算九十天累计净数趋势", () => {
   const { withSignalNetHistory } = loadPageUtils();
   const signals = [
     {
@@ -156,7 +185,55 @@ test("旧版报告可由文章列表补算六十天净数趋势", () => {
   const result = withSignalNetHistory(signals, articles, 3, new Date(2026, 7, 27));
   assert.equal(
     Array.from(result[0].net_history, (point) => `${point.date}:${point.net_count}`).join(","),
-    "2026-08-25:0,2026-08-26:1,2026-08-27:-1",
+    "2026-08-25:0,2026-08-26:1,2026-08-27:0",
+  );
+  assert.equal(result[0].net_history.at(-1).net_count, result[0].recommendation_count - result[0].risk_count);
+});
+
+test("旧服务返回单日净变化时自动转换为累计净数", () => {
+  const { withSignalNetHistory } = loadPageUtils();
+  const signals = [{
+    name: "人工智能",
+    type: "theme",
+    members: ["AI"],
+    recommendation_count: 1,
+    risk_count: 3,
+    count: 4,
+    net_history: [
+      { date: "2026-08-25", net_count: -1 },
+      { date: "2026-08-26", net_count: 0 },
+      { date: "2026-08-27", net_count: -1 },
+    ],
+  }];
+
+  const result = withSignalNetHistory(signals, [], 3, new Date(2026, 7, 27));
+  assert.equal(
+    Array.from(result[0].net_history, (point) => `${point.date}:${point.net_count}`).join(","),
+    "2026-08-25:-1,2026-08-26:-1,2026-08-27:-2",
+  );
+  assert.equal(result[0].net_history.at(-1).net_count, result[0].recommendation_count - result[0].risk_count);
+});
+
+test("旧趋势缺少一条可落日信号时用起始基数对齐排行榜净数", () => {
+  const { withSignalNetHistory } = loadPageUtils();
+  const signals = [{
+    name: "算力与半导体",
+    type: "theme",
+    members: ["算力"],
+    recommendation_count: 75,
+    risk_count: 76,
+    count: 151,
+    net_history: [
+      { date: "2026-08-25", net_count: -1 },
+      { date: "2026-08-26", net_count: -1 },
+      { date: "2026-08-27", net_count: 0 },
+    ],
+  }];
+
+  const result = withSignalNetHistory(signals, [], 3, new Date(2026, 7, 27));
+  assert.equal(
+    Array.from(result[0].net_history, (point) => `${point.date}:${point.net_count}`).join(","),
+    "2026-08-25:0,2026-08-26:-1,2026-08-27:-1",
   );
 });
 
@@ -168,8 +245,9 @@ test("小屏信号榜保持图表宽度并允许横向滚动", () => {
 
 test("净数变化图悬停显示日期和净数坐标", () => {
   const source = fs.readFileSync(signalNetTrendPath, "utf8");
-  assert.match(source, /block h-24 w-\[30rem\] max-w-full/);
-  assert.doesNotMatch(source, /h-24 w-full/);
+  assert.match(source, /block h-\[6\.5rem\] w-full/);
+  assert.match(source, /new ResizeObserver\(updateWidth\)/);
+  assert.match(source, /right: chartWidth - 10/);
   assert.match(source, /onPointerMove=\{handlePointerMove\}/);
   assert.match(source, /onPointerLeave=\{\(\) => setHoveredIndex\(null\)\}/);
   assert.match(source, /\{active\.date\}/);
@@ -177,7 +255,7 @@ test("净数变化图悬停显示日期和净数坐标", () => {
   assert.match(source, /strokeDasharray="3 3"/);
 });
 
-test("文章筛选加载完整六十天窗口而不是旧的两百篇", () => {
+test("文章筛选加载完整九十天窗口而不是旧的两百篇", () => {
   const source = fs.readFileSync(articleAnalysisPagePath, "utf8");
   assert.match(source, /fetchArticles\(TARGET_DAYS,\s*5000\)/);
 });

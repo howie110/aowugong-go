@@ -3,6 +3,12 @@ import { Progress } from "@/components/ui/progress";
 import type { ArticleAnalysisReport, DistributionItem } from "@/lib/article-analysis";
 import { getDistributionBarClass, translate } from "./market-ui";
 import { MARKET_DAYS } from "./page-constants";
+import {
+  completeDistribution,
+  formatDistributionValue,
+  MARKET_MOOD_CATEGORIES,
+  MARKET_PREDICTION_CATEGORIES,
+} from "./page-utils";
 
 export function MarketPanel({ report }: { report: ArticleAnalysisReport | null }) {
   return (
@@ -12,8 +18,8 @@ export function MarketPanel({ report }: { report: ArticleAnalysisReport | null }
         <CardDescription className="hidden sm:block">日更文章只按短期口径统计市场氛围和涨跌预测。</CardDescription>
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-3 px-4 pb-4 sm:gap-4 sm:px-5 sm:pb-5">
-        <DistributionBlock title="市场氛围" items={report?.mood_distribution || []} />
-        <DistributionBlock title="涨跌预测" items={report?.prediction_distribution || []} />
+        <DistributionBlock title="市场氛围" items={completeDistribution(report?.mood_distribution || [], MARKET_MOOD_CATEGORIES)} />
+        <DistributionBlock title="涨跌预测" items={completeDistribution(report?.prediction_distribution || [], MARKET_PREDICTION_CATEGORIES)} />
       </CardContent>
     </Card>
   );
@@ -28,10 +34,10 @@ function DistributionBlock({ title, items }: { title: string; items: Distributio
         items.map((item) => {
           const percent = total ? (item.count / total) * 100 : 0;
           return (
-            <div key={item.name} className="space-y-1">
+            <div key={item.name} className="-mx-2 space-y-1 rounded-sm px-2 py-1 transition-colors hover:bg-muted">
               <div className="flex items-center justify-between gap-3 text-xs">
                 <span>{translate(item.name)}</span>
-                <span className="tabular-nums text-muted-foreground">{item.count}</span>
+                <span className="tabular-nums text-muted-foreground">{formatDistributionValue(item.count, total)}</span>
               </div>
               <Progress value={percent} indicatorClassName={getDistributionBarClass(item.name)} />
             </div>

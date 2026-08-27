@@ -5,7 +5,7 @@ const (
 	// PromptVersion 标识当前投资文章结构化提示词版本。
 	PromptVersion = "investment_article_single_verdict_v9"
 	// DefaultTargetDays 是信号榜默认统计天数。
-	DefaultTargetDays = 60
+	DefaultTargetDays = 90
 	// DefaultMarketDays 是短期市场判断默认统计天数。
 	DefaultMarketDays = 3
 )

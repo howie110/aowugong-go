@@ -1,7 +1,27 @@
-import type { ArticleItem, TargetSignalStat } from "@/lib/article-analysis";
+import type { ArticleItem, DistributionItem, SignalNetPoint, TargetSignalStat } from "@/lib/article-analysis";
 
 export type SignalSortField = "net" | "total";
 export type SignalSortDirection = "asc" | "desc";
+
+export const MARKET_MOOD_CATEGORIES = [
+  "very_optimistic",
+  "optimistic",
+  "neutral",
+  "pessimistic",
+  "very_pessimistic",
+  "unknown",
+];
+export const MARKET_PREDICTION_CATEGORIES = ["up", "range", "down", "unknown"];
+
+export function completeDistribution(items: DistributionItem[], categories: string[]) {
+  const counts = new Map(items.map((item) => [item.name, item.count]));
+  return categories.map((name) => ({ name, count: counts.get(name) || 0 }));
+}
+
+export function formatDistributionValue(count: number, total: number) {
+  const percent = total ? Math.round((count / total) * 100) : 0;
+  return `${count}/${total} ${percent}%`;
+}
 
 export function formatShortDate(value?: string | null) {
   if (!value) {
@@ -47,7 +67,7 @@ export function sortSignals(signals: TargetSignalStat[], field: SignalSortField,
   });
 }
 
-/** withSignalNetHistory 为旧版报告补算概念组每日推荐减风险净数，服务端已有数据时原样保留。 */
+/** withSignalNetHistory 补齐概念组逐日累计净数，并转换旧服务返回的单日增量曲线。 */
 export function withSignalNetHistory(
   signals: TargetSignalStat[],
   articles: ArticleItem[],
@@ -88,15 +108,32 @@ export function withSignalNetHistory(
     addSignals(date, article.risk_names || [], -1);
   }
 
-  // 3. 仅为缺少新版字段的报告补数据，确保后端正式口径上线后由后端优先。
+  // 3. 新版累计曲线末点必然等于排行榜净数；不相等时按旧版单日增量转换。
   return signals.map((signal, signalIndex) => {
     if (signal.net_history?.length) {
-      return signal;
+      const rankNetCount = signal.recommendation_count - signal.risk_count;
+      if (signal.net_history[signal.net_history.length - 1].net_count === rankNetCount) {
+        return signal;
+      }
+      return {
+        ...signal,
+        net_history: accumulateNetHistory(signal.net_history, rankNetCount),
+      };
     }
+    const dailyHistory = dates.map((date) => ({ date, net_count: dailyCounts[signalIndex].get(date) || 0 }));
     return {
       ...signal,
-      net_history: dates.map((date) => ({ date, net_count: dailyCounts[signalIndex].get(date) || 0 })),
+      net_history: accumulateNetHistory(dailyHistory, signal.recommendation_count - signal.risk_count),
     };
+  });
+}
+
+function accumulateNetHistory(points: SignalNetPoint[], finalNetCount: number) {
+  const visibleNetChange = points.reduce((total, point) => total + point.net_count, 0);
+  let runningNetCount = finalNetCount - visibleNetChange;
+  return points.map((point) => {
+    runningNetCount += point.net_count;
+    return { ...point, net_count: runningNetCount };
   });
 }
 
