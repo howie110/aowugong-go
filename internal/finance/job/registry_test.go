@@ -49,7 +49,7 @@ func (s *fakeArticleSyncer) SyncScheduled(_ context.Context, classifySignals boo
 func (s *fakeArticleSyncer) RebuildSignalGroups(_ context.Context, _ int, apply bool) (articleanalysis.SignalGroupRebuildResult, error) {
 	// 1. 记录调用并返回可格式化的任务摘要。
 	s.rebuildCalled = apply
-	return articleanalysis.SignalGroupRebuildResult{Applied: apply, GroupCount: 2, AliasCount: 3, PendingAliasCount: 1}, nil
+	return articleanalysis.SignalGroupRebuildResult{Applied: apply, GroupCount: 2, AliasCount: 3}, nil
 }
 
 // TestSyncInvestmentArticlesSkipsClassificationForManualRun 验证页面手动抓取不等待历史信号归类。
@@ -350,7 +350,7 @@ func TestBackupGitHubCodeSendsSuccessSummary(t *testing.T) {
 
 // TestRebuildInvestmentSignalGroupsAppliesGlobalDictionary 验证手动任务调用全局词典正式应用入口。
 // 输入：返回固定摘要的文章服务。
-// 输出：任务要求应用六十天重组，并返回组、别名和待归类数量。
+// 输出：任务要求应用六十天重组，并返回组和别名数量。
 // 副作用：修改测试替身的 rebuildCalled 字段。
 func TestRebuildInvestmentSignalGroupsAppliesGlobalDictionary(t *testing.T) {
 	// 1. 用文章服务替身构造任务并执行。
@@ -365,7 +365,7 @@ func TestRebuildInvestmentSignalGroupsAppliesGlobalDictionary(t *testing.T) {
 	if !articles.rebuildCalled {
 		t.Fatal("RebuildSignalGroups() apply = false, want true")
 	}
-	for _, fragment := range []string{"概念组=2", "别名=3", "待归类=1"} {
+	for _, fragment := range []string{"概念组=2", "别名=3"} {
 		if !strings.Contains(message, fragment) {
 			t.Errorf("message = %q, missing %q", message, fragment)
 		}

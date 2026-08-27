@@ -144,6 +144,33 @@ func (r *Repository) SignalGroups(ctx context.Context) ([]SignalGroup, error) {
 	return result, nil
 }
 
+// PendingSignalAliases 读取全部历史待归类别名，供一次性迁移到正式概念组。
+func (r *Repository) PendingSignalAliases(ctx context.Context) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT a.alias_name
+		FROM investment_signal_alias a
+		JOIN investment_signal_group g ON g.id = a.group_id
+		WHERE g.canonical_name = ? OR g.group_type = ?
+		ORDER BY a.id ASC
+	`, pendingSignalGroupName, pendingSignalGroupType)
+	if err != nil {
+		return nil, fmt.Errorf("读取历史待归类投资信号: %w", err)
+	}
+	defer rows.Close()
+	result := make([]string, 0)
+	for rows.Next() {
+		var alias string
+		if err := rows.Scan(&alias); err != nil {
+			return nil, fmt.Errorf("扫描历史待归类投资信号: %w", err)
+		}
+		result = append(result, alias)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历历史待归类投资信号: %w", err)
+	}
+	return result, nil
+}
+
 // SaveSignalGroups 原子保存 DeepSeek 生成的概念组和原始名称映射。
 // 输入：ctx 控制事务，groups 是已校验分类，modelName 是模型名称。
 // 输出：返回本次新增别名数量；失败时回滚并返回错误。
@@ -176,8 +203,19 @@ func (r *Repository) SaveSignalGroups(ctx context.Context, groups []signalGroupP
 				INSERT INTO investment_signal_alias(
 					group_id, alias_name, normalized_name, confidence, source, model_name
 				) VALUES(?,?,?,?,?,?)
-				ON CONFLICT(normalized_name) DO NOTHING
-			`, groupID, alias.Name, normalizeSignalAlias(alias.Name), alias.Confidence, "deepseek", modelName)
+				ON CONFLICT(normalized_name) DO UPDATE SET
+					group_id = excluded.group_id,
+					alias_name = excluded.alias_name,
+					confidence = excluded.confidence,
+					source = excluded.source,
+					model_name = excluded.model_name,
+					updated_at = excluded.updated_at
+				WHERE investment_signal_alias.group_id IN (
+					SELECT id FROM investment_signal_group
+					WHERE canonical_name = ? OR group_type = ?
+				)
+			`, groupID, alias.Name, normalizeSignalAlias(alias.Name), alias.Confidence, "deepseek", modelName,
+				pendingSignalGroupName, pendingSignalGroupType)
 			if err != nil {
 				return 0, fmt.Errorf("保存投资信号别名 %s: %w", alias.Name, err)
 			}
@@ -187,6 +225,16 @@ func (r *Repository) SaveSignalGroups(ctx context.Context, groups []signalGroupP
 			}
 			inserted += int(affected)
 		}
+	}
+	if _, err := transaction.ExecContext(ctx, `
+		DELETE FROM investment_signal_group
+		WHERE (canonical_name = ? OR group_type = ?)
+		  AND NOT EXISTS (
+			SELECT 1 FROM investment_signal_alias alias
+			WHERE alias.group_id = investment_signal_group.id
+		  )
+	`, pendingSignalGroupName, pendingSignalGroupType); err != nil {
+		return 0, fmt.Errorf("清理空待归类投资信号组: %w", err)
 	}
 
 	// 3. 全部写入成功后提交事务并返回新增数量。

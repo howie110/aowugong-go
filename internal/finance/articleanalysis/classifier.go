@@ -8,10 +8,6 @@ import (
 	"unicode/utf8"
 )
 
-const signalClassificationConfidenceThreshold = 0.80
-
-const signalNewGroupConfidenceThreshold = 0.90
-
 const signalClassificationBatchSize = 20
 
 const signalClassificationMaxAttempts = 2
@@ -46,8 +42,7 @@ type signalClassificationPayload struct {
 }
 
 type signalClassificationBatchResult struct {
-	Groups  []signalGroupProposal
-	Pending []signalCandidate
+	Groups []signalGroupProposal
 }
 
 // classifySignalAliases 使用当前文章分析模型批量归类指定范围内的未知信号名称。
@@ -68,6 +63,11 @@ func (s *Service) classifySignalAliases(ctx context.Context, days int) (int, err
 		return 0, err
 	}
 	candidates := collectUnknownSignalCandidates(rows, groups)
+	pendingAliases, err := s.repository.PendingSignalAliases(ctx)
+	if err != nil {
+		return 0, err
+	}
+	candidates = appendUniqueSignalCandidates(candidates, pendingAliases)
 	if len(candidates) == 0 {
 		return 0, nil
 	}
@@ -91,11 +91,7 @@ func (s *Service) classifySignalAliases(ctx context.Context, days int) (int, err
 		if err != nil {
 			return inserted, fmt.Errorf("处理第 %d 批投资信号分类: %w", start/signalClassificationBatchSize+1, err)
 		}
-		pendingNames := make([]string, 0, len(classification.Pending))
-		for _, candidate := range classification.Pending {
-			pendingNames = append(pendingNames, candidate.Name)
-		}
-		count, err := s.repository.SaveSignalGroups(ctx, signalGroupsForPersistence(classification.Groups, pendingNames), model.Model)
+		count, err := s.repository.SaveSignalGroups(ctx, classification.Groups, model.Model)
 		if err != nil {
 			return inserted, err
 		}
@@ -155,18 +151,18 @@ func buildSignalClassificationPrompt(groups []SignalGroup, candidates []signalCa
 本轮待分类名称：%s
 
 规则：
-1. 每个名称必须明确选择 reuse、create、pending 三种 action 之一。
+1. 每个名称必须明确选择 reuse、create 两种 action 之一，系统不允许待归类或模糊状态。
 2. 优先使用 reuse，并通过 existing_group_id 引用已有概念组；只有确实没有对应组时才使用 create。
-3. 待归类不是可复用的业务概念组；无法可靠判断时必须使用 pending action。
+3. 待归类不是可复用的业务概念组，禁止返回 pending。
 4. 具体公司上卷到最直接的行业或主题，例如证券公司归入“证券行业”。
 5. create 的规范概念名使用简洁、通行的行业、主题、资产或市场名称，只能有一个名称，禁止使用斜杠拼接多个名称；type 只能使用 sector、concept、company、commodity、index、market、crypto 或 other。
 6. 相关但统计含义不同的主题不要过度合并，选择与原始名称最直接的上级概念。
-7. 无法可靠判断时使用 pending，不要为了完整而强行新建组。
+7. 信息不足时也必须给出明确归属：通用策略归入“投资策略”，无法识别的公司归入“未具名公司”，其余真正无法辨认的名称归入“信息不明确”。必要时使用 create 新建这些兜底组。
 8. 每个待分类名称必须且只能出现一次，name 必须原样返回。
-9. confidence 是 0 到 1；reuse 至少 0.80，create 至少 0.90，否则使用 pending。
+9. confidence 是 0 到 1，仅记录判断可信度，不得因为低置信度返回 pending。
 
 只返回以下结构的 JSON，不要解释，不要 Markdown：
-{"decisions":[{"name":"中信证券","action":"reuse","existing_group_id":1,"confidence":0.96},{"name":"新主题","action":"create","canonical_name":"新主题行业","type":"sector","confidence":0.93},{"name":"含糊称呼","action":"pending","confidence":0.40}]}`,
+{"decisions":[{"name":"中信证券","action":"reuse","existing_group_id":1,"confidence":0.96},{"name":"新主题","action":"create","canonical_name":"新主题行业","type":"sector","confidence":0.93},{"name":"含糊称呼","action":"create","canonical_name":"信息不明确","type":"other","confidence":0.40}]}`,
 		string(groupsJSON), string(candidatesJSON))
 }
 
@@ -175,8 +171,16 @@ func buildSignalClassificationPrompt(groups []SignalGroup, candidates []signalCa
 // 输出：按首次出现顺序返回待分类名称和原始类型。
 // 副作用：无。
 func collectUnknownSignalCandidates(rows []analysisRow, groups []SignalGroup) []signalCandidate {
-	// 1. 建立已有别名和本轮候选索引。
-	mapped := buildSignalGroupIndex(groups)
+	// 1. 仅把正式概念组视为已映射，历史待归类别名必须重新进入候选。
+	mapped := make(map[string]struct{})
+	for _, group := range groups {
+		if group.Name == pendingSignalGroupName || group.Type == pendingSignalGroupType {
+			continue
+		}
+		for _, alias := range group.Aliases {
+			mapped[normalizeSignalAlias(alias)] = struct{}{}
+		}
+	}
 	positions := make(map[string]int)
 	result := make([]signalCandidate, 0)
 
@@ -210,6 +214,27 @@ func collectUnknownSignalCandidates(rows []analysisRow, groups []SignalGroup) []
 		appendSignals(row.Risks)
 	}
 	return result
+}
+
+// appendUniqueSignalCandidates 把历史待归类别名补入候选，并保留统计行中更具体的类型。
+func appendUniqueSignalCandidates(candidates []signalCandidate, aliases []string) []signalCandidate {
+	seen := make(map[string]struct{}, len(candidates)+len(aliases))
+	for _, candidate := range candidates {
+		seen[normalizeSignalAlias(candidate.Name)] = struct{}{}
+	}
+	for _, alias := range aliases {
+		name := strings.TrimSpace(alias)
+		key := normalizeSignalAlias(name)
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		candidates = append(candidates, signalCandidate{Name: name, Type: "other"})
+	}
+	return candidates
 }
 
 // parseSignalClassificationJSON 解码并校验模型的增量归类决策。
@@ -248,7 +273,7 @@ func validateSignalClassificationPayload(payload signalClassificationPayload, ca
 
 	// 2. 逐项验证三态动作，并把高置信度映射合并为仓储写入建议。
 	seen := make(map[string]struct{}, len(candidates))
-	result := signalClassificationBatchResult{Groups: []signalGroupProposal{}, Pending: []signalCandidate{}}
+	result := signalClassificationBatchResult{Groups: []signalGroupProposal{}}
 	positions := make(map[string]int)
 	for _, decision := range payload.Decisions {
 		key := normalizeSignalAlias(decision.Name)
@@ -265,7 +290,6 @@ func validateSignalClassificationPayload(payload signalClassificationPayload, ca
 		seen[key] = struct{}{}
 
 		var targetName, targetType string
-		threshold := signalClassificationConfidenceThreshold
 		switch strings.ToLower(strings.TrimSpace(decision.Action)) {
 		case "reuse":
 			group, exists := groupIndex[decision.ExistingGroupID]
@@ -273,8 +297,8 @@ func validateSignalClassificationPayload(payload signalClassificationPayload, ca
 				return signalClassificationBatchResult{}, fmt.Errorf("信号分类 %q 复用了不存在的概念组 %d", candidate.Name, decision.ExistingGroupID)
 			}
 			if group.Name == pendingSignalGroupName || group.Type == pendingSignalGroupType {
-				result.Pending = append(result.Pending, candidate)
-				continue
+				targetName, targetType = unclearSignalGroupName, unclearSignalGroupType
+				break
 			}
 			targetName, targetType = group.Name, group.Type
 		case "create":
@@ -287,18 +311,11 @@ func validateSignalClassificationPayload(payload signalClassificationPayload, ca
 			if _, exists := existingNames[normalizeSignalAlias(targetName)]; exists {
 				return signalClassificationBatchResult{}, fmt.Errorf("信号分类 %q 应复用已有概念组 %q，不得重复新建", candidate.Name, targetName)
 			}
-			threshold = signalNewGroupConfidenceThreshold
 		case "pending":
-			result.Pending = append(result.Pending, candidate)
-			continue
+			targetName, targetType = unclearSignalGroupName, unclearSignalGroupType
 		default:
 			return signalClassificationBatchResult{}, fmt.Errorf("信号分类 %q action 无效: %q", candidate.Name, decision.Action)
 		}
-		if decision.Confidence < threshold {
-			result.Pending = append(result.Pending, candidate)
-			continue
-		}
-
 		proposalKey := normalizeSignalAlias(targetName)
 		position, exists := positions[proposalKey]
 		if !exists {
@@ -322,57 +339,6 @@ func validateSignalClassificationPayload(payload signalClassificationPayload, ca
 		return signalClassificationBatchResult{}, fmt.Errorf("信号分类缺少名称: %s", strings.Join(missing, "、"))
 	}
 	return result, nil
-}
-
-// signalGroupsForPersistence 给已确认概念组追加唯一的待归类别名组。
-// 输入：groups 是模型确认映射，pendingNames 是暂时不能可靠判断的原始名称。
-// 输出：返回可直接写入仓储的组列表；待归类名称去重且置信度为零。
-// 副作用：无，不修改输入切片。
-func signalGroupsForPersistence(groups []signalGroupProposal, pendingNames []string) []signalGroupProposal {
-	// 1. 复制正式组并建立所有已归属别名索引。
-	result := make([]signalGroupProposal, 0, len(groups)+1)
-	for _, group := range groups {
-		group.Aliases = append([]signalAliasProposal(nil), group.Aliases...)
-		result = append(result, group)
-	}
-	seen := make(map[string]struct{})
-	pendingPosition := -1
-	for index, group := range result {
-		if group.CanonicalName == pendingSignalGroupName || group.Type == pendingSignalGroupType {
-			pendingPosition = index
-		}
-		for _, alias := range group.Aliases {
-			key := normalizeSignalAlias(alias.Name)
-			if key != "" {
-				seen[key] = struct{}{}
-			}
-		}
-	}
-
-	// 2. 只在存在新名称时创建特殊组，并保持首次出现顺序。
-	pendingAliases := make([]signalAliasProposal, 0, len(pendingNames))
-	for _, value := range pendingNames {
-		name := strings.TrimSpace(value)
-		key := normalizeSignalAlias(name)
-		if key == "" {
-			continue
-		}
-		if _, exists := seen[key]; exists {
-			continue
-		}
-		seen[key] = struct{}{}
-		pendingAliases = append(pendingAliases, signalAliasProposal{Name: name, Confidence: 0})
-	}
-	if len(pendingAliases) == 0 {
-		return result
-	}
-	if pendingPosition >= 0 {
-		result[pendingPosition].Aliases = append(result[pendingPosition].Aliases, pendingAliases...)
-		return result
-	}
-	return append(result, signalGroupProposal{
-		CanonicalName: pendingSignalGroupName, Type: pendingSignalGroupType, Aliases: pendingAliases,
-	})
 }
 
 // validateSignalGroupName 校验模型生成的单一规范概念名称。

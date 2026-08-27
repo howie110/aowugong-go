@@ -363,6 +363,9 @@ func TestServiceScheduledSyncReportsMissingClassifierForUnknownSignals(t *testin
 			AddRow(`[{"name":"券商","type":"sector"}]`, `[]`, "neutral", "range", "2026-07-20 10:00:00"))
 	mock.ExpectQuery("SELECT g.id, g.canonical_name, g.group_type, a.alias_name").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "canonical_name", "group_type", "alias_name"}))
+	mock.ExpectQuery("SELECT a.alias_name").
+		WithArgs(pendingSignalGroupName, pendingSignalGroupType).
+		WillReturnRows(sqlmock.NewRows([]string{"alias_name"}))
 
 	// 2. 执行自动完整同步并要求未知信号触发明确配置错误。
 	service := NewService(NewRepository(db), ServiceOptions{})

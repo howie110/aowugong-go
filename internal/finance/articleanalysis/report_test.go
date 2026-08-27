@@ -174,11 +174,11 @@ func TestBuildSignalStatsCombinesUnmappedAliasesAtBottom(t *testing.T) {
 	}
 }
 
-// TestAnalysisPromptTemplateKeepsFinalV8Rules 验证 Go 分析提示词同时完成文章判断和概念归类。
+// TestAnalysisPromptTemplateKeepsFinalV9Rules 验证 Go 分析提示词同时完成文章判断和无模糊概念归类。
 // 输入：页面展示使用的占位符提示词。
 // 输出：结果导向示例、未来理由范围和推荐风险原因约束均完整存在。
 // 副作用：无。
-func TestAnalysisPromptTemplateKeepsFinalV8Rules(t *testing.T) {
+func TestAnalysisPromptTemplateKeepsFinalV9Rules(t *testing.T) {
 	// 1. 读取页面与实际分析共用的唯一提示词模板。
 	prompt := AnalysisPromptTemplate()
 

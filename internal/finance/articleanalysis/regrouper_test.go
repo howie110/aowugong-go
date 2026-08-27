@@ -40,7 +40,7 @@ func (g *sequenceSignalRegroupingGateway) SimpleChat(_ context.Context, prompt s
 
 // TestParseSignalRegroupingJSONMergesSourcesAndExpandsAliases 验证全局归类把旧组和未归类来源合并成更宽的概念组。
 // 输入：两个旧科技组和一个未归类原始标的，以及一份完整模型映射。
-// 输出：生成一个科技行业组，展开全部三个原始别名，含糊来源保持待归类。
+// 输出：生成科技行业和信息不明确两个组，全部原始别名都有明确归属。
 // 副作用：无。
 func TestParseSignalRegroupingJSONMergesSourcesAndExpandsAliases(t *testing.T) {
 	// 1. 准备可被全局合并的稳定来源集合。
@@ -50,23 +50,33 @@ func TestParseSignalRegroupingJSONMergesSourcesAndExpandsAliases(t *testing.T) {
 		{ID: "alias:0", Name: "里子", Type: "other", Aliases: []string{"里子"}, Count: 2},
 	}
 	content := `{"groups":[{"canonical_name":"科技行业","type":"sector","sources":[` +
-		`{"source_id":"group:1","confidence":0.95},{"source_id":"group:2","confidence":0.98}]}],` +
-		`"pending":[{"source_id":"alias:0","confidence":0.35}]}`
+		`{"source_id":"group:1","confidence":0.95},{"source_id":"group:2","confidence":0.98}]},` +
+		`{"canonical_name":"信息不明确","type":"other","sources":[{"source_id":"alias:0","confidence":0.35}]}]}`
 
-	// 2. 旧组别名全部迁入新组，待归类来源不进入映射。
+	// 2. 旧组别名迁入科技行业，含糊来源也进入明确兜底组。
 	result, err := parseSignalRegroupingJSON(content, sources)
 	if err != nil {
 		t.Fatalf("parseSignalRegroupingJSON() error = %v", err)
 	}
-	if len(result.Groups) != 1 || result.Groups[0].CanonicalName != "科技行业" {
+	if len(result.Groups) != 2 || result.Groups[0].CanonicalName != "科技行业" || result.Groups[1].CanonicalName != "信息不明确" {
 		t.Fatalf("groups = %#v", result.Groups)
 	}
 	aliases := result.Groups[0].Aliases
 	if len(aliases) != 3 || aliases[0].Name != "AI硬件" || aliases[1].Name != "AI应用" || aliases[2].Name != "科技股" {
 		t.Fatalf("aliases = %#v", aliases)
 	}
-	if len(result.PendingAliases) != 1 || result.PendingAliases[0] != "里子" {
-		t.Fatalf("pending = %#v", result.PendingAliases)
+	if len(result.Groups[1].Aliases) != 1 || result.Groups[1].Aliases[0].Name != "里子" {
+		t.Fatalf("fallback aliases = %#v", result.Groups[1].Aliases)
+	}
+}
+
+// TestParseSignalRegroupingJSONConvertsPendingSources 验证全局重组把模糊输出强制写入明确兜底组。
+func TestParseSignalRegroupingJSONConvertsPendingSources(t *testing.T) {
+	sources := []signalGroupSource{{ID: "alias:0", Name: "里子", Aliases: []string{"里子"}}}
+	content := `{"groups":[],"pending":[{"source_id":"alias:0","confidence":0.30}]}`
+	result, err := parseSignalRegroupingJSON(content, sources)
+	if err != nil || len(result.Groups) != 1 || result.Groups[0].CanonicalName != unclearSignalGroupName || result.Groups[0].Aliases[0].Name != "里子" {
+		t.Fatalf("result = %#v, error = %v", result, err)
 	}
 }
 
@@ -235,7 +245,7 @@ func TestServiceRebuildSignalGroupsDryRunDoesNotWriteDatabase(t *testing.T) {
 	if result.Applied || result.GroupCount != 2 || result.AliasCount != 2 || result.PendingAliasCount != 0 {
 		t.Fatalf("result = %#v", result)
 	}
-	for _, fragment := range []string{"20 到 40", "source_id", "每个来源必须且只能出现一次"} {
+	for _, fragment := range []string{"20 到 40", "source_id", "每个来源必须且只能放入"} {
 		if !strings.Contains(gateway.prompt, fragment) {
 			t.Errorf("prompt is missing %q", fragment)
 		}

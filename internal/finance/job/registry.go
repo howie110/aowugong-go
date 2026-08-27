@@ -172,12 +172,12 @@ func (t *tasks) syncInvestmentArticles(ctx context.Context) (string, error) {
 
 // rebuildInvestmentSignalGroups 全局收敛六十天投资信号并替换概念词典。
 // 输入：ctx 是任务超时上下文。
-// 输出：返回新概念组、别名和待归类数量；模型或事务失败时返回错误。
+// 输出：返回新概念组和别名数量；模型或事务失败时返回错误。
 // 副作用：调用 DeepSeek，并在单个事务内重建 PostgreSQL 信号概念词典。
 func (t *tasks) rebuildInvestmentSignalGroups(ctx context.Context) (string, error) {
 	// 1. 调用文章服务唯一全局重组入口并明确应用已校验结果。
 	result, err := t.dependencies.Articles.RebuildSignalGroups(ctx, articleanalysis.DefaultTargetDays, true)
-	message := fmt.Sprintf("概念组=%d，别名=%d，待归类=%d", result.GroupCount, result.AliasCount, result.PendingAliasCount)
+	message := fmt.Sprintf("概念组=%d，别名=%d", result.GroupCount, result.AliasCount)
 	if err != nil {
 		return message, fmt.Errorf("重建投资信号概念组: %w", err)
 	}

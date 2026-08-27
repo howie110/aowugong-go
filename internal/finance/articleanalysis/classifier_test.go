@@ -138,23 +138,19 @@ func TestParseSignalClassificationJSONRejectsInvalidCanonicalName(t *testing.T) 
 	}
 }
 
-// TestParseSignalClassificationJSONUsesReuseCreateAndPendingActions 验证增量分类只接受复用、新建和待归类三态。
-// 输入：分别复用现有证券行业、新建贵金属和暂缓处理含糊名称。
-// 输出：两个高置信度映射进入待保存分组，含糊名称进入待归类列表。
+// TestParseSignalClassificationJSONUsesReuseAndCreateActions 验证增量分类只接受复用和新建两态。
+// 输入：分别复用现有证券行业并新建贵金属概念组。
+// 输出：两个映射都进入待保存分组，不产生模糊状态。
 // 副作用：无。
-func TestParseSignalClassificationJSONUsesReuseCreateAndPendingActions(t *testing.T) {
-	// 1. 构造三种决策及唯一可复用概念组。
-	groups := []SignalGroup{
-		{ID: 7, Name: "证券行业", Type: "sector", Aliases: []string{"券商"}},
-		{ID: 8, Name: pendingSignalGroupName, Type: pendingSignalGroupType, Aliases: []string{"里子"}},
-	}
-	candidates := []signalCandidate{{Name: "中信证券", Type: "stock"}, {Name: "黄金", Type: "commodity"}, {Name: "里子", Type: "other"}}
+func TestParseSignalClassificationJSONUsesReuseAndCreateActions(t *testing.T) {
+	// 1. 构造两种明确决策及唯一可复用概念组。
+	groups := []SignalGroup{{ID: 7, Name: "证券行业", Type: "sector", Aliases: []string{"券商"}}}
+	candidates := []signalCandidate{{Name: "中信证券", Type: "stock"}, {Name: "黄金", Type: "commodity"}}
 	content := `{"decisions":[` +
 		`{"name":"中信证券","action":"reuse","existing_group_id":7,"confidence":0.96},` +
-		`{"name":"黄金","action":"create","canonical_name":"贵金属","type":"commodity","confidence":0.94},` +
-		`{"name":"里子","action":"pending","confidence":0.40}]}`
+		`{"name":"黄金","action":"create","canonical_name":"贵金属","type":"commodity","confidence":0.40}]}`
 
-	// 2. 核对复用组名称由后端决定，新建组被保留，待归类不进入写库建议。
+	// 2. 核对复用组名称由后端决定，低置信度新建组仍被明确保存。
 	result, err := parseSignalClassificationJSON(content, candidates, groups)
 	if err != nil {
 		t.Fatalf("parseSignalClassificationJSON() error = %v", err)
@@ -162,28 +158,25 @@ func TestParseSignalClassificationJSONUsesReuseCreateAndPendingActions(t *testin
 	if len(result.Groups) != 2 || result.Groups[0].CanonicalName != "证券行业" || result.Groups[1].CanonicalName != "贵金属" {
 		t.Fatalf("groups = %#v", result.Groups)
 	}
-	if len(result.Pending) != 1 || result.Pending[0].Name != "里子" {
-		t.Fatalf("pending = %#v", result.Pending)
-	}
 }
 
-// TestParseSignalClassificationJSONNormalizesPendingGroupReuse 验证模型复用待归类组时自动转为 pending。
-// 输入：现有待归类组和错误使用 reuse 动作的含糊信号。
-// 输出：信号进入待归类列表，不生成正式概念组且不让整批任务失败。
+// TestParseSignalClassificationJSONConvertsPendingState 验证任何待归类输出都会转成明确兜底组。
+// 输入：复用待归类组以及显式 pending 的两种模型响应。
+// 输出：两种响应都生成“信息不明确”正式概念组，不能形成 pending 状态。
 // 副作用：无。
-func TestParseSignalClassificationJSONNormalizesPendingGroupReuse(t *testing.T) {
-	// 1. 构造线上出现过的模型响应：把含糊信号复用到特殊待归类组。
+func TestParseSignalClassificationJSONConvertsPendingState(t *testing.T) {
+	// 1. 构造历史线上曾出现的两种模糊响应。
 	groups := []SignalGroup{{ID: 8, Name: pendingSignalGroupName, Type: pendingSignalGroupType}}
 	candidates := []signalCandidate{{Name: "A股伪科技股", Type: "concept"}}
-	content := `{"decisions":[{"name":"A股伪科技股","action":"reuse","existing_group_id":8,"confidence":0.96}]}`
-
-	// 2. 后端应按 pending 语义接收，而不是重试模型后中断同步任务。
-	result, err := parseSignalClassificationJSON(content, candidates, groups)
-	if err != nil {
-		t.Fatalf("parseSignalClassificationJSON() error = %v", err)
+	contents := []string{
+		`{"decisions":[{"name":"A股伪科技股","action":"reuse","existing_group_id":8,"confidence":0.96}]}`,
+		`{"decisions":[{"name":"A股伪科技股","action":"pending","confidence":0.40}]}`,
 	}
-	if len(result.Groups) != 0 || len(result.Pending) != 1 || result.Pending[0].Name != "A股伪科技股" {
-		t.Fatalf("result = %#v", result)
+	for _, content := range contents {
+		result, err := parseSignalClassificationJSON(content, candidates, groups)
+		if err != nil || len(result.Groups) != 1 || result.Groups[0].CanonicalName != unclearSignalGroupName || result.Groups[0].Aliases[0].Name != "A股伪科技股" {
+			t.Fatalf("content = %s, result = %#v, error = %v", content, result, err)
+		}
 	}
 }
 
@@ -212,22 +205,16 @@ func TestParseSignalClassificationJSONRejectsFakeReuseAndDuplicateCreate(t *test
 	}
 }
 
-// TestSignalGroupsForPersistenceAddsSinglePendingGroup 验证未确定标的写入统一待归类组。
-// 输入：一个正式概念组和两个待归类名称。
-// 输出：保留正式组并追加一个包含两个别名的待归类组，置信度为零。
+// TestAppendUniqueSignalCandidatesIncludesHistoricalPendingAliases 验证历史待归类别名重新进入明确分类流程。
+// 输入：当前候选和包含重复名称的历史待归类别名。
+// 输出：保留现有类型，并只追加一次历史名称。
 // 副作用：无。
-func TestSignalGroupsForPersistenceAddsSinglePendingGroup(t *testing.T) {
-	// 1. 构造正式分类和含重复空白的待归类名称。
-	groups := []signalGroupProposal{{CanonicalName: "证券行业", Type: "sector", Aliases: []signalAliasProposal{{Name: "券商", Confidence: 0.98}}}}
-	pending := []string{"里子", " 期指 ", "里子"}
-
-	// 2. 待归类名称必须去重并进入唯一特殊组。
-	result := signalGroupsForPersistence(groups, pending)
-	if len(result) != 2 || result[1].CanonicalName != pendingSignalGroupName || result[1].Type != pendingSignalGroupType {
-		t.Fatalf("groups = %#v", result)
-	}
-	if len(result[1].Aliases) != 2 || result[1].Aliases[0].Name != "里子" || result[1].Aliases[1].Name != "期指" {
-		t.Fatalf("pending aliases = %#v", result[1].Aliases)
+func TestAppendUniqueSignalCandidatesIncludesHistoricalPendingAliases(t *testing.T) {
+	result := appendUniqueSignalCandidates(
+		[]signalCandidate{{Name: "券商", Type: "sector"}}, []string{"券商", " 里子 ", "里子"},
+	)
+	if len(result) != 2 || result[0].Type != "sector" || result[1].Name != "里子" || result[1].Type != "other" {
+		t.Fatalf("candidates = %#v", result)
 	}
 }
 
@@ -240,9 +227,9 @@ func TestFilterSignalClassificationDecisionsOnlyDropsNormalizedSignals(t *testin
 	}}
 	normalized := NormalizeAnalysis(raw)
 	decisions := []signalClassificationDecision{
-		{Name: "贵州茅台（A股）", Action: "pending", Confidence: 0.4},
-		{Name: "科技大涨", Action: "pending", Confidence: 0.4},
-		{Name: "凭空标的", Action: "pending", Confidence: 0.4},
+		{Name: "贵州茅台（A股）", Action: "create", CanonicalName: "白酒行业", Type: "sector", Confidence: 0.4},
+		{Name: "科技大涨", Action: "create", CanonicalName: "科技行业", Type: "sector", Confidence: 0.4},
+		{Name: "凭空标的", Action: "create", CanonicalName: "信息不明确", Type: "other", Confidence: 0.4},
 	}
 
 	// 2. 有效名称跟随后端压缩，已过滤信号消失，越权名称留下并交给严格校验拒绝。
@@ -269,7 +256,7 @@ func TestBuildSignalClassificationPromptRequiresCanonicalIndustryRollup(t *testi
 
 	// 2. 核对决定最终统计口径的三项规则都进入模型提示词。
 	prompt := buildSignalClassificationPrompt(groups, candidates)
-	for _, fragment := range []string{"reuse、create、pending", "只有确实没有对应组时才使用 create", "existing_group_id", "待归类不是可复用的业务概念组", "具体公司上卷到最直接的行业或主题", "禁止使用斜杠拼接多个名称", "证券行业", "中信证券"} {
+	for _, fragment := range []string{"reuse、create 两种", "只有确实没有对应组时才使用 create", "existing_group_id", "禁止返回 pending", "信息不明确", "具体公司上卷到最直接的行业或主题", "禁止使用斜杠拼接多个名称", "证券行业", "中信证券"} {
 		if !strings.Contains(prompt, fragment) {
 			t.Errorf("prompt is missing %q", fragment)
 		}
@@ -296,17 +283,23 @@ func TestServiceAnalyzeAndClassifyPendingPersistsUnknownNames(t *testing.T) {
 			AddRow(`[{"name":"券商","type":"sector"},{"name":"中信证券","type":"stock"}]`, `[]`, "neutral", "range", "2026-07-20 10:00:00"))
 	mock.ExpectQuery("SELECT g.id, g.canonical_name, g.group_type, a.alias_name").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "canonical_name", "group_type", "alias_name"}))
+	mock.ExpectQuery("SELECT a.alias_name").
+		WithArgs(pendingSignalGroupName, pendingSignalGroupType).
+		WillReturnRows(sqlmock.NewRows([]string{"alias_name"}))
 	gateway := &fixedSignalClassificationGateway{response: `{"decisions":[{"name":"券商","action":"create","canonical_name":"证券行业","type":"sector","confidence":0.98},{"name":"中信证券","action":"create","canonical_name":"证券行业","type":"sector","confidence":0.96}]}`}
 	mock.ExpectBegin()
 	mock.ExpectQuery("INSERT INTO investment_signal_group").
 		WithArgs("证券行业", "sector", "deepseek", "test-model", sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 	mock.ExpectExec("INSERT INTO investment_signal_alias").
-		WithArgs(int64(7), "券商", "券商", 0.98, "deepseek", "test-model").
+		WithArgs(int64(7), "券商", "券商", 0.98, "deepseek", "test-model", pendingSignalGroupName, pendingSignalGroupType).
 		WillReturnResult(sqlmock.NewResult(11, 1))
 	mock.ExpectExec("INSERT INTO investment_signal_alias").
-		WithArgs(int64(7), "中信证券", "中信证券", 0.96, "deepseek", "test-model").
+		WithArgs(int64(7), "中信证券", "中信证券", 0.96, "deepseek", "test-model", pendingSignalGroupName, pendingSignalGroupType).
 		WillReturnResult(sqlmock.NewResult(12, 1))
+	mock.ExpectExec("DELETE FROM investment_signal_group").
+		WithArgs(pendingSignalGroupName, pendingSignalGroupType).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()
 
 	// 2. 执行分类并核对新增数量、提示词和数据库交互。

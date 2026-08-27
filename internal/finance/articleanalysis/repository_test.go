@@ -60,11 +60,14 @@ func TestRepositorySaveSignalGroupsWritesGroupAndAliasesInOneTransaction(t *test
 		WithArgs("证券行业", "sector", "deepseek", "test-model", sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 	mock.ExpectExec("INSERT INTO investment_signal_alias").
-		WithArgs(int64(7), "券商", "券商", 0.98, "deepseek", "test-model").
+		WithArgs(int64(7), "券商", "券商", 0.98, "deepseek", "test-model", pendingSignalGroupName, pendingSignalGroupType).
 		WillReturnResult(sqlmock.NewResult(11, 1))
 	mock.ExpectExec("INSERT INTO investment_signal_alias").
-		WithArgs(int64(7), "中信证券", "中信证券", 0.95, "deepseek", "test-model").
+		WithArgs(int64(7), "中信证券", "中信证券", 0.95, "deepseek", "test-model", pendingSignalGroupName, pendingSignalGroupType).
 		WillReturnResult(sqlmock.NewResult(12, 1))
+	mock.ExpectExec("DELETE FROM investment_signal_group").
+		WithArgs(pendingSignalGroupName, pendingSignalGroupType).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()
 
 	// 2. 保存分类并核对新增别名数量和全部 SQL 预期。
@@ -81,6 +84,48 @@ func TestRepositorySaveSignalGroupsWritesGroupAndAliasesInOneTransaction(t *test
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("database expectations = %v", err)
+	}
+}
+
+// TestRepositorySaveSignalGroupsMovesPendingAliasAndDeletesEmptyGroup 验证历史模糊映射只能迁移到正式组。
+func TestRepositorySaveSignalGroupsMovesPendingAliasAndDeletesEmptyGroup(t *testing.T) {
+	ctx := context.Background()
+	db := testdatabase.Open(t)
+	var pendingGroupID int64
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO investment_signal_group(canonical_name, group_type, source)
+		VALUES(?,?,?) RETURNING id
+	`, pendingSignalGroupName, pendingSignalGroupType, "legacy").Scan(&pendingGroupID); err != nil {
+		t.Fatalf("insert pending group: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO investment_signal_alias(group_id, alias_name, normalized_name, confidence, source)
+		VALUES(?,?,?,?,?)
+	`, pendingGroupID, "车企L", "车企l", 0.2, "legacy"); err != nil {
+		t.Fatalf("insert pending alias: %v", err)
+	}
+
+	count, err := NewRepository(db).SaveSignalGroups(ctx, []signalGroupProposal{{
+		CanonicalName: "汽车行业", Type: "sector",
+		Aliases: []signalAliasProposal{{Name: "车企L", Confidence: 0.6}},
+	}}, "test-model")
+	if err != nil || count != 1 {
+		t.Fatalf("SaveSignalGroups() = %d, %v", count, err)
+	}
+	var groupName string
+	if err := db.QueryRowContext(ctx, `
+		SELECT g.canonical_name
+		FROM investment_signal_alias a JOIN investment_signal_group g ON g.id=a.group_id
+		WHERE a.normalized_name=?
+	`, "车企l").Scan(&groupName); err != nil || groupName != "汽车行业" {
+		t.Fatalf("moved group = %q, %v", groupName, err)
+	}
+	var pendingCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM investment_signal_group
+		WHERE canonical_name=? OR group_type=?
+	`, pendingSignalGroupName, pendingSignalGroupType).Scan(&pendingCount); err != nil || pendingCount != 0 {
+		t.Fatalf("pending groups = %d, %v", pendingCount, err)
 	}
 }
 

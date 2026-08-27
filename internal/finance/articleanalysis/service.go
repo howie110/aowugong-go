@@ -24,6 +24,8 @@ const (
 	scheduledSourceStaleAfter   = 72 * time.Hour
 	pendingSignalGroupName      = "待归类"
 	pendingSignalGroupType      = "pending"
+	unclearSignalGroupName      = "信息不明确"
+	unclearSignalGroupType      = "other"
 )
 
 // ArticleGateway 定义投资文章服务需要的外部文章读取能力。
@@ -506,12 +508,8 @@ func (s *Service) analyzeOne(ctx context.Context, article pendingArticle, model 
 		}
 		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", 0, nil
 	}
-	pendingNames := make([]string, 0, len(classification.Pending))
-	for _, candidate := range classification.Pending {
-		pendingNames = append(pendingNames, candidate.Name)
-	}
 	classifiedCount := 0
-	groupsToSave := signalGroupsForPersistence(classification.Groups, pendingNames)
+	groupsToSave := classification.Groups
 	if len(groupsToSave) > 0 {
 		classifiedCount, err = s.repository.SaveSignalGroups(ctx, groupsToSave, model.Model)
 		if err != nil {
@@ -1123,11 +1121,11 @@ func buildAnalysisPrompt(article pendingArticle, groups []SignalGroup) string {
 
 概念组归类规则：
 1. 在同一次返回中，为 recommendations 和 risks 最终保留的每个标的各返回一条 signal_classifications 决策；没有标的时返回空数组。
-2. 每条决策必须选择 reuse、create、pending 三种 action 之一，name 必须与信号列表中的 name 完全一致。
+2. 每条决策必须选择 reuse、create 两种 action 之一，系统不允许 pending 或待归类；name 必须与信号列表中的 name 完全一致。
 3. 优先 reuse，并通过 existing_group_id 引用下方已有概念组；只有确实没有合适概念组时才 create。
 4. 具体公司应上卷到最直接的行业或主题，例如证券公司归入“证券行业”。相关但统计含义不同的主题不要过度合并。
 5. create 的 canonical_name 必须是简洁、通行、单一的行业、主题、资产或市场名称，禁止用斜杠拼接；type 只能是 sector、concept、company、commodity、index、market、crypto、other。
-6. 无法可靠判断时用 pending，不要强行复用或新建。confidence 范围是 0 到 1；reuse 至少 0.80，create 至少 0.90，否则必须 pending。
+6. 信息不足时仍必须明确归类：通用策略归入“投资策略”，无法识别的公司归入“未具名公司”，其他无法辨认的名称归入“信息不明确”；必要时 create。confidence 范围是 0 到 1，只记录可信度。
 7. 每个最终标的必须且只能有一条决策，不得返回信号列表之外的名称。
 
 已有概念组（待归类组已排除，只能使用这里列出的 id）：
@@ -1153,7 +1151,7 @@ JSON 结构：
   "signal_classifications": [
     {
       "name": "与 recommendations 或 risks 完全一致的标的名称",
-      "action": "reuse|create|pending",
+      "action": "reuse|create",
       "existing_group_id": 123,
       "canonical_name": "仅 create 时填写的新概念组名称",
       "type": "仅 create 时填写的概念组类型",

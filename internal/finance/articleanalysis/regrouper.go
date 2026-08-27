@@ -116,8 +116,7 @@ func (s *Service) RebuildSignalGroups(ctx context.Context, days int, apply bool)
 	if !apply {
 		return result, nil
 	}
-	groupsForPersistence := signalGroupsForPersistence(regrouped.Groups, regrouped.PendingAliases)
-	if _, err := s.repository.ReplaceSignalGroups(ctx, groupsForPersistence, model.Model); err != nil {
+	if _, err := s.repository.ReplaceSignalGroups(ctx, regrouped.Groups, model.Model); err != nil {
 		return SignalGroupRebuildResult{}, err
 	}
 	result.Applied = true
@@ -202,7 +201,16 @@ func buildSignalGroupSources(rows []analysisRow, groups []SignalGroup) []signalG
 
 	// 3. 未进入旧词典的名称各自成为来源，交给模型复用、合并或暂缓。
 	unknown := collectUnknownSignalCandidates(rows, groups)
+	includedAliases := make(map[string]struct{})
+	for _, source := range result {
+		for _, alias := range source.Aliases {
+			includedAliases[normalizeSignalAlias(alias)] = struct{}{}
+		}
+	}
 	for _, candidate := range unknown {
+		if _, exists := includedAliases[normalizeSignalAlias(candidate.Name)]; exists {
+			continue
+		}
 		result = append(result, signalGroupSource{
 			ID: fmt.Sprintf("alias:%d", individualIndex), Name: candidate.Name, Type: candidate.Type,
 			Aliases: []string{candidate.Name}, Count: counts[normalizeSignalAlias(candidate.Name)],
@@ -226,16 +234,16 @@ func buildSignalRegroupingPrompt(sources []signalGroupSource) string {
 
 规则：
 1. 从全局语义统一判断，尽量收敛为 20 到 40 个长期稳定、可统计的行业、主题、资产或市场概念组。
-2. 每个来源必须且只能出现一次：放入某个 groups[].sources，或放入 pending；禁止遗漏、重复和虚构 source_id。
+2. 每个来源必须且只能放入某个 groups[].sources；禁止遗漏、重复、虚构 source_id 或返回 pending。
 3. 一个原始标的只属于一个概念组。已有来源内部的 aliases 不得拆开，但语义相近的多个旧组应合并。
 4. 公司、产品和细分称呼优先上卷到最直接且有统计意义的行业或主题，例如“中信证券”“券商板块”归入“证券行业”。
 5. 不要为了凑数量创建单例组；只有真正独立且长期有统计意义的资产或主题才允许单独成组。
 6. canonical_name 必须是一个简洁通行名称，禁止用斜杠或列表拼接；type 使用 sector、concept、company、commodity、index、market、crypto 或 other。
-7. confidence 是 0 到 1；低于 0.80 或无法可靠判断的来源放入 pending。
+7. confidence 是 0 到 1，只记录可信度。信息不足时仍必须明确归类：通用策略归入“投资策略”，无法识别的公司归入“未具名公司”，其余无法辨认的来源归入“信息不明确”。
 8. source_id 必须原样返回。只返回 JSON，不要解释，不要 Markdown。
 
 输出结构：
-{"groups":[{"canonical_name":"证券行业","type":"sector","sources":[{"source_id":"group:1","confidence":0.98},{"source_id":"alias:0","confidence":0.95}]}],"pending":[{"source_id":"alias:1","confidence":0.40}]}`,
+{"groups":[{"canonical_name":"证券行业","type":"sector","sources":[{"source_id":"group:1","confidence":0.98},{"source_id":"alias:0","confidence":0.95}]}]}`,
 		string(sourcesJSON))
 }
 
@@ -286,10 +294,6 @@ func parseSignalRegroupingJSON(content string, sources []signalGroupSource) (sig
 			if err != nil {
 				return signalRegroupingResult{}, err
 			}
-			if reference.Confidence < signalClassificationConfidenceThreshold {
-				appendPendingSignalAliases(&result, source.Aliases, seenAliases)
-				continue
-			}
 			for _, alias := range source.Aliases {
 				key := normalizeSignalAlias(alias)
 				if key == "" {
@@ -307,14 +311,42 @@ func parseSignalRegroupingJSON(content string, sources []signalGroupSource) (sig
 		}
 	}
 
-	// 3. 验证显式待归类来源，并确保模型完整覆盖每一个输入来源。
-	for _, pending := range payload.Pending {
-		source, err := consumeSignalRegroupingSource(pending.SourceID, pending.Confidence, sourceIndex, seenSources)
-		if err != nil {
-			return signalRegroupingResult{}, err
+	// 3. 模型若仍返回 pending，后端强制改写为正式的“信息不明确”组。
+	if len(payload.Pending) > 0 {
+		fallbackPosition := -1
+		for index, group := range result.Groups {
+			if group.CanonicalName == unclearSignalGroupName {
+				fallbackPosition = index
+				break
+			}
 		}
-		appendPendingSignalAliases(&result, source.Aliases, seenAliases)
+		if fallbackPosition < 0 {
+			fallbackPosition = len(result.Groups)
+			result.Groups = append(result.Groups, signalGroupProposal{
+				CanonicalName: unclearSignalGroupName, Type: unclearSignalGroupType, Aliases: []signalAliasProposal{},
+			})
+		}
+		for _, pending := range payload.Pending {
+			source, err := consumeSignalRegroupingSource(pending.SourceID, pending.Confidence, sourceIndex, seenSources)
+			if err != nil {
+				return signalRegroupingResult{}, err
+			}
+			for _, alias := range source.Aliases {
+				key := normalizeSignalAlias(alias)
+				if key == "" {
+					continue
+				}
+				if _, exists := seenAliases[key]; exists {
+					return signalRegroupingResult{}, fmt.Errorf("信号全局归类别名重复归属 %q", alias)
+				}
+				seenAliases[key] = struct{}{}
+				result.Groups[fallbackPosition].Aliases = append(result.Groups[fallbackPosition].Aliases,
+					signalAliasProposal{Name: strings.TrimSpace(alias), Confidence: pending.Confidence})
+			}
+		}
 	}
+
+	// 4. 确保模型通过正式概念组完整覆盖每一个输入来源。
 	missing := make([]string, 0)
 	for _, source := range sources {
 		if _, exists := seenSources[source.ID]; !exists {
@@ -372,26 +404,6 @@ func consumeSignalRegroupingSource(sourceID string, confidence float64, sourceIn
 	return source, nil
 }
 
-// appendPendingSignalAliases 把来源别名追加到待归类集合并保持唯一顺序。
-// 输入：result 是当前结果，aliases 是来源别名，seen 记录全局已归属名称。
-// 输出：无；重复归属不会再次追加。
-// 副作用：修改 result.PendingAliases 和 seen。
-func appendPendingSignalAliases(result *signalRegroupingResult, aliases []string, seen map[string]struct{}) {
-	// 1. 清理空值并按来源顺序记录唯一待归类别名。
-	for _, alias := range aliases {
-		name := strings.TrimSpace(alias)
-		key := normalizeSignalAlias(name)
-		if key == "" {
-			continue
-		}
-		if _, exists := seen[key]; exists {
-			continue
-		}
-		seen[key] = struct{}{}
-		result.PendingAliases = append(result.PendingAliases, name)
-	}
-}
-
 // uniqueSignalAliases 清理并去重一个来源中的原始别名。
 // 输入：aliases 是数据库稳定顺序的原始名称。
 // 输出：返回去除空值和大小写重复后的名称数组。
@@ -417,7 +429,7 @@ func uniqueSignalAliases(aliases []string) []string {
 
 // summarizeSignalRegrouping 把内部重组建议转换为稳定的人工审查摘要。
 // 输入：regrouped 是已校验结果，sourceCount 和 previousGroupCount 描述变更规模。
-// 输出：返回按别名数量倒序的概念组摘要和完整待归类名单。
+// 输出：返回按别名数量倒序的概念组摘要，待归类数量恒为零。
 // 副作用：无。
 func summarizeSignalRegrouping(regrouped signalRegroupingResult, sourceCount int, previousGroupCount int) SignalGroupRebuildResult {
 	// 1. 统计可写入别名数量并生成组级摘要。
@@ -434,11 +446,10 @@ func summarizeSignalRegrouping(regrouped signalRegroupingResult, sourceCount int
 		return groups[left].AliasCount > groups[right].AliasCount
 	})
 
-	// 2. 待归类名称保持模型来源顺序，便于人工定位和后续增量处理。
-	pending := append([]string(nil), regrouped.PendingAliases...)
+	// 2. 全部来源必须进入正式组，兼容字段固定返回空值。
 	return SignalGroupRebuildResult{
 		SourceCount: sourceCount, PreviousGroupCount: previousGroupCount,
 		GroupCount: len(regrouped.Groups), AliasCount: aliasCount,
-		PendingAliasCount: len(pending), PendingAliases: pending, Groups: groups,
+		PendingAliasCount: 0, PendingAliases: []string{}, Groups: groups,
 	}
 }
