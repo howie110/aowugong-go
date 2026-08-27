@@ -85,6 +85,7 @@ export type SyncResult = {
 
 export type AnalysisBatchResult = {
   analyzed_count: number;
+  classified_alias_count: number;
   skipped_count: number;
   error_count: number;
   items: Array<Record<string, unknown>>;

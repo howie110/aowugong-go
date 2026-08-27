@@ -150,16 +150,19 @@ export function ArticleFetchPage() {
     }
   }
 
-  /** handleAnalyze 仅分析当前库中尚未分析的文章。 */
+  /** handleAnalyze 分析当前库中尚未分析的文章并补齐信号概念映射。 */
   async function handleAnalyze() {
     // 1. 执行待分析批次并在完成后刷新页面数据。
     setIsWorking(true);
     try {
       const result = await analyzePendingArticles(50, true);
-      notify.success("分析完成", `成功 ${result.analyzed_count} 篇，跳过 ${result.skipped_count} 篇，失败 ${result.error_count} 篇。`);
+      notify.success(
+        "分析完成",
+        `成功 ${result.analyzed_count} 篇，归类 ${result.classified_alias_count} 个信号，跳过 ${result.skipped_count} 篇，失败 ${result.error_count} 篇。`,
+      );
       await loadData();
     } catch (error) {
-      notify.errorFrom(error, "分析文章失败");
+      notify.errorFrom(error, "分析或归类文章失败");
     } finally {
       setIsWorking(false);
     }

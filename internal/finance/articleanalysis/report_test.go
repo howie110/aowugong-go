@@ -149,19 +149,22 @@ func TestBuildSignalStatsPreservesRawAliasSpellings(t *testing.T) {
 }
 
 // TestBuildSignalStatsCombinesUnmappedAliasesAtBottom 验证未归类标的不再各自占据信号榜行。
-// 输入：一个已映射证券行业和两个尚未映射的原始名称。
+// 输入：一个已映射证券行业、一个已登记待归类别名和一个尚未映射名称。
 // 输出：排行榜只包含证券行业与末尾的待归类行，并完整保留待归类成员。
 // 副作用：无。
 func TestBuildSignalStatsCombinesUnmappedAliasesAtBottom(t *testing.T) {
 	// 1. 构造高频未知名称和低频已映射证券信号，确保排序规则会受到检验。
-	groups := []SignalGroup{{ID: 1, Name: "证券行业", Type: "sector", Aliases: []string{"券商"}}}
+	groups := []SignalGroup{
+		{ID: 1, Name: "证券行业", Type: "sector", Aliases: []string{"券商"}},
+		{ID: 2, Name: pendingSignalGroupName, Type: pendingSignalGroupType, Aliases: []string{"里子"}},
+	}
 	rows := []analysisRow{
 		{Recommendations: []Signal{{Name: "传统行业"}, {Name: "里子"}}, OccurredAt: "2026-07-20"},
 		{Recommendations: []Signal{{Name: "传统行业"}, {Name: "里子"}}, OccurredAt: "2026-07-19"},
 		{Risks: []Signal{{Name: "券商"}}, OccurredAt: "2026-07-18"},
 	}
 
-	// 2. 两个未知名称合并成一行且固定排在已确认概念组之后。
+	// 2. 已登记和未登记的待归类名称合并成一行，固定排在已确认概念组之后。
 	result := buildSignalStats(rows, groups)
 	if len(result) != 2 || result[0].Name != "证券行业" || result[1].Name != pendingSignalGroupName {
 		t.Fatalf("signals = %#v", result)
@@ -171,11 +174,11 @@ func TestBuildSignalStatsCombinesUnmappedAliasesAtBottom(t *testing.T) {
 	}
 }
 
-// TestAnalysisPromptTemplateKeepsFinalV7Rules 验证 Go 分析提示词保留现有 v7 最终规则。
+// TestAnalysisPromptTemplateKeepsFinalV8Rules 验证 Go 分析提示词同时完成文章判断和概念归类。
 // 输入：页面展示使用的占位符提示词。
 // 输出：结果导向示例、未来理由范围和推荐风险原因约束均完整存在。
 // 副作用：无。
-func TestAnalysisPromptTemplateKeepsFinalV7Rules(t *testing.T) {
+func TestAnalysisPromptTemplateKeepsFinalV8Rules(t *testing.T) {
 	// 1. 读取页面与实际分析共用的唯一提示词模板。
 	prompt := AnalysisPromptTemplate()
 
@@ -187,6 +190,10 @@ func TestAnalysisPromptTemplateKeepsFinalV7Rules(t *testing.T) {
 		`"reason": "80字以内综合原因，说明为什么最终偏风险"`,
 		`"mood_reason": "80字以内原因，说明文章为什么体现这种短期市场氛围"`,
 		`"prediction_reason": "80字以内原因，说明文章为什么体现这种短期涨跌预测"`,
+		`"signal_classifications"`,
+		"每个最终标的必须且只能有一条决策",
+		"优先 reuse",
+		`{"id":123,"name":"{现有概念组名称}","type":"sector"}`,
 	}
 	for _, fragment := range required {
 		if !strings.Contains(prompt, fragment) {

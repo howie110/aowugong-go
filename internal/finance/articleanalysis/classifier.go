@@ -226,8 +226,15 @@ func parseSignalClassificationJSON(content string, candidates []signalCandidate,
 	if err := json.Unmarshal([]byte(content), &payload); err != nil {
 		return signalClassificationBatchResult{}, fmt.Errorf("解析信号分类 JSON: %w", err)
 	}
+	return validateSignalClassificationPayload(payload, candidates, groups)
+}
 
-	// 2. 建立候选、已有组和已有规范名索引，后端决定 reuse 的最终组名。
+// validateSignalClassificationPayload 校验结构化分类决策并生成持久化建议。
+// 输入：payload 是模型决策，candidates 是本轮名称，groups 是允许复用的现有概念组。
+// 输出：返回待保存概念组和待归类名称；遗漏、重复或越权决策会返回错误。
+// 副作用：无。
+func validateSignalClassificationPayload(payload signalClassificationPayload, candidates []signalCandidate, groups []SignalGroup) (signalClassificationBatchResult, error) {
+	// 1. 建立候选、已有组和已有规范名索引，后端决定 reuse 的最终组名。
 	candidateIndex := make(map[string]signalCandidate, len(candidates))
 	for _, candidate := range candidates {
 		candidateIndex[normalizeSignalAlias(candidate.Name)] = candidate
@@ -239,7 +246,7 @@ func parseSignalClassificationJSON(content string, candidates []signalCandidate,
 		existingNames[normalizeSignalAlias(group.Name)] = struct{}{}
 	}
 
-	// 3. 逐项验证三态动作，并把高置信度映射合并为仓储写入建议。
+	// 2. 逐项验证三态动作，并把高置信度映射合并为仓储写入建议。
 	seen := make(map[string]struct{}, len(candidates))
 	result := signalClassificationBatchResult{Groups: []signalGroupProposal{}, Pending: []signalCandidate{}}
 	positions := make(map[string]int)
@@ -304,7 +311,7 @@ func parseSignalClassificationJSON(content string, candidates []signalCandidate,
 		result.Groups[position].Aliases = append(result.Groups[position].Aliases, signalAliasProposal{Name: candidate.Name, Confidence: decision.Confidence})
 	}
 
-	// 4. 缺少任一候选都拒绝整批结果，避免写入半套分类。
+	// 3. 缺少任一候选都拒绝整批结果，避免写入半套分类。
 	missing := make([]string, 0)
 	for _, candidate := range candidates {
 		if _, exists := seen[normalizeSignalAlias(candidate.Name)]; !exists {

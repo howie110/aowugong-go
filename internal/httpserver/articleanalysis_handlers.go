@@ -381,7 +381,7 @@ func (h articleAnalysisHandlers) sync(w http.ResponseWriter, request *http.Reque
 	writeJSON(w, http.StatusOK, result)
 }
 
-// analyze 手动分析一批待处理文章。
+// analyze 手动分析一批待处理文章并补齐信号概念映射。
 // 输入：limit 范围 1 到 50。
 // 输出：写入 AnalysisBatchResult。
 // 副作用：调用当前分析模型、写入 PostgreSQL 和 HTTP 响应。
@@ -392,15 +392,9 @@ func (h articleAnalysisHandlers) analyze(w http.ResponseWriter, request *http.Re
 		return
 	}
 	all := request.URL.Query().Get("all") == "true"
-	var result articleanalysis.AnalysisBatchResult
-	var err error
-	if all {
-		result, err = h.service.AnalyzeAllPending(request.Context())
-	} else {
-		result, err = h.service.AnalyzePending(request.Context(), limit)
-	}
+	result, err := h.service.AnalyzeAndClassifyPending(request.Context(), limit, all)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "分析投资文章失败")
+		writeError(w, http.StatusInternalServerError, "internal_error", "分析或归类投资文章失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

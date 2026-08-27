@@ -3,7 +3,7 @@ package articleanalysis
 
 const (
 	// PromptVersion 标识当前投资文章结构化提示词版本。
-	PromptVersion = "investment_article_single_verdict_v7"
+	PromptVersion = "investment_article_single_verdict_v8"
 	// DefaultTargetDays 是信号榜默认统计天数。
 	DefaultTargetDays = 60
 	// DefaultMarketDays 是短期市场判断默认统计天数。
@@ -63,10 +63,11 @@ type MarketJudgment struct {
 
 // AnalysisResult 描述模型输出和数据库写入使用的结构化结果。
 type AnalysisResult struct {
-	Summary         string         `json:"summary"`
-	Recommendations []Signal       `json:"recommendations"`
-	Risks           []Signal       `json:"risks"`
-	Market          MarketJudgment `json:"market"`
+	Summary               string                         `json:"summary"`
+	Recommendations       []Signal                       `json:"recommendations"`
+	Risks                 []Signal                       `json:"risks"`
+	SignalClassifications []signalClassificationDecision `json:"signal_classifications"`
+	Market                MarketJudgment                 `json:"market"`
 }
 
 // Analysis 描述文章详情抽屉使用的分析字段。
@@ -230,10 +231,11 @@ type WeReadCredentialCheckResult struct {
 
 // AnalysisBatchResult 描述一批待分析文章的处理统计。
 type AnalysisBatchResult struct {
-	AnalyzedCount int              `json:"analyzed_count"`
-	SkippedCount  int              `json:"skipped_count"`
-	ErrorCount    int              `json:"error_count"`
-	Items         []map[string]any `json:"items"`
+	AnalyzedCount        int              `json:"analyzed_count"`
+	ClassifiedAliasCount int              `json:"classified_alias_count"`
+	SkippedCount         int              `json:"skipped_count"`
+	ErrorCount           int              `json:"error_count"`
+	Items                []map[string]any `json:"items"`
 }
 
 // ParseBatchResult 描述一批文章正文解析的处理统计。

@@ -231,6 +231,33 @@ func TestSignalGroupsForPersistenceAddsSinglePendingGroup(t *testing.T) {
 	}
 }
 
+// TestFilterSignalClassificationDecisionsOnlyDropsNormalizedSignals 验证后端过滤信号与模型越权名称得到不同处理。
+func TestFilterSignalClassificationDecisionsOnlyDropsNormalizedSignals(t *testing.T) {
+	// 1. “科技大涨”会被结果导向规则删除，“凭空标的”从未出现在文章分析信号中。
+	raw := AnalysisResult{Recommendations: []Signal{
+		{Name: "贵州茅台（A股）", Type: "stock", Reason: "估值有望修复"},
+		{Name: "科技大涨", Type: "sector", Reason: "今日领涨"},
+	}}
+	normalized := NormalizeAnalysis(raw)
+	decisions := []signalClassificationDecision{
+		{Name: "贵州茅台（A股）", Action: "pending", Confidence: 0.4},
+		{Name: "科技大涨", Action: "pending", Confidence: 0.4},
+		{Name: "凭空标的", Action: "pending", Confidence: 0.4},
+	}
+
+	// 2. 有效名称跟随后端压缩，已过滤信号消失，越权名称留下并交给严格校验拒绝。
+	filtered := filterSignalClassificationDecisions(decisions, raw, analysisSignalCandidates(normalized))
+	if len(filtered) != 2 || filtered[0].Name != "贵州茅台" || filtered[1].Name != "凭空标的" {
+		t.Fatalf("filtered = %#v", filtered)
+	}
+	_, err := validateSignalClassificationPayload(
+		signalClassificationPayload{Decisions: filtered}, analysisSignalCandidates(normalized), nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "未请求名称") {
+		t.Fatalf("error = %v, want unknown-name rejection", err)
+	}
+}
+
 // TestBuildSignalClassificationPromptRequiresCanonicalIndustryRollup 验证分类提示词使用稳定规范名并允许个股上卷。
 // 输入：已有证券行业组和未知个股中信证券。
 // 输出：提示词要求复用已有组、个股上卷且规范名禁止斜杠拼接。
@@ -249,17 +276,20 @@ func TestBuildSignalClassificationPromptRequiresCanonicalIndustryRollup(t *testi
 	}
 }
 
-// TestServiceClassifySignalAliasesPersistsUnknownNames 验证任务内部批量分类并持久化未知名称。
-// 输入：六十天内的券商和中信证券信号、空概念词典及固定 DeepSeek 响应。
-// 输出：新增两个别名并把两者写入同一证券行业组。
+// TestServiceAnalyzeAndClassifyPendingPersistsUnknownNames 验证页面分析操作会补齐未知信号映射。
+// 输入：没有待分析文章、六十天内的券商和中信证券信号、空概念词典及固定模型响应。
+// 输出：即使未分析新文章，也新增两个别名并把两者写入同一证券行业组。
 // 副作用：执行模拟 SQLite 查询、事务写入和模型调用。
-func TestServiceClassifySignalAliasesPersistsUnknownNames(t *testing.T) {
-	// 1. 准备统计行、空概念词典和完整分类响应。
+func TestServiceAnalyzeAndClassifyPendingPersistsUnknownNames(t *testing.T) {
+	// 1. 准备空待分析列表、统计行、空概念词典和完整分类响应。
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New() error = %v", err)
 	}
 	defer db.Close()
+	mock.ExpectQuery("SELECT article.id, article.title").
+		WithArgs(10).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "link", "summary", "content", "published_at", "source_name", "source_type"}))
 	mock.ExpectQuery("SELECT COALESCE\\(analysis.recommendations_json").
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"recommendations_json", "risks_json", "market_mood", "prediction", "occurred_at"}).
@@ -281,12 +311,12 @@ func TestServiceClassifySignalAliasesPersistsUnknownNames(t *testing.T) {
 
 	// 2. 执行分类并核对新增数量、提示词和数据库交互。
 	service := NewService(NewRepository(db), ServiceOptions{Model: "test-model", Analyzer: gateway})
-	inserted, err := service.classifySignalAliases(context.Background(), 60)
+	result, err := service.AnalyzeAndClassifyPending(context.Background(), 10, false)
 	if err != nil {
-		t.Fatalf("classifySignalAliases() error = %v", err)
+		t.Fatalf("AnalyzeAndClassifyPending() error = %v", err)
 	}
-	if inserted != 2 || !strings.Contains(gateway.prompt, "中信证券") {
-		t.Fatalf("inserted = %d, prompt = %q", inserted, gateway.prompt)
+	if result.AnalyzedCount != 0 || result.ClassifiedAliasCount != 2 || !strings.Contains(gateway.prompt, "中信证券") {
+		t.Fatalf("result = %#v, prompt = %q", result, gateway.prompt)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("database expectations = %v", err)

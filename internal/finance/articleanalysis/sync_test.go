@@ -114,6 +114,10 @@ func (staleArticleGateway) Fetch(ctx context.Context, sourceID int64, feedURL st
 
 type fixedAnalysisGateway struct{}
 
+type countingCombinedAnalysisGateway struct {
+	calls int
+}
+
 // Configured 表示测试模型客户端已配置。
 // 输入：无。
 // 输出：返回 true。
@@ -121,6 +125,17 @@ type fixedAnalysisGateway struct{}
 func (fixedAnalysisGateway) Configured() bool {
 	// 1. 允许同步流程进入分析阶段。
 	return true
+}
+
+// Configured 表示单次分析归类测试模型已配置。
+func (*countingCombinedAnalysisGateway) Configured() bool {
+	return true
+}
+
+// SimpleChat 在一份 JSON 中同时返回文章信号和新概念组决策。
+func (g *countingCombinedAnalysisGateway) SimpleChat(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	g.calls++
+	return `{"summary":"分析摘要","recommendations":[{"name":"测试标的甲","type":"stock","reason":"估值有望修复"}],"risks":[],"signal_classifications":[{"name":"测试标的甲","action":"create","canonical_name":"测试行业甲","type":"sector","confidence":0.96}],"market":{"mood":"neutral","mood_reason":"等待确认","prediction":"range","prediction_reason":"震荡"}}`, nil
 }
 
 // SimpleChat 返回测试使用的结构化模型 JSON。
@@ -132,7 +147,11 @@ func (fixedAnalysisGateway) SimpleChat(ctx context.Context, prompt string, maxTo
 	if strings.Contains(prompt, "本轮待分类名称") {
 		return `{"decisions":[{"name":"贵州茅台","action":"create","canonical_name":"白酒行业","type":"sector","confidence":0.96}]}`, nil
 	}
-	return "```json\n{\"summary\":\"分析摘要\",\"recommendations\":[{\"name\":\"贵州茅台\",\"type\":\"stock\",\"reason\":\"估值有望修复\"}],\"risks\":[],\"market\":{\"mood\":\"cautious\",\"mood_reason\":\"等待确认\",\"prediction\":\"range\",\"prediction_reason\":\"震荡\"}}\n```", nil
+	decision := `{"name":"贵州茅台","action":"create","canonical_name":"白酒行业","type":"sector","confidence":0.96}`
+	if strings.Contains(prompt, `"name":"白酒行业"`) {
+		decision = `{"name":"贵州茅台","action":"reuse","existing_group_id":1,"confidence":0.96}`
+	}
+	return "```json\n{\"summary\":\"分析摘要\",\"recommendations\":[{\"name\":\"贵州茅台\",\"type\":\"stock\",\"reason\":\"估值有望修复\"}],\"risks\":[],\"signal_classifications\":[" + decision + "],\"market\":{\"mood\":\"cautious\",\"mood_reason\":\"等待确认\",\"prediction\":\"range\",\"prediction_reason\":\"震荡\"}}\n```", nil
 }
 
 // TestServiceSyncsArticlesAndAnalyzesThroughUnifiedEntry 验证抓取与分析完整业务入口。
@@ -158,8 +177,8 @@ func TestServiceSyncsArticlesAndAnalyzesThroughUnifiedEntry(t *testing.T) {
 	if result.InsertedCount != 1 || result.UpdatedCount != 0 || result.AnalyzedCount != 1 {
 		t.Fatalf("first result = %#v", result)
 	}
-	if result.ClassifiedAliasCount != 0 {
-		t.Fatalf("direct sync classified aliases = %d, want 0", result.ClassifiedAliasCount)
+	if result.ClassifiedAliasCount != 1 {
+		t.Fatalf("direct sync classified aliases = %d, want 1", result.ClassifiedAliasCount)
 	}
 
 	// 3. 再次读取同一份 Miniflux 数据时跳过已有文章，不重复更新大字段。
@@ -178,6 +197,45 @@ func TestServiceSyncsArticlesAndAnalyzesThroughUnifiedEntry(t *testing.T) {
 	}
 	if articles[0].MarketMood != "neutral" || len(articles[0].RecommendationNames) != 1 {
 		t.Errorf("article = %#v", articles[0])
+	}
+}
+
+// TestServiceAnalyzesAndClassifiesArticleWithOneModelCall 验证新文章不再额外调用第二次分类模型。
+func TestServiceAnalyzesAndClassifiesArticleWithOneModelCall(t *testing.T) {
+	// 1. 建立一篇待同步文章和会记录调用次数的组合模型。
+	ctx := context.Background()
+	db := testdatabase.Open(t)
+	repository := NewRepository(db)
+	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("SyncDefaultSource() error = %v", err)
+	}
+	gateway := &countingCombinedAnalysisGateway{}
+	service := NewService(repository, ServiceOptions{
+		Model: "test-model", Articles: &fixedArticleGateway{}, Analyzer: gateway,
+	})
+
+	// 2. 一次模型请求后，文章和概念别名都必须成功落库。
+	result, err := service.Sync(ctx, 30, true, 10)
+	if err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	groups, err := repository.SignalGroups(ctx)
+	if err != nil {
+		t.Fatalf("SignalGroups() error = %v", err)
+	}
+	if gateway.calls != 1 || result.AnalyzedCount != 1 || result.ClassifiedAliasCount != 1 {
+		var analysisError string
+		_ = db.QueryRowContext(ctx, `SELECT COALESCE(error_message, '') FROM investment_article_analysis LIMIT 1`).Scan(&analysisError)
+		t.Fatalf("calls = %d, result = %#v, analysis error = %q", gateway.calls, result, analysisError)
+	}
+	found := false
+	for _, group := range groups {
+		if group.Name == "测试行业甲" && strings.Join(group.Aliases, ",") == "测试标的甲" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("groups = %#v", groups)
 	}
 }
 

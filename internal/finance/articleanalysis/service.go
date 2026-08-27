@@ -143,6 +143,7 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 			return SyncResult{}, err
 		}
 		result.AnalyzedCount = analysisResult.AnalyzedCount
+		result.ClassifiedAliasCount = analysisResult.ClassifiedAliasCount
 		result.SkippedCount = analysisResult.SkippedCount
 		result.ErrorCount = analysisResult.ErrorCount
 	}
@@ -266,6 +267,7 @@ func (s *Service) SyncScheduled(ctx context.Context, classifySignals bool) (Sync
 			return result, fmt.Errorf("分析第 %d 批投资文章: %w", batch+1, analyzeErr)
 		}
 		result.AnalyzedCount += analysisResult.AnalyzedCount
+		result.ClassifiedAliasCount += analysisResult.ClassifiedAliasCount
 		result.SkippedCount += analysisResult.SkippedCount
 		result.ErrorCount += analysisResult.ErrorCount
 		counts, err = s.repository.counts(ctx)
@@ -378,14 +380,25 @@ func (s *Service) AnalyzePending(ctx context.Context, limit int) (AnalysisBatchR
 	if err != nil {
 		return AnalysisBatchResult{}, err
 	}
+	groups, err := s.repository.SignalGroups(ctx)
+	if err != nil {
+		return AnalysisBatchResult{}, err
+	}
 
-	// 2. 每篇独立分析和落库，模型错误不阻断下一篇。
+	// 2. 每篇使用当时最新概念组分析和落库，模型错误不阻断下一篇。
 	for _, article := range articles {
-		item, status, err := s.analyzeOne(ctx, article, model)
+		item, status, classifiedCount, err := s.analyzeOne(ctx, article, model, groups)
 		if err != nil {
 			return AnalysisBatchResult{}, err
 		}
 		result.Items = append(result.Items, item)
+		result.ClassifiedAliasCount += classifiedCount
+		if classifiedCount > 0 {
+			groups, err = s.repository.SignalGroups(ctx)
+			if err != nil {
+				return AnalysisBatchResult{}, err
+			}
+		}
 		switch status {
 		case "success":
 			result.AnalyzedCount++
@@ -412,6 +425,7 @@ func (s *Service) AnalyzeAllPending(ctx context.Context) (AnalysisBatchResult, e
 			return AnalysisBatchResult{}, err
 		}
 		result.AnalyzedCount += current.AnalyzedCount
+		result.ClassifiedAliasCount += current.ClassifiedAliasCount
 		result.SkippedCount += current.SkippedCount
 		result.ErrorCount += current.ErrorCount
 		result.Items = append(result.Items, current.Items...)
@@ -422,42 +436,139 @@ func (s *Service) AnalyzeAllPending(ctx context.Context) (AnalysisBatchResult, e
 	return result, nil
 }
 
+// AnalyzeAndClassifyPending 分析待处理文章并补齐六十天信号概念映射。
+// 输入：ctx 控制处理，limit 是单批上限，all 控制是否连续处理全部待分析文章。
+// 输出：返回文章分析和新增信号别名数量；分析或归类失败时返回错误。
+// 副作用：调用当前分析模型并写入文章分析、信号概念组和别名表。
+func (s *Service) AnalyzeAndClassifyPending(ctx context.Context, limit int, all bool) (AnalysisBatchResult, error) {
+	// 1. 页面选择全部时复用多批入口，否则只处理指定上限。
+	var result AnalysisBatchResult
+	var err error
+	if all {
+		result, err = s.AnalyzeAllPending(ctx)
+	} else {
+		result, err = s.AnalyzePending(ctx, limit)
+	}
+	if err != nil {
+		return result, err
+	}
+
+	// 2. 即使没有待分析文章，也补扫统计窗口内尚未映射的信号名称。
+	classifiedCount, err := s.classifySignalAliases(ctx, DefaultTargetDays)
+	if err != nil {
+		return result, fmt.Errorf("归类投资信号: %w", err)
+	}
+	result.ClassifiedAliasCount += classifiedCount
+	return result, nil
+}
+
 // analyzeOne 分析单篇文章并持久化最终状态。
-// 输入：ctx 控制模型请求，article 是待分析文章。
-// 输出：返回页面结果项、业务状态和仅数据库失败时使用的错误。
-// 副作用：调用当前分析模型并写入 PostgreSQL。
-func (s *Service) analyzeOne(ctx context.Context, article pendingArticle, model analysisModelRuntime) (map[string]any, string, error) {
+// 输入：ctx 控制模型请求，article 是待分析文章，groups 是当前概念词典。
+// 输出：返回页面结果项、业务状态、新增别名数和仅数据库失败时使用的错误。
+// 副作用：调用当前分析模型并写入 PostgreSQL 分析及概念映射表。
+func (s *Service) analyzeOne(ctx context.Context, article pendingArticle, model analysisModelRuntime, groups []SignalGroup) (map[string]any, string, int, error) {
 	// 1. 未配置模型时保留 pending，便于配置后重试。
 	if model.Analyzer == nil || !model.Analyzer.Configured() {
 		message := "未配置可用的文章分析模型"
 		if err := s.repository.SaveAnalysis(ctx, article.ID, "pending", AnalysisResult{}, message, model.Model, PromptVersion); err != nil {
-			return nil, "", err
+			return nil, "", 0, err
 		}
-		return map[string]any{"article_id": article.ID, "status": "skipped", "message": message}, "skipped", nil
+		return map[string]any{"article_id": article.ID, "status": "skipped", "message": message}, "skipped", 0, nil
 	}
 
-	// 2. 调用模型并解析、规范化严格 JSON。
-	content, err := model.Analyzer.SimpleChat(ctx, buildAnalysisPrompt(article), 1600)
+	// 2. 同一次模型调用完成文章分析和每个标的的概念组决策。
+	content, err := model.Analyzer.SimpleChat(ctx, buildAnalysisPrompt(article, groups), 2400)
 	if err != nil {
 		message := err.Error()
 		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", AnalysisResult{}, message, model.Model, PromptVersion); saveErr != nil {
-			return nil, "", saveErr
+			return nil, "", 0, saveErr
 		}
-		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", nil
+		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", 0, nil
 	}
 	parsed, err := parseAnalysisJSON(content)
 	if err != nil {
 		message := "模型 JSON 解析失败：" + err.Error()
 		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", AnalysisResult{}, message, model.Model, PromptVersion); saveErr != nil {
-			return nil, "", saveErr
+			return nil, "", 0, saveErr
 		}
-		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", nil
+		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", 0, nil
 	}
 	normalized := NormalizeAnalysis(parsed)
-	if err := s.repository.SaveAnalysis(ctx, article.ID, "success", normalized, "", model.Model, PromptVersion); err != nil {
-		return nil, "", err
+	candidates := analysisSignalCandidates(normalized)
+	classification, err := validateSignalClassificationPayload(
+		signalClassificationPayload{Decisions: filterSignalClassificationDecisions(parsed.SignalClassifications, parsed, candidates)},
+		candidates, groups,
+	)
+	if err != nil {
+		message := "模型信号归类失败：" + err.Error()
+		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", normalized, message, model.Model, PromptVersion); saveErr != nil {
+			return nil, "", 0, saveErr
+		}
+		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", 0, nil
 	}
-	return map[string]any{"article_id": article.ID, "status": "success"}, "success", nil
+	pendingNames := make([]string, 0, len(classification.Pending))
+	for _, candidate := range classification.Pending {
+		pendingNames = append(pendingNames, candidate.Name)
+	}
+	classifiedCount := 0
+	groupsToSave := signalGroupsForPersistence(classification.Groups, pendingNames)
+	if len(groupsToSave) > 0 {
+		classifiedCount, err = s.repository.SaveSignalGroups(ctx, groupsToSave, model.Model)
+		if err != nil {
+			return nil, "", 0, err
+		}
+	}
+	if err := s.repository.SaveAnalysis(ctx, article.ID, "success", normalized, "", model.Model, PromptVersion); err != nil {
+		return nil, "", 0, err
+	}
+	return map[string]any{"article_id": article.ID, "status": "success", "classified_alias_count": classifiedCount}, "success", classifiedCount, nil
+}
+
+// analysisSignalCandidates 返回最终文章信号中的唯一分类候选。
+func analysisSignalCandidates(result AnalysisResult) []signalCandidate {
+	seen := make(map[string]struct{})
+	candidates := make([]signalCandidate, 0, len(result.Recommendations)+len(result.Risks))
+	appendSignals := func(signals []Signal) {
+		for _, signal := range signals {
+			key := normalizeSignalAlias(signal.Name)
+			if key == "" {
+				continue
+			}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			candidates = append(candidates, signalCandidate{Name: signal.Name, Type: signal.Type})
+		}
+	}
+	appendSignals(result.Recommendations)
+	appendSignals(result.Risks)
+	return candidates
+}
+
+// filterSignalClassificationDecisions 丢弃规范化时已移除信号的对应决策，并保留真正的越权名称供校验拒绝。
+func filterSignalClassificationDecisions(decisions []signalClassificationDecision, raw AnalysisResult, candidates []signalCandidate) []signalClassificationDecision {
+	allowed := make(map[string]string, len(candidates))
+	for _, candidate := range candidates {
+		allowed[normalizeSignalAlias(candidate.Name)] = candidate.Name
+	}
+	rawNames := make(map[string]struct{}, len(raw.Recommendations)+len(raw.Risks))
+	for _, signal := range append(append([]Signal{}, raw.Recommendations...), raw.Risks...) {
+		rawNames[normalizeSignalAlias(compactSignalName(signal.Name))] = struct{}{}
+	}
+	result := make([]signalClassificationDecision, 0, len(decisions))
+	for _, decision := range decisions {
+		key := normalizeSignalAlias(compactSignalName(decision.Name))
+		if normalizedName, exists := allowed[key]; exists {
+			decision.Name = normalizedName
+			result = append(result, decision)
+			continue
+		}
+		if _, removedByNormalization := rawNames[key]; !removedByNormalization {
+			result = append(result, decision)
+		}
+	}
+	return result
 }
 
 // parseAnalysisJSON 解码模型纯 JSON 或 Markdown fenced JSON。
@@ -781,10 +892,13 @@ func buildSignalStats(rows []analysisRow, groups []SignalGroup) []SignalStat {
 			groupKey := "pending"
 			groupName, groupType := pendingSignalGroupName, pendingSignalGroupType
 			if group, exists := groupIndex[normalizeSignalAlias(signal.Name)]; exists {
-				groupKey = fmt.Sprintf("group:%d:%s", group.ID, normalizeSignalAlias(group.Name))
-				groupName = group.Name
-				if strings.TrimSpace(group.Type) != "" {
-					groupType = group.Type
+				// 已持久化的待归类别名与尚未映射信号必须进入同一特殊分组。
+				if group.Name != pendingSignalGroupName && group.Type != pendingSignalGroupType {
+					groupKey = fmt.Sprintf("group:%d:%s", group.ID, normalizeSignalAlias(group.Name))
+					groupName = group.Name
+					if strings.TrimSpace(group.Type) != "" {
+						groupType = group.Type
+					}
 				}
 			}
 			item, exists := grouped[groupKey]
@@ -968,20 +1082,28 @@ func AnalysisPromptTemplate() string {
 	return buildAnalysisPrompt(pendingArticle{
 		SourceName: "{来源名称}", SourceType: "{来源类型}", Title: "{文章标题}",
 		Link: "{原文链接}", PublishedAt: "{发布时间}", Content: "{文章正文，最多取前 12000 字}",
-	})
+	}, []SignalGroup{{ID: 123, Name: "{现有概念组名称}", Type: "sector"}})
 }
 
 // buildAnalysisPrompt 根据文章内容生成结构化分析提示词。
-// 输入：article 是待分析文章。
+// 输入：article 是待分析文章，groups 是当前允许复用的概念组。
 // 输出：返回严格 JSON 输出约束提示词。
 // 副作用：无。
-func buildAnalysisPrompt(article pendingArticle) string {
+func buildAnalysisPrompt(article pendingArticle, groups []SignalGroup) string {
 	// 1. 正文为空时回退摘要并限制最大字符数。
 	content := article.Content
 	if content == "" {
 		content = article.Summary
 	}
 	content = truncateRunes(content, 12000)
+	groupOptions := make([]map[string]any, 0, len(groups))
+	for _, group := range groups {
+		if group.Name == pendingSignalGroupName || group.Type == pendingSignalGroupType {
+			continue
+		}
+		groupOptions = append(groupOptions, map[string]any{"id": group.ID, "name": group.Name, "type": group.Type})
+	}
+	groupsJSON, _ := json.Marshal(groupOptions)
 
 	// 2. 返回与当前 prompt 版本一致的完整模板。
 	return fmt.Sprintf(`你是一个投资资讯结构化分析助手。请提取对未来投资判断有指导意义的结构化信息。
@@ -998,6 +1120,18 @@ func buildAnalysisPrompt(article pendingArticle) string {
 7. 剔除纯结果导向的信息：例如“科技大涨虹吸传统行业”“年初至今盈利30-40%%”“涨幅领先”“一枝独秀”等已经发生的涨跌、排名、收益结果。
 8. 只有当文章给出面向未来的理由时才抽取标的，例如估值、盈利/业绩、政策、供需、周期、库存、订单、流动性、风险事件、配置价值、催化或基本面变化。
 9. 如果一句话只是描述当前涨跌、过去收益、资金当下流向，而没有未来判断，请不要抽取为 recommendations 或 risks。
+
+概念组归类规则：
+1. 在同一次返回中，为 recommendations 和 risks 最终保留的每个标的各返回一条 signal_classifications 决策；没有标的时返回空数组。
+2. 每条决策必须选择 reuse、create、pending 三种 action 之一，name 必须与信号列表中的 name 完全一致。
+3. 优先 reuse，并通过 existing_group_id 引用下方已有概念组；只有确实没有合适概念组时才 create。
+4. 具体公司应上卷到最直接的行业或主题，例如证券公司归入“证券行业”。相关但统计含义不同的主题不要过度合并。
+5. create 的 canonical_name 必须是简洁、通行、单一的行业、主题、资产或市场名称，禁止用斜杠拼接；type 只能是 sector、concept、company、commodity、index、market、crypto、other。
+6. 无法可靠判断时用 pending，不要强行复用或新建。confidence 范围是 0 到 1；reuse 至少 0.80，create 至少 0.90，否则必须 pending。
+7. 每个最终标的必须且只能有一条决策，不得返回信号列表之外的名称。
+
+已有概念组（待归类组已排除，只能使用这里列出的 id）：
+%s
 
 JSON 结构：
 {
@@ -1016,6 +1150,16 @@ JSON 结构：
       "reason": "80字以内综合原因，说明为什么最终偏风险"
     }
   ],
+  "signal_classifications": [
+    {
+      "name": "与 recommendations 或 risks 完全一致的标的名称",
+      "action": "reuse|create|pending",
+      "existing_group_id": 123,
+      "canonical_name": "仅 create 时填写的新概念组名称",
+      "type": "仅 create 时填写的概念组类型",
+      "confidence": 0.96
+    }
+  ],
   "market": {
     "mood": "very_optimistic|optimistic|neutral|pessimistic|very_pessimistic|unknown",
     "mood_reason": "80字以内原因，说明文章为什么体现这种短期市场氛围",
@@ -1031,5 +1175,5 @@ JSON 结构：
 发布时间：%s
 
 文章内容：
-%s`, article.SourceName, article.SourceType, article.Title, article.Link, article.PublishedAt, content)
+%s`, string(groupsJSON), article.SourceName, article.SourceType, article.Title, article.Link, article.PublishedAt, content)
 }
