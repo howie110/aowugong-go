@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -375,7 +376,7 @@ func (h articleAnalysisHandlers) sync(w http.ResponseWriter, request *http.Reque
 	// 2. 调用统一同步入口并返回统计。
 	result, err := h.service.SyncNow(request.Context(), fetchLimit, analyze, analysisLimit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "同步投资文章失败")
+		writeError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("同步投资文章失败: %v", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -394,7 +395,7 @@ func (h articleAnalysisHandlers) analyze(w http.ResponseWriter, request *http.Re
 	all := request.URL.Query().Get("all") == "true"
 	result, err := h.service.AnalyzeAndClassifyPending(request.Context(), limit, all)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "分析或归类投资文章失败")
+		writeError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("分析或归类投资文章失败: %v", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -411,7 +412,7 @@ func (h articleAnalysisHandlers) parse(w http.ResponseWriter, request *http.Requ
 	}
 	result, err := h.service.ParsePending(request.Context(), limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "解析投资文章失败")
+		writeError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("解析投资文章失败: %v", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

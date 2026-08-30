@@ -3,6 +3,7 @@ package articleanalysis
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -206,19 +207,38 @@ func (s *Service) parseWeReadArticle(ctx context.Context, item pendingParseArtic
 			return "", fmt.Errorf("解析文章原始标识: %w", err)
 		}
 	}
+	var detailErr error
 	if raw.ReviewID != "" {
 		detail, err := s.options.WeRead.client.FetchArticleDetail(ctx, credentials, raw.ReviewID)
 		if err == nil && strings.TrimSpace(detail.Content) != "" {
 			return detail.Content, nil
+		}
+		detailErr = err
+		if detailErr == nil {
+			detailErr = fmt.Errorf("正文为空")
 		}
 	}
 
 	// 2. 详情接口没有正文时，再用 Readability 解析微信公众号原文。
 	content, _, err := s.options.WeRead.client.FetchArticleContent(ctx, item.Link)
 	if err != nil {
-		return "", err
+		return "", combineArticleParseErrors(detailErr, err)
 	}
 	return content, nil
+}
+
+// combineArticleParseErrors 合并详情接口和微信原文的失败原因。
+func combineArticleParseErrors(detailErr, originalErr error) error {
+	if detailErr == nil {
+		return fmt.Errorf("微信原文: %w", originalErr)
+	}
+	if originalErr == nil {
+		return fmt.Errorf("微信读书详情: %w", detailErr)
+	}
+	return errors.Join(
+		fmt.Errorf("微信读书详情: %w", detailErr),
+		fmt.Errorf("微信原文: %w", originalErr),
+	)
 }
 
 func errorText(err error, fallback string) string {
@@ -389,10 +409,11 @@ func (s *Service) AnalyzePending(ctx context.Context, limit int) (AnalysisBatchR
 
 	// 2. 每篇使用当时最新概念组分析和落库，模型错误不阻断下一篇。
 	for _, article := range articles {
-		item, status, classifiedCount, err := s.analyzeOne(ctx, article, model, groups)
+		item, status, classifiedCount, usedModel, err := s.analyzeOne(ctx, article, model, groups)
 		if err != nil {
 			return AnalysisBatchResult{}, err
 		}
+		model = usedModel
 		result.Items = append(result.Items, item)
 		result.ClassifiedAliasCount += classifiedCount
 		if classifiedCount > 0 {
@@ -466,34 +487,34 @@ func (s *Service) AnalyzeAndClassifyPending(ctx context.Context, limit int, all 
 
 // analyzeOne 分析单篇文章并持久化最终状态。
 // 输入：ctx 控制模型请求，article 是待分析文章，groups 是当前概念词典。
-// 输出：返回页面结果项、业务状态、新增别名数和仅数据库失败时使用的错误。
+// 输出：返回页面结果项、业务状态、新增别名数、实际模型和仅数据库失败时使用的错误。
 // 副作用：调用当前分析模型并写入 PostgreSQL 分析及概念映射表。
-func (s *Service) analyzeOne(ctx context.Context, article pendingArticle, model analysisModelRuntime, groups []SignalGroup) (map[string]any, string, int, error) {
+func (s *Service) analyzeOne(ctx context.Context, article pendingArticle, model analysisModelRuntime, groups []SignalGroup) (map[string]any, string, int, analysisModelRuntime, error) {
 	// 1. 未配置模型时保留 pending，便于配置后重试。
 	if model.Analyzer == nil || !model.Analyzer.Configured() {
 		message := "未配置可用的文章分析模型"
 		if err := s.repository.SaveAnalysis(ctx, article.ID, "pending", AnalysisResult{}, message, model.Model, PromptVersion); err != nil {
-			return nil, "", 0, err
+			return nil, "", 0, model, err
 		}
-		return map[string]any{"article_id": article.ID, "status": "skipped", "message": message}, "skipped", 0, nil
+		return map[string]any{"article_id": article.ID, "status": "skipped", "message": message}, "skipped", 0, model, nil
 	}
 
 	// 2. 同一次模型调用完成文章分析和每个标的的概念组决策。
-	content, err := model.Analyzer.SimpleChat(ctx, buildAnalysisPrompt(article, groups), 2400)
+	content, usedModel, err := s.callAnalysisModel(ctx, model, buildAnalysisPrompt(article, groups), 2400)
 	if err != nil {
 		message := err.Error()
-		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", AnalysisResult{}, message, model.Model, PromptVersion); saveErr != nil {
-			return nil, "", 0, saveErr
+		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", AnalysisResult{}, message, usedModel.Model, PromptVersion); saveErr != nil {
+			return nil, "", 0, usedModel, saveErr
 		}
-		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", 0, nil
+		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", 0, usedModel, nil
 	}
 	parsed, err := parseAnalysisJSON(content)
 	if err != nil {
 		message := "模型 JSON 解析失败：" + err.Error()
-		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", AnalysisResult{}, message, model.Model, PromptVersion); saveErr != nil {
-			return nil, "", 0, saveErr
+		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", AnalysisResult{}, message, usedModel.Model, PromptVersion); saveErr != nil {
+			return nil, "", 0, usedModel, saveErr
 		}
-		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", 0, nil
+		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", 0, usedModel, nil
 	}
 	normalized := NormalizeAnalysis(parsed)
 	candidates := analysisSignalCandidates(normalized)
@@ -503,23 +524,23 @@ func (s *Service) analyzeOne(ctx context.Context, article pendingArticle, model 
 	)
 	if err != nil {
 		message := "模型信号归类失败：" + err.Error()
-		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", normalized, message, model.Model, PromptVersion); saveErr != nil {
-			return nil, "", 0, saveErr
+		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", normalized, message, usedModel.Model, PromptVersion); saveErr != nil {
+			return nil, "", 0, usedModel, saveErr
 		}
-		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", 0, nil
+		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", 0, usedModel, nil
 	}
 	classifiedCount := 0
 	groupsToSave := classification.Groups
 	if len(groupsToSave) > 0 {
-		classifiedCount, err = s.repository.SaveSignalGroups(ctx, groupsToSave, model.Model)
+		classifiedCount, err = s.repository.SaveSignalGroups(ctx, groupsToSave, usedModel.Model)
 		if err != nil {
-			return nil, "", 0, err
+			return nil, "", 0, usedModel, err
 		}
 	}
-	if err := s.repository.SaveAnalysis(ctx, article.ID, "success", normalized, "", model.Model, PromptVersion); err != nil {
-		return nil, "", 0, err
+	if err := s.repository.SaveAnalysis(ctx, article.ID, "success", normalized, "", usedModel.Model, PromptVersion); err != nil {
+		return nil, "", 0, usedModel, err
 	}
-	return map[string]any{"article_id": article.ID, "status": "success", "classified_alias_count": classifiedCount}, "success", classifiedCount, nil
+	return map[string]any{"article_id": article.ID, "status": "success", "classified_alias_count": classifiedCount}, "success", classifiedCount, usedModel, nil
 }
 
 // analysisSignalCandidates 返回最终文章信号中的唯一分类候选。
@@ -735,6 +756,31 @@ func (s *Service) selectedAnalysisModel(ctx context.Context) (analysisModelRunti
 		return s.analysisModels[s.analysisModelOrder[0]], nil
 	}
 	return analysisModelRuntime{}, nil
+}
+
+// callAnalysisModel 调用当前模型，并在临时上游故障时切换到已配置的 DeepSeek。
+func (s *Service) callAnalysisModel(ctx context.Context, primary analysisModelRuntime, prompt string, maxTokens int) (string, analysisModelRuntime, error) {
+	content, err := primary.Analyzer.SimpleChat(ctx, prompt, maxTokens)
+	if err == nil {
+		return content, primary, nil
+	}
+	var retryable interface{ Retryable() bool }
+	if !errors.As(err, &retryable) || !retryable.Retryable() {
+		return "", primary, err
+	}
+
+	for _, id := range s.analysisModelOrder {
+		fallback := s.analysisModels[id]
+		if fallback.ID == primary.ID || fallback.Provider != "deepseek" || fallback.Analyzer == nil || !fallback.Analyzer.Configured() {
+			continue
+		}
+		fallbackContent, fallbackErr := fallback.Analyzer.SimpleChat(ctx, prompt, maxTokens)
+		if fallbackErr == nil {
+			return fallbackContent, fallback, nil
+		}
+		return "", fallback, fmt.Errorf("主模型 %s 临时不可用: %v; 备用模型 %s 调用失败: %w", primary.Model, err, fallback.Model, fallbackErr)
+	}
+	return "", primary, err
 }
 
 // AnalysisSummary 构建投资文章分析页面摘要。

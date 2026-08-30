@@ -57,6 +57,36 @@ test("存在失败来源时生成包含原因的警告通知", () => {
   assert.match(result.description, /公众号聚合：轮询器未启动/);
 });
 
+test("手动抓取存在失败来源时不能显示为成功", () => {
+  const { buildArticleFetchNotification } = loadModule();
+
+  const result = buildArticleFetchNotification(
+    createSyncResult([{ source: "微信读书公众号", error: "微信读书要求人工验证" }]),
+  );
+
+  assert.equal(result.level, "warning");
+  assert.match(result.title, /抓取失败/);
+  assert.match(result.description, /微信读书公众号：微信读书要求人工验证/);
+});
+
+test("解析失败通知展示文章和真实原因", () => {
+  const { buildArticleParseNotification } = loadModule();
+
+  const result = buildArticleParseNotification({
+    parsed_count: 0,
+    error_count: 2,
+    items: [
+      { title: "文章甲", status: "pending_parse", error: "微信原文触发访问验证：环境异常" },
+      { title: "文章乙", status: "pending_parse", error: "微信读书要求人工验证" },
+    ],
+  });
+
+  assert.equal(result.level, "warning");
+  assert.match(result.title, /存在失败文章/);
+  assert.match(result.description, /文章甲：微信原文触发访问验证：环境异常/);
+  assert.match(result.description, /文章乙：微信读书要求人工验证/);
+});
+
 test("页面生产同步入口调用统一任务注册表", () => {
   const source = fs.readFileSync(articleAPIPath, "utf8");
 

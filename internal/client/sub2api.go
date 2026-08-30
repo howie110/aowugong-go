@@ -40,6 +40,21 @@ type responsesResponse struct {
 	} `json:"error"`
 }
 
+// sub2APIHTTPError 保留上游 HTTP 状态，供业务层判断是否可切换备用模型。
+type sub2APIHTTPError struct {
+	statusCode int
+	message    string
+}
+
+func (e *sub2APIHTTPError) Error() string {
+	return fmt.Sprintf("Sub2API Responses 返回 HTTP %d: %s", e.statusCode, e.message)
+}
+
+// Retryable 返回错误是否属于限流或临时上游故障。
+func (e *sub2APIHTTPError) Retryable() bool {
+	return e.statusCode == http.StatusTooManyRequests || e.statusCode >= http.StatusInternalServerError
+}
+
 // NewSub2APIClient 创建固定模型的 Sub2API Responses 客户端。
 // 输入：cfg 提供 BaseURL 和 APIKey，model 是本客户端使用的模型，httpClient 提供超时。
 // 输出：返回可并发复用客户端。
@@ -98,7 +113,7 @@ func (c *Sub2APIClient) SimpleChat(ctx context.Context, prompt string, maxTokens
 		return "", fmt.Errorf("读取 Sub2API Responses 响应: %w", err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return "", fmt.Errorf("Sub2API Responses 返回 HTTP %d: %s", response.StatusCode, responsesErrorMessage(body))
+		return "", &sub2APIHTTPError{statusCode: response.StatusCode, message: responsesErrorMessage(body)}
 	}
 
 	// 3. 按官方 Responses 结构合并消息中的 output_text。

@@ -43,6 +43,14 @@ test("分析页移除监控公众号并把提示词放入抓取页分析模型",
   assert.match(fetchPage, /modelSettings\?\.analysis_prompt/);
 });
 
+test("抓取页三个操作展示后端真实结果而不是统一成功文案", () => {
+  const fetchPage = fs.readFileSync(articleFetchPagePath, "utf8");
+
+  assert.match(fetchPage, /buildArticleFetchNotification\(result\)/);
+  assert.match(fetchPage, /buildArticleParseNotification\(result\)/);
+  assert.match(fetchPage, /notification\.level === "warning"/);
+});
+
 test("短期市场判断始终补齐全部氛围和涨跌类别", () => {
   const { completeDistribution, formatDistributionValue, MARKET_MOOD_CATEGORIES, MARKET_PREDICTION_CATEGORIES } = loadPageUtils();
   const moods = completeDistribution([{ name: "neutral", count: 3 }], MARKET_MOOD_CATEGORIES);

@@ -37,6 +37,7 @@ import {
   startWeReadArticleLogin,
   syncArticles,
 } from "@/lib/article-analysis";
+import { buildArticleFetchNotification, buildArticleParseNotification } from "@/lib/article-sync-notification";
 import { notify } from "@/lib/notify";
 
 /** ArticleFetchPage 展示投资文章抓取状态，并管理微信读书绑定和公众号范围。 */
@@ -143,7 +144,12 @@ export function ArticleFetchPage() {
     setIsWorking(true);
     try {
       const result = await syncArticles(30, false, 1);
-      notify.success("抓取新增文章完成", `新增 ${result.inserted_count} 篇，更新 ${result.updated_count} 篇。`);
+      const notification = buildArticleFetchNotification(result);
+      if (notification.level === "warning") {
+        notify.warning(notification.title, notification.description);
+      } else {
+        notify.success(notification.title, notification.description);
+      }
       await loadData();
     } catch (error) {
       notify.errorFrom(error, "抓取文章失败");
@@ -158,10 +164,12 @@ export function ArticleFetchPage() {
     setIsWorking(true);
     try {
       const result = await analyzePendingArticles(50, true);
-      notify.success(
-        "分析完成",
-        `成功 ${result.analyzed_count} 篇，归类 ${result.classified_alias_count} 个信号，跳过 ${result.skipped_count} 篇，失败 ${result.error_count} 篇。`,
-      );
+      const description = `成功 ${result.analyzed_count} 篇，归类 ${result.classified_alias_count} 个信号，跳过 ${result.skipped_count} 篇，失败 ${result.error_count} 篇。`;
+      if (result.error_count > 0 || result.skipped_count > 0) {
+        notify.warning("分析完成，存在失败文章", description);
+      } else {
+        notify.success("分析完成", description);
+      }
       await loadData();
     } catch (error) {
       notify.errorFrom(error, "分析或归类文章失败");
@@ -175,7 +183,12 @@ export function ArticleFetchPage() {
     setIsWorking(true);
     try {
       const result = await parsePendingArticles(30);
-      notify.success("解析完成", `成功 ${result.parsed_count} 篇，失败 ${result.error_count} 篇。`);
+      const notification = buildArticleParseNotification(result);
+      if (notification.level === "warning") {
+        notify.warning(notification.title, notification.description);
+      } else {
+        notify.success(notification.title, notification.description);
+      }
       await loadData();
     } catch (error) {
       notify.errorFrom(error, "解析文章失败");

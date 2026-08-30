@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -40,6 +41,22 @@ func TestSub2APIClientUsesResponsesContract(t *testing.T) {
 	content, err := client.SimpleChat(context.Background(), "测试提示词", 321)
 	if err != nil || content != "测试结果" {
 		t.Fatalf("SimpleChat() = %q, %v", content, err)
+	}
+}
+
+// TestSub2APIClientMarksTemporaryUpstreamErrorsRetryable 验证临时上游错误可被业务层识别并回退。
+func TestSub2APIClientMarksTemporaryUpstreamErrorsRetryable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"Service temporarily unavailable"}}`))
+	}))
+	defer server.Close()
+	client := NewSub2APIClient(config.Sub2API{BaseURL: server.URL, APIKey: "test-key"}, "gpt-5.6-luna", server.Client())
+
+	_, err := client.SimpleChat(context.Background(), "测试", 10)
+	var retryable interface{ Retryable() bool }
+	if !errors.As(err, &retryable) || !retryable.Retryable() {
+		t.Fatalf("SimpleChat() error = %T %v, want retryable", err, err)
 	}
 }
 
