@@ -242,13 +242,9 @@ func appendUniqueSignalCandidates(candidates []signalCandidate, aliases []string
 // 输出：返回待保存概念组和待归类名称；遗漏、重复或越权决策会返回错误。
 // 副作用：无。
 func parseSignalClassificationJSON(content string, candidates []signalCandidate, groups []SignalGroup) (signalClassificationBatchResult, error) {
-	// 1. 兼容纯 JSON 和 Markdown fenced JSON。
-	content = strings.TrimSpace(content)
-	if matches := fencedJSONPattern.FindStringSubmatch(content); len(matches) == 2 {
-		content = strings.TrimSpace(matches[1])
-	}
+	// 1. 兼容纯 JSON、Markdown fenced JSON 和常见轻微格式噪声。
 	var payload signalClassificationPayload
-	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+	if err := unmarshalJSONWithRepair(content, &payload); err != nil {
 		return signalClassificationBatchResult{}, fmt.Errorf("解析信号分类 JSON: %w", err)
 	}
 	return validateSignalClassificationPayload(payload, candidates, groups)

@@ -24,6 +24,14 @@ type recordingArticleGateway struct {
 
 type staleArticleGateway struct{}
 
+type retryingArticleAnalysisGateway struct {
+	calls int
+}
+
+type incompleteArticleClassificationGateway struct {
+	calls int
+}
+
 // Fetch 记录当前进程实际使用的 Miniflux 地址。
 // 输入：ctx、sourceID、feedURL 和 limit 模拟正式客户端。
 // 输出：返回空文章集合。
@@ -110,6 +118,34 @@ func (staleArticleGateway) Fetch(ctx context.Context, sourceID int64, feedURL st
 		Link: "https://example.com/stale", Author: "旧作者", PublishedAt: "2026-07-29 06:10:08",
 		Summary: "旧摘要", Content: "旧正文",
 	}}, nil
+}
+
+// Configured 表示文章 JSON 重试测试模型已配置。
+func (g *retryingArticleAnalysisGateway) Configured() bool {
+	return true
+}
+
+// SimpleChat 首次返回损坏 JSON，第二次返回完整文章分析。
+func (g *retryingArticleAnalysisGateway) SimpleChat(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	g.calls++
+	if g.calls == 1 {
+		return `{"summary":"分析摘要","recommendations":[`, nil
+	}
+	return `{"summary":"分析摘要","recommendations":[],"risks":[],"signal_classifications":[],"market":{"mood":"neutral","mood_reason":"等待确认","prediction":"range","prediction_reason":"震荡"}}`, nil
+}
+
+// Configured 表示分类补齐测试模型已配置。
+func (g *incompleteArticleClassificationGateway) Configured() bool {
+	return true
+}
+
+// SimpleChat 首次遗漏分类决策，第二次按仅分类提示词补齐全部名称。
+func (g *incompleteArticleClassificationGateway) SimpleChat(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	g.calls++
+	if strings.Contains(prompt, "本轮待分类名称") {
+		return `{"decisions":[{"name":"AI软件","action":"create","canonical_name":"信息不明确","type":"other","confidence":0.40},{"name":"世纪华通","action":"create","canonical_name":"信息不明确","type":"other","confidence":0.40}]}`, nil
+	}
+	return `{"summary":"分析摘要","recommendations":[{"name":"AI软件","type":"concept","reason":"未来变化仍需观察"},{"name":"世纪华通","type":"stock","reason":"未来业绩仍需观察"}],"risks":[],"signal_classifications":[],"market":{"mood":"neutral","mood_reason":"等待确认","prediction":"range","prediction_reason":"震荡"}}`, nil
 }
 
 type fixedAnalysisGateway struct{}
@@ -236,6 +272,85 @@ func TestServiceAnalyzesAndClassifiesArticleWithOneModelCall(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("groups = %#v", groups)
+	}
+}
+
+// TestServiceRetriesMalformedArticleJSON 验证文章分析 JSON 损坏时只重试一次并继续入库。
+// 输入：第一次返回不完整 JSON，第二次返回完整且无标的的分析结果。
+// 输出：文章成功分析，错误数为零，模型恰好调用两次。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
+func TestServiceRetriesMalformedArticleJSON(t *testing.T) {
+	// 1. 创建默认来源和会按顺序返回两种响应的模型。
+	ctx := context.Background()
+	db := testdatabase.Open(t)
+	repository := NewRepository(db)
+	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("SyncDefaultSource() error = %v", err)
+	}
+	gateway := &retryingArticleAnalysisGateway{}
+	service := NewService(repository, ServiceOptions{Model: "test-model", Articles: &fixedArticleGateway{}, Analyzer: gateway})
+
+	// 2. 损坏响应只触发一次重试，最终应按成功文章处理。
+	result, err := service.Sync(ctx, 30, true, 10)
+	if err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	if gateway.calls != 2 || result.AnalyzedCount != 1 || result.ErrorCount != 0 {
+		t.Fatalf("calls = %d, result = %#v", gateway.calls, result)
+	}
+}
+
+// TestParseAnalysisJSONRepairsCommonModelJSONNoise 验证尾逗号和多余闭合符号不会让完整结果报废。
+// 输入：模型返回 fenced JSON，内部含尾逗号，外部多一个闭合符号。
+// 输出：仍能解析出完整文章分析结果。
+// 副作用：无。
+func TestParseAnalysisJSONRepairsCommonModelJSONNoise(t *testing.T) {
+	// 1. 模拟当前线上出现过的轻微 JSON 格式错误。
+	content := "```json\n{" +
+		`"summary":"分析摘要","recommendations":[],"risks":[],"signal_classifications":[],` +
+		`"market":{"mood":"neutral","mood_reason":"等待","prediction":"range","prediction_reason":"震荡",}}}` +
+		"\n```"
+
+	// 2. 只修复结构性噪声，核心字段应正常保留。
+	result, err := parseAnalysisJSON(content)
+	if err != nil || result.Summary != "分析摘要" || result.Market.Prediction != "range" {
+		t.Fatalf("result = %#v, error = %v", result, err)
+	}
+}
+
+// TestServiceRepairsMissingArticleClassifications 验证文章分析漏分类时走仅分类补齐流程。
+// 输入：文章分析返回两个标的但不返回 signal_classifications，补分类请求返回完整决策。
+// 输出：文章成功入库，两个标的都落入明确兜底概念组。
+// 副作用：创建并写入隔离 SQLite 测试 schema。
+func TestServiceRepairsMissingArticleClassifications(t *testing.T) {
+	// 1. 创建默认来源和会按提示词类型返回响应的模型。
+	ctx := context.Background()
+	db := testdatabase.Open(t)
+	repository := NewRepository(db)
+	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("SyncDefaultSource() error = %v", err)
+	}
+	gateway := &incompleteArticleClassificationGateway{}
+	service := NewService(repository, ServiceOptions{Model: "test-model", Articles: &fixedArticleGateway{}, Analyzer: gateway})
+
+	// 2. 缺失决策由仅分类调用补齐，整篇文章不得被标为失败。
+	result, err := service.Sync(ctx, 30, true, 10)
+	if err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	if gateway.calls != 2 || result.AnalyzedCount != 1 || result.ErrorCount != 0 || result.ClassifiedAliasCount != 2 {
+		t.Fatalf("calls = %d, result = %#v", gateway.calls, result)
+	}
+	groups, err := repository.SignalGroups(ctx)
+	var unclearGroup *SignalGroup
+	for index := range groups {
+		if groups[index].Name == unclearSignalGroupName {
+			unclearGroup = &groups[index]
+			break
+		}
+	}
+	if err != nil || unclearGroup == nil || len(unclearGroup.Aliases) != 2 {
+		t.Fatalf("groups = %#v, error = %v", groups, err)
 	}
 }
 

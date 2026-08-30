@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/howiedata/aowugong-go/internal/client"
 )
@@ -19,6 +20,8 @@ var fencedJSONPattern = regexp.MustCompile("(?s)```(?:json)?\\s*(.*?)```")
 type forceArticleFetchContextKey struct{}
 
 const (
+	articleAnalysisMaxAttempts  = 2
+	articleAnalysisMaxTokens    = 3600
 	scheduledFetchLimit         = 1000
 	scheduledAnalysisBatchLimit = 50
 	scheduledAnalysisMaxBatches = 10
@@ -498,18 +501,10 @@ func (s *Service) analyzeOne(ctx context.Context, article pendingArticle, model 
 		return map[string]any{"article_id": article.ID, "status": "skipped", "message": message}, "skipped", 0, nil
 	}
 
-	// 2. 同一次模型调用完成文章分析和每个标的的概念组决策。
-	content, err := model.Analyzer.SimpleChat(ctx, buildAnalysisPrompt(article, groups), 2400)
+	// 2. 正常只调用一次；模型返回损坏 JSON 时在同一篇文章内有限重试。
+	parsed, err := s.requestArticleAnalysis(ctx, article, groups, model)
 	if err != nil {
 		message := err.Error()
-		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", AnalysisResult{}, message, model.Model, PromptVersion); saveErr != nil {
-			return nil, "", 0, saveErr
-		}
-		return map[string]any{"article_id": article.ID, "status": "error", "message": message}, "error", 0, nil
-	}
-	parsed, err := parseAnalysisJSON(content)
-	if err != nil {
-		message := "模型 JSON 解析失败：" + err.Error()
 		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", AnalysisResult{}, message, model.Model, PromptVersion); saveErr != nil {
 			return nil, "", 0, saveErr
 		}
@@ -521,6 +516,16 @@ func (s *Service) analyzeOne(ctx context.Context, article pendingArticle, model 
 		signalClassificationPayload{Decisions: filterSignalClassificationDecisions(parsed.SignalClassifications, parsed, candidates)},
 		candidates, groups,
 	)
+	if err != nil {
+		// 3. 文章 JSON 已可用但分类决策漏项时，仅重做分类，避免整篇文章报废。
+		if len(candidates) > 0 {
+			if repaired, repairErr := s.classifySignalBatch(ctx, groups, candidates, model); repairErr == nil {
+				classification, err = repaired, nil
+			} else {
+				err = fmt.Errorf("%w；补分类仍失败: %v", err, repairErr)
+			}
+		}
+	}
 	if err != nil {
 		message := "模型信号归类失败：" + err.Error()
 		if saveErr := s.repository.SaveAnalysis(ctx, article.ID, "error", normalized, message, model.Model, PromptVersion); saveErr != nil {
@@ -540,6 +545,39 @@ func (s *Service) analyzeOne(ctx context.Context, article pendingArticle, model 
 		return nil, "", 0, err
 	}
 	return map[string]any{"article_id": article.ID, "status": "success", "classified_alias_count": classifiedCount}, "success", classifiedCount, nil
+}
+
+// requestArticleAnalysis 调用文章分析模型并解析结构化结果。
+// 输入：ctx 控制请求，article/groups 提供提示词数据，model 是当前 DeepSeek 模型。
+// 输出：返回已解析结果；上游错误或连续无效 JSON 时返回可定位错误。
+// 副作用：正常调用一次，异常响应最多再调用一次当前模型。
+func (s *Service) requestArticleAnalysis(ctx context.Context, article pendingArticle, groups []SignalGroup, model analysisModelRuntime) (AnalysisResult, error) {
+	basePrompt := buildAnalysisPrompt(article, groups)
+	prompt := basePrompt
+	var lastErr error
+	for attempt := 1; attempt <= articleAnalysisMaxAttempts; attempt++ {
+		content, err := model.Analyzer.SimpleChat(ctx, prompt, articleAnalysisMaxTokens)
+		if err == nil {
+			parsed, parseErr := parseAnalysisJSON(content)
+			if parseErr == nil {
+				return parsed, nil
+			}
+			lastErr = fmt.Errorf("模型 JSON 解析失败: %w", parseErr)
+		} else {
+			lastErr = fmt.Errorf("请求模型失败: %w", err)
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return AnalysisResult{}, fmt.Errorf("文章分析取消: %w", ctxErr)
+		}
+		prompt = basePrompt + `
+
+这是同一篇文章的重试请求。上一次响应未通过校验，请重新完整输出一个可直接 JSON.parse 的 JSON 对象：
+- 不要 Markdown、注释或任何 JSON 之外的文字；
+- 最终 recommendations 和 risks 中每个标的都必须在 signal_classifications 中出现且只出现一次；
+- 即使无法判断，也必须使用信息不明确等明确概念组完成分类；
+- 输出最后一个字符必须是 }，不要尾逗号，也不要多余闭合符号。`
+	}
+	return AnalysisResult{}, fmt.Errorf("模型 %s 连续 %d 次返回无效文章分析: %w", model.Model, articleAnalysisMaxAttempts, lastErr)
 }
 
 // analysisSignalCandidates 返回最终文章信号中的唯一分类候选。
@@ -589,23 +627,136 @@ func filterSignalClassificationDecisions(decisions []signalClassificationDecisio
 	return result
 }
 
-// parseAnalysisJSON 解码模型纯 JSON 或 Markdown fenced JSON。
+// parseAnalysisJSON 解码模型纯 JSON 或 Markdown fenced JSON，并容忍常见轻微格式噪声。
 // 输入：content 是模型文本。
 // 输出：返回结构化结果；JSON 无效时返回错误。
 // 副作用：无。
 func parseAnalysisJSON(content string) (AnalysisResult, error) {
-	// 1. 优先提取 fenced 代码块并清理空白。
+	var result AnalysisResult
+	if err := unmarshalJSONWithRepair(content, &result); err != nil {
+		return AnalysisResult{}, err
+	}
+	return result, nil
+}
+
+// unmarshalJSONWithRepair 先严格解码，失败后只修复可证明的格式噪声。
+// 输入：content 是模型响应，target 是目标结构。
+// 输出：严格或安全修复后解码成功返回 nil，否则返回首次 JSON 错误。
+// 副作用：无。
+func unmarshalJSONWithRepair(content string, target any) error {
+	content = extractJSONPayload(content)
+	if err := json.Unmarshal([]byte(content), target); err == nil {
+		return nil
+	} else {
+		repaired := repairJSONPayload(content)
+		if repaired != content {
+			if repairErr := json.Unmarshal([]byte(repaired), target); repairErr == nil {
+				return nil
+			}
+		}
+		return err
+	}
+}
+
+// extractJSONPayload 提取 fenced JSON 或响应中第一个完整对象，去掉模型附带的说明和多余尾部。
+// 输入：content 是模型原始文本。
+// 输出：返回尽量不改变正文的 JSON 对象文本。
+// 副作用：无。
+func extractJSONPayload(content string) string {
 	content = strings.TrimSpace(content)
 	if matches := fencedJSONPattern.FindStringSubmatch(content); len(matches) == 2 {
 		content = strings.TrimSpace(matches[1])
 	}
-
-	// 2. 使用标准 JSON 解码器读取固定模型。
-	var result AnalysisResult
-	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return AnalysisResult{}, err
+	start := strings.IndexByte(content, '{')
+	if start < 0 {
+		return content
 	}
-	return result, nil
+	if end, ok := completeJSONObjectEnd(content[start:]); ok {
+		return strings.TrimSpace(content[start : start+end])
+	}
+	return content
+}
+
+// completeJSONObjectEnd 返回从开头对象到最外层闭合符的下一个索引。
+// 输入：value 必须从对象开头开始。
+// 输出：完整对象的结束索引和是否完整。
+// 副作用：无。
+func completeJSONObjectEnd(value string) (int, bool) {
+	depth := 0
+	inString := false
+	escaped := false
+	for index, character := range value {
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if character == '\\' {
+				escaped = true
+				continue
+			}
+			if character == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch character {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return index + 1, true
+			}
+			if depth < 0 {
+				return 0, false
+			}
+		}
+	}
+	return 0, false
+}
+
+// repairJSONPayload 删除对象或数组闭合前的尾逗号，避免把普通模型笔误当成整篇失败。
+// 输入：content 是已经提取的 JSON 对象文本。
+// 输出：返回修复后的文本；字符串内部的逗号保持不变。
+// 副作用：无。
+func repairJSONPayload(content string) string {
+	var builder strings.Builder
+	builder.Grow(len(content))
+	inString := false
+	escaped := false
+	for index := 0; index < len(content); index++ {
+		character := content[index]
+		if inString {
+			builder.WriteByte(character)
+			if escaped {
+				escaped = false
+			} else if character == '\\' {
+				escaped = true
+			} else if character == '"' {
+				inString = false
+			}
+			continue
+		}
+		if character == '"' {
+			inString = true
+			builder.WriteByte(character)
+			continue
+		}
+		if character == ',' {
+			next := index + 1
+			for next < len(content) && unicode.IsSpace(rune(content[next])) {
+				next++
+			}
+			if next < len(content) && (content[next] == '}' || content[next] == ']') {
+				continue
+			}
+		}
+		builder.WriteByte(character)
+	}
+	return builder.String()
 }
 
 // feedEntryFromClient 把通用外部文章模型转换为文章仓储模型。
@@ -1242,6 +1393,8 @@ func buildAnalysisPrompt(article pendingArticle, groups []SignalGroup) string {
 5. create 的 canonical_name 必须是简洁、通行、单一的行业、主题、资产或市场名称，禁止用斜杠拼接；type 只能是 sector、concept、company、commodity、index、market、crypto、other。
 6. 信息不足时仍必须明确归类：通用策略归入“投资策略”，无法识别的公司归入“未具名公司”，其他无法辨认的名称归入“信息不明确”；必要时 create。confidence 范围是 0 到 1，只记录可信度。
 7. 每个最终标的必须且只能有一条决策，不得返回信号列表之外的名称。
+
+输出前自检：recommendations 和 risks 中最终保留几个标的，signal_classifications 就必须返回几个不同的 name；不能遗漏任何一个，也不能提前截断 JSON。所有字符串必须正确转义，JSON 最外层必须完整闭合。
 
 已有概念组（待归类组已排除，只能使用这里列出的 id）：
 %s
