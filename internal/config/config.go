@@ -114,21 +114,12 @@ type VPN struct {
 type Clients struct {
 	WeRead                WeRead
 	Miniflux              Miniflux
-	Sub2API               Sub2API
 	DeepSeek              DeepSeek
 	Tushare               Tushare
 	WeComBot              WeComBot
 	ServiceMonitorTargets string
 	PositionOCR           PositionOCR
 	Email                 Email
-}
-
-// Sub2API 描述 OpenAI Responses 兼容的文章分析客户端配置。
-type Sub2API struct {
-	BaseURL      string
-	APIKey       string
-	Models       []string
-	DefaultModel string
 }
 
 // Email 描述 TLS SMTP 发件服务配置。
@@ -239,10 +230,6 @@ func Load(lookup LookupEnv) (Config, error) {
 			Miniflux: Miniflux{
 				BaseURL: "http://127.0.0.1:5000", MonitorURL: "http://8.138.123.59:5000/", Category: "投资文章",
 			},
-			Sub2API: Sub2API{
-				BaseURL: "http://64.186.230.213:8080/v1", DefaultModel: "gpt-5.6-luna",
-				Models: []string{"gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6"},
-			},
 			DeepSeek: DeepSeek{BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"},
 			Tushare:  Tushare{BaseURL: "https://api.tushare.pro"},
 			PositionOCR: PositionOCR{
@@ -300,12 +287,6 @@ func Load(lookup LookupEnv) (Config, error) {
 	loadString(lookup, "MINIFLUX_MONITOR_URL", &cfg.Clients.Miniflux.MonitorURL)
 	loadString(lookup, "MINIFLUX_API_TOKEN", &cfg.Clients.Miniflux.APIToken)
 	loadString(lookup, "MINIFLUX_CATEGORY", &cfg.Clients.Miniflux.Category)
-	loadString(lookup, "SUB2API_BASE_URL", &cfg.Clients.Sub2API.BaseURL)
-	loadString(lookup, "SUB2API_API_KEY", &cfg.Clients.Sub2API.APIKey)
-	sub2APIModels := strings.Join(cfg.Clients.Sub2API.Models, ",")
-	loadString(lookup, "SUB2API_MODELS", &sub2APIModels)
-	cfg.Clients.Sub2API.Models = splitCommaSeparated(sub2APIModels)
-	loadString(lookup, "SUB2API_DEFAULT_MODEL", &cfg.Clients.Sub2API.DefaultModel)
 	loadString(lookup, "DEEPSEEK_BASE_URL", &cfg.Clients.DeepSeek.BaseURL)
 	loadString(lookup, "DEEPSEEK_API_KEY", &cfg.Clients.DeepSeek.APIKey)
 	loadString(lookup, "DEEPSEEK_MODEL", &cfg.Clients.DeepSeek.Model)

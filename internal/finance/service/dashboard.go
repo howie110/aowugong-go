@@ -325,7 +325,7 @@ func moduleList() []Item {
 		{Name: "量化工具", Description: "回测、数据和交易能力入口", Status: "3 个页面"},
 		{Name: "内容服务", Description: "微信读书和工作导航", Status: "2 个页面"},
 		{Name: "系统运维", Description: "监控、定时任务、通知和权限管理", Status: "4 个页面"},
-		{Name: "外部联动", Description: "RSS、Sub2API、DeepSeek、企业微信和阿里 OCR", Status: "已接入"},
+		{Name: "外部联动", Description: "RSS、DeepSeek、企业微信和阿里 OCR", Status: "已接入"},
 	}
 }
 

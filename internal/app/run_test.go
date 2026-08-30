@@ -12,6 +12,21 @@ import (
 	"github.com/howiedata/aowugong-go/internal/config"
 )
 
+// TestNewArticleAnalysisModelsUsesOnlyDeepSeek 验证文章分析模型目录固定使用 DeepSeek。
+func TestNewArticleAnalysisModelsUsesOnlyDeepSeek(t *testing.T) {
+	models := newArticleAnalysisModels(config.Config{
+		Clients: config.Clients{
+			DeepSeek: config.DeepSeek{Model: "deepseek-v4-pro"},
+		},
+	})
+	if len(models) != 1 {
+		t.Fatalf("newArticleAnalysisModels() returned %d models, want 1", len(models))
+	}
+	if models[0].ID != "deepseek:deepseek-v4-pro" || models[0].Provider != "deepseek" || models[0].Model != "deepseek-v4-pro" {
+		t.Fatalf("newArticleAnalysisModels() = %#v, want DeepSeek only", models[0])
+	}
+}
+
 // TestRunShutsDownOnContextCancellation 验证 Run 会在上下文取消后优雅退出。
 // 输入：开发 API 代理配置和可取消测试上下文。
 // 输出：HTTP 服务启动后在十秒内无错误退出。

@@ -117,7 +117,7 @@ func (s *Service) classifySignalBatch(ctx context.Context, groups []SignalGroup,
 
 	// 2. 模型调用或 JSON 校验失败时重试一次，成功后立即返回稳定结果。
 	for attempt := 1; attempt <= signalClassificationMaxAttempts; attempt++ {
-		content, _, err := s.callAnalysisModel(ctx, model, prompt, 4000)
+		content, err := model.Analyzer.SimpleChat(ctx, prompt, 4000)
 		if err == nil {
 			result, parseErr := parseSignalClassificationJSON(content, batch, groups)
 			if parseErr == nil {

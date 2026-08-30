@@ -136,7 +136,7 @@ func (s *Service) regroupSignalSources(ctx context.Context, sources []signalGrou
 		if lastErr != nil {
 			prompt += fmt.Sprintf("\n\n上一次输出未通过后端校验：%s。请完整重新输出修正后的 JSON。", lastErr.Error())
 		}
-		content, _, err := s.callAnalysisModel(ctx, model, prompt, signalRegroupingMaxTokens)
+		content, err := model.Analyzer.SimpleChat(ctx, prompt, signalRegroupingMaxTokens)
 		if err == nil {
 			var result signalRegroupingResult
 			result, err = parseSignalRegroupingJSON(content, sources)

@@ -133,7 +133,7 @@ export type WeReadLoginStatus = {
 
 export type ArticleAnalysisModelChoice = {
   id: string;
-  provider: "sub2api" | "deepseek" | string;
+  provider: "deepseek" | string;
   model: string;
   label: string;
   configured: boolean;

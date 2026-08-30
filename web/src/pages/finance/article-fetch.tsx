@@ -496,9 +496,6 @@ function formatDate(value?: string | null) {
 /** providerLabel 将模型 Provider 转换为页面短标签。 */
 function providerLabel(provider: string) {
   // 1. 已知 Provider 使用品牌名，未知值保留原文便于定位配置。
-  if (provider === "sub2api") {
-    return "Sub2API";
-  }
   if (provider === "deepseek") {
     return "DeepSeek";
   }

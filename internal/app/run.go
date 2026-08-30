@@ -300,7 +300,7 @@ func newTaskServices(cfg config.Config, db *sql.DB) taskServices {
 		articleRepository: articleRepository,
 		articles: articleanalysis.NewService(articleRepository, articleanalysis.ServiceOptions{
 			Articles: weReadSource, WeRead: weReadSource, AnalysisModels: analysisModels,
-			DefaultAnalysisModelID: "sub2api:" + cfg.Clients.Sub2API.DefaultModel,
+			DefaultAnalysisModelID: "deepseek:" + cfg.Clients.DeepSeek.Model,
 		}),
 		data: financedata.NewService(financedata.NewRepository(db), client.NewTushareClient(cfg.Clients.Tushare, nil), financedata.SyncOptions{
 			LookbackDays: 60, Delay: time.Second,
@@ -332,29 +332,17 @@ func newTaskServices(cfg config.Config, db *sql.DB) taskServices {
 	return services
 }
 
-// newArticleAnalysisModels 构造页面可选的 Sub2API 和 DeepSeek 模型目录。
-// 输入：cfg 提供两个 Provider 的地址、凭据和模型清单。
-// 输出：返回按页面展示顺序排列的模型配置，DeepSeek 始终保留为备选。
+// newArticleAnalysisModels 构造固定的 DeepSeek 文章分析模型目录。
+// 输入：cfg 提供 DeepSeek 的地址、凭据和模型名。
+// 输出：返回仅包含 DeepSeek 的模型配置。
 // 副作用：无，只构造 HTTP 客户端。
 func newArticleAnalysisModels(cfg config.Config) []articleanalysis.AnalysisModelConfig {
-	// 1. 为每个 Sub2API 模型构造固定模型的 Responses 客户端。
-	models := make([]articleanalysis.AnalysisModelConfig, 0, len(cfg.Clients.Sub2API.Models)+1)
-	for _, model := range cfg.Clients.Sub2API.Models {
-		models = append(models, articleanalysis.AnalysisModelConfig{
-			ID: "sub2api:" + model, Provider: "sub2api", Model: model,
-			Label: model, Analyzer: client.NewSub2APIClient(
-				cfg.Clients.Sub2API, model, &http.Client{Timeout: 90 * time.Second},
-			),
-		})
-	}
-
-	// 2. 追加原有 DeepSeek 客户端，允许随时从页面切回。
-	models = append(models, articleanalysis.AnalysisModelConfig{
+	// 1. 只构造 DeepSeek 客户端，避免页面继续暴露已停用的模型入口。
+	return []articleanalysis.AnalysisModelConfig{{
 		ID: "deepseek:" + cfg.Clients.DeepSeek.Model, Provider: "deepseek",
 		Model: cfg.Clients.DeepSeek.Model, Label: cfg.Clients.DeepSeek.Model,
 		Analyzer: client.NewDeepSeekClient(cfg.Clients.DeepSeek, &http.Client{Timeout: 60 * time.Second}),
-	})
-	return models
+	}}
 }
 
 // newJobRegistry 建立全部执行来源共用的任务注册表。
