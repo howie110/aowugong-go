@@ -88,6 +88,10 @@ export function DashboardPage({ initialPage }: DashboardPageProps) {
   const [isStockAnalysisMasked, setIsStockAnalysisMasked] = useState(true);
 
   useEffect(() => {
+    document.title = "Aowugong 工作台";
+  }, []);
+
+  useEffect(() => {
     getProfile()
       .then(setUser)
       .catch(() => {

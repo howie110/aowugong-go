@@ -12,7 +12,7 @@ import (
 const (
 	defaultEnvironment        = "development"
 	defaultHTTPAddress        = "0.0.0.0:2345"
-	defaultPublicURL          = "https://8.138.123.59:2345"
+	defaultPublicURL          = "https://aowugong.top"
 	defaultPostgresURL        = "postgres://aowugong@127.0.0.1:5432/aowugong?sslmode=disable"
 	defaultPostgresMaxOpen    = 8
 	defaultPostgresMaxIdle    = 4

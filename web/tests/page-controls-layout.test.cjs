@@ -17,11 +17,11 @@ test("共享页头不再显示右上角日期", () => {
   assert.doesNotMatch(dashboardSource, /isLoading=\{isPageLoading\}/);
 });
 
-test("浏览器标签使用工作台名称和应用图标", () => {
+test("根页面使用工具分享名称和应用图标", () => {
   const indexSource = readSource("index.html");
   const faviconPath = path.resolve(__dirname, "../public/favicon.svg");
 
-  assert.match(indexSource, /<title>Aowugong 工作台<\/title>/);
+  assert.match(indexSource, /<title>嗷呜公 · 工具分享<\/title>/);
   assert.match(indexSource, /<link rel="icon" type="image\/svg\+xml" href="\/favicon\.svg" \/>/);
   assert.equal(fs.existsSync(faviconPath), true);
 });
@@ -193,5 +193,5 @@ test("本地访问使用 2345 且生产 Go 只监听反向代理内部端口", (
   assert.match(localScript, /AOWUGONG_HTTP_ADDRESS = "127\.0\.0\.1:2345"/);
   assert.match(localScript, /https:\/\/8\.138\.123\.59:2345/);
   assert.match(envExample, /^AOWUGONG_HTTP_ADDRESS=127\.0\.0\.1:12345$/m);
-  assert.match(envExample, /^VPN_PUBLIC_URL=https:\/\/8\.138\.123\.59:2345$/m);
+  assert.match(envExample, /^VPN_PUBLIC_URL=https:\/\/aowugong\.top$/m);
 });

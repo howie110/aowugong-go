@@ -23,7 +23,7 @@ func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 	if cfg.Environment != "development" {
 		t.Errorf("Environment = %q, want development", cfg.Environment)
 	}
-	if cfg.HTTP.Address != "0.0.0.0:2345" || cfg.HTTP.PublicURL != "https://8.138.123.59:2345" {
+	if cfg.HTTP.Address != "0.0.0.0:2345" || cfg.HTTP.PublicURL != "https://aowugong.top" {
 		t.Errorf("HTTP = %#v", cfg.HTTP)
 	}
 

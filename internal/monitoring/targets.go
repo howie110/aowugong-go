@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	defaultBlogURL  = "https://www.aowugong.top/"
+	defaultBlogURL  = "https://blog.aowugong.top/"
 	defaultMovieURL = "https://movie.aowugong.top/"
 )
 

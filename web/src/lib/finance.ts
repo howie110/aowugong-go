@@ -188,7 +188,7 @@ const pageEndpointMap: Record<FinancePageKey, string> = {
 
 export function getFinancePagePath(pageKey: FinancePageKey) {
   if (pageKey === "overview") {
-    return "/";
+    return "/work";
   }
   if (pageKey === "stockAnalysis") {
     return "/stock-analysis";
@@ -203,7 +203,7 @@ export function getFinancePagePath(pageKey: FinancePageKey) {
     return "/weread";
   }
   if (pageKey === "work") {
-    return "/work";
+    return "/work/navigation";
   }
   if (pageKey === "mahjong") {
     return "/mahjong";
@@ -231,6 +231,12 @@ export function getFinancePagePath(pageKey: FinancePageKey) {
 
 export function getFinancePageFromPath(pathname: string): FinancePageKey {
   const path = pathname.replace(/^\/+|\/+$/g, "");
+  if (path === "work") {
+    return "overview";
+  }
+  if (path === "work/navigation") {
+    return "work";
+  }
   if (path === "stock-analysis") {
     return "stockAnalysis";
   }

@@ -1,6 +1,6 @@
 # Aowugong Go
 
-`aowugong-go` 是 Aowugong 工作台的 Go 模块化单体。Go 进程提供 HTTP API、React 静态资源、RBAC、定时任务和微信通知，业务数据统一保存在 PostgreSQL。
+`aowugong-go` 是 Aowugong 工作台与根域名主页共用的 Go 模块化单体。Go 进程提供公开备案主页、工作台、HTTP API、React 静态资源、RBAC、定时任务和微信通知，业务数据统一保存在 PostgreSQL。
 
 ## 技术栈
 
@@ -70,6 +70,8 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 ```powershell
 ./scripts/stop-local.ps1
 ```
+
+正式公网入口按路径区分：`/` 是公开的“嗷呜公 · 工具分享”备案主页，`/work` 是登录后的工作台，`/work/navigation` 是工作导航页面，`/api/`（包括 VPN 订阅接口）继续由同一 Go 服务处理。根页面不依赖登录，工作台不会占用根路径，也不会从根页面暴露入口。
 
 投资文章不再依赖外部 RSS 聚合接口。在“投资研究 > 投资文章抓取”中扫码绑定一个微信读书账号，服务会从书架发现公众号；人工启用的公众号由 08:00、20:00 任务各检查最近 20 篇，只为数据库未知文章读取详情和微信公众号原文。登录凭据使用 `AOWUGONG_ENCRYPTION_KEY` 派生的 AES-256-GCM 密钥加密后存入 PostgreSQL，二维码中间态只保存在当前 Go 进程内。Go 同时按公众号从已入库文章生成 `http://127.0.0.1:2345/feeds/weread/{account_id}.xml`，仅允许服务器回环地址访问，供同机 Miniflux 分源保存和阅读公众号全文。
 
@@ -141,7 +143,7 @@ VPN 订阅直接由已开放的 Go 服务提供，确保设备在尚未连接代
 
 ```env
 VPN_SOURCE_DIR=storage/private/vpn
-VPN_PUBLIC_URL=https://8.138.123.59:2345
+VPN_PUBLIC_URL=https://aowugong.top
 ```
 
 原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每名登录用户独立的高强度 Token；管理员在“VPN 分配”管理订阅，`VPN 用户` 在“VPN 资源”中只读取自己的订阅并扫码。生产使用 Let’s Encrypt 公网 IP 短期证书，由 Caddy 在 `2345` 终止 TLS 并转发到仅监听 `127.0.0.1:12345` 的 Go 服务；同端口收到 HTTP 请求时自动跳转到 HTTPS。systemd 每日检查续期，证书变化后自动重启 Caddy。

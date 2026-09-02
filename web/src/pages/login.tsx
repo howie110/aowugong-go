@@ -16,8 +16,12 @@ import {
   saveRememberedCredentials,
 } from "@/lib/remembered-credentials";
 
+type LoginPageProps = {
+  onLoggedIn: () => void;
+};
+
 /** 渲染后台登录页面并管理浏览器记住密码状态。 */
-export function LoginPage() {
+export function LoginPage({ onLoggedIn }: LoginPageProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [rememberPassword, setRememberPassword] = useState(false);
@@ -55,7 +59,7 @@ export function LoginPage() {
       } else {
         clearRememberedCredentials(getCredentialStorage(window));
       }
-      window.location.href = "/";
+      onLoggedIn();
     } catch (err) {
       setError(err instanceof Error ? err.message : "登录失败");
     } finally {
