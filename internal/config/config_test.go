@@ -53,6 +53,9 @@ func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 	if cfg.Clients.DeepSeek.BaseURL != "https://api.deepseek.com" || cfg.Clients.DeepSeek.Model != "deepseek-v4-pro" {
 		t.Errorf("DeepSeek defaults = %#v", cfg.Clients.DeepSeek)
 	}
+	if cfg.PictureProxy.Endpoint != "oss-cn-guangzhou-internal.aliyuncs.com" {
+		t.Errorf("PictureProxy.Endpoint = %q, want Guangzhou internal OSS endpoint", cfg.PictureProxy.Endpoint)
+	}
 }
 
 // TestEnvironmentExampleUsesPostgresRuntimeSettings 验证环境示例以 PostgreSQL 作为运行时数据库。
@@ -74,6 +77,7 @@ func TestEnvironmentExampleUsesPostgresRuntimeSettings(t *testing.T) {
 		"GITHUB_BACKUP_ENABLED=", "GITHUB_BACKUP_TOKEN=", "GITHUB_BACKUP_REQUIRED_REPOSITORIES=KES-IT/KES-SCM,KES-IT/KES-BIS",
 		"VAULTWARDEN_BACKUP_EMAIL_ENABLED=", "VAULTWARDEN_BACKUP_RECOVERY_SCRIPTS_DIR=", "VAULTWARDEN_BACKUP_AGE_RECIPIENT=", "SMTP_EMAIL=", "SMTP_PASSWORD=",
 		"DEEPSEEK_BASE_URL=", "DEEPSEEK_API_KEY=", "DEEPSEEK_MODEL=deepseek-v4-pro",
+		"PICTURE_OSS_ENDPOINT=oss-cn-guangzhou-internal.aliyuncs.com",
 		"WECOM_BOT_WEBHOOK_URL=",
 	} {
 		if !strings.Contains(string(content), key) {
