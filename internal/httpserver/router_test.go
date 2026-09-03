@@ -93,6 +93,54 @@ func TestNewRouterDoesNotFallbackForMissingAsset(t *testing.T) {
 	assertErrorEnvelope(t, recorder, "not_found")
 }
 
+// TestNewRouterRoutesPictureHost 验证图片域名不会被工作台 SPA 抢先处理。
+// 输入：绑定到 pic.example.com 的图片处理器和带端口 Host。
+// 输出：请求被原样交给图片处理器。
+// 副作用：创建 HTTP 测试请求。
+func TestNewRouterRoutesPictureHost(t *testing.T) {
+	// 1. 创建可识别的图片测试处理器。
+	picture := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("X-Picture-Route", "hit")
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := NewRouter(Dependencies{Picture: picture, PictureHost: "pic.example.com"})
+
+	// 2. 使用带端口的图片 Host 发起请求。
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/images/photo.jpg", nil)
+	request.Host = "pic.example.com:12345"
+	handler.ServeHTTP(recorder, request)
+
+	// 3. 断言请求命中了图片处理器而不是 SPA。
+	if recorder.Code != http.StatusOK || recorder.Header().Get("X-Picture-Route") != "hit" {
+		t.Errorf("picture route status/header = %d/%q", recorder.Code, recorder.Header().Get("X-Picture-Route"))
+	}
+}
+
+// TestNewRouterKeepsPictureRouteHostScoped 验证工作台主域名不读取图片处理器。
+// 输入：同一个图片处理器和主站 Host。
+// 输出：请求不命中图片处理器。
+// 副作用：创建 HTTP 测试请求。
+func TestNewRouterKeepsPictureRouteHostScoped(t *testing.T) {
+	// 1. 创建只会标记命中的图片处理器。
+	picture := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("X-Picture-Route", "hit")
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := NewRouter(Dependencies{Picture: picture, PictureHost: "pic.example.com"})
+
+	// 2. 使用主站 Host 请求同一路径。
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/images/photo.jpg", nil)
+	request.Host = "aowugong.top"
+	handler.ServeHTTP(recorder, request)
+
+	// 3. 断言没有图片路由标记。
+	if recorder.Header().Get("X-Picture-Route") == "hit" {
+		t.Error("main host unexpectedly reached picture handler")
+	}
+}
+
 // newTestRouter 创建使用临时静态目录的路由器。
 // 输入：t 管理临时目录生命周期。
 // 输出：返回包含固定 index.html 的测试路由。

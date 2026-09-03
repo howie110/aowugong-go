@@ -8,6 +8,7 @@ AOWUGONG_HOST="${AOWUGONG_HOST:-aowugong.top}"
 BLOG_HOST="${BLOG_HOST:-blog.aowugong.top}"
 MINIFLUX_HOST="${MINIFLUX_HOST:-miniflux.aowugong.top}"
 NEXTFLUX_HOST="${NEXTFLUX_HOST:-nextflux.aowugong.top}"
+PICTURE_HOST="${PICTURE_HOST:-pic.aowugong.top}"
 APP_DIR="${APP_DIR:-/opt/vaultwarden}"
 BLOG_ROOT="${BLOG_ROOT:-/opt/aowugong-blog}"
 BLOG_DEPLOY_USER="${BLOG_DEPLOY_USER:-blog-deploy}"
@@ -185,6 +186,18 @@ ${BLOG_HOST} {
     file_server
 }
 
+${PICTURE_HOST} {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+    }
+    reverse_proxy 127.0.0.1:12345 {
+        header_up X-Forwarded-For {http.request.remote.host}
+    }
+}
+
 ${VAULTWARDEN_HOST} {
     encode zstd gzip
     header {
@@ -272,7 +285,7 @@ main() {
 
     # 1. 校验运行条件和公网入口端口。
     require_root
-    for host in "${AOWUGONG_HOST}" "${BLOG_HOST}" "${VAULTWARDEN_HOST}" "${MINIFLUX_HOST}" "${NEXTFLUX_HOST}"; do
+    for host in "${AOWUGONG_HOST}" "${BLOG_HOST}" "${VAULTWARDEN_HOST}" "${MINIFLUX_HOST}" "${NEXTFLUX_HOST}" "${PICTURE_HOST}"; do
         if [[ ! "${host}" =~ ^[A-Za-z0-9.-]+$ ]]; then
             printf 'ERROR: 域名格式无效: %s\n' "${host}" >&2
             exit 1

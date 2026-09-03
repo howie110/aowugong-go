@@ -2,6 +2,7 @@
 package httpserver
 
 import (
+	"net"
 	"net/http"
 	"strings"
 
@@ -38,11 +39,15 @@ type Dependencies struct {
 	Jobs            *scheduler.Registry
 	Database        databaseReadService
 	VPN             *vpn.Service
+	Picture         http.Handler
+	PictureHost     string
 }
 
 type router struct {
-	api http.Handler
-	spa spaHandler
+	api         http.Handler
+	spa         spaHandler
+	picture     http.Handler
+	pictureHost string
 }
 
 // NewRouter 创建应用的 HTTP 路由器。
@@ -108,7 +113,10 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 
 	// 3. 组装 API 与 SPA 静态文件处理器。
-	return router{api: api, spa: newSPAHandler(deps.StaticDir)}
+	return router{
+		api: api, spa: newSPAHandler(deps.StaticDir), picture: deps.Picture,
+		pictureHost: normalizeHost(deps.PictureHost),
+	}
 }
 
 // ServeHTTP 按请求路径分发 API 和 SPA 请求。
@@ -116,14 +124,36 @@ func NewRouter(deps Dependencies) http.Handler {
 // 输出：无。
 // 副作用：调用 API 或静态资源处理器并写响应。
 func (r router) ServeHTTP(w http.ResponseWriter, request *http.Request) {
-	// 1. 将全部 API 请求交给 chi 路由，阻止进入 SPA 回退。
+	// 1. 图片域名只交给图片代理，避免把对象路径误交给工作台 SPA。
+	if r.picture != nil && sameHost(request.Host, r.pictureHost) {
+		r.picture.ServeHTTP(w, request)
+		return
+	}
+
+	// 2. 将全部 API 请求交给 chi 路由，阻止进入 SPA 回退。
 	if request.URL.Path == "/api" || strings.HasPrefix(request.URL.Path, "/api/") || strings.HasPrefix(request.URL.Path, "/feeds/") {
 		r.api.ServeHTTP(w, request)
 		return
 	}
 
-	// 2. 将其他请求交给静态文件与 SPA 处理器。
+	// 3. 将其他请求交给静态文件与 SPA 处理器。
 	r.spa.ServeHTTP(w, request)
+}
+
+// sameHost 比较 HTTP Host 与图片配置域名，兼容本地测试和带端口请求。
+func sameHost(value, expected string) bool {
+	value = normalizeHost(value)
+	expected = normalizeHost(expected)
+	if value == expected {
+		return true
+	}
+	host, _, err := net.SplitHostPort(value)
+	return err == nil && normalizeHost(host) == expected
+}
+
+// normalizeHost 清理 Host 字符串中的大小写和末尾点。
+func normalizeHost(value string) string {
+	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(value), "."))
 }
 
 // healthHandler 返回进程级健康状态。

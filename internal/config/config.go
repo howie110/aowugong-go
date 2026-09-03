@@ -25,6 +25,11 @@ const (
 	defaultBackupDir          = "storage/backup"
 	defaultPositionUploadDir  = "storage/uploads/positions"
 	defaultPositionTempDir    = "storage/temp/positions"
+	defaultPictureProxyHost   = "pic.aowugong.top"
+	defaultPictureEndpoint    = "oss-cn-hangzhou.aliyuncs.com"
+	defaultPictureRateLimit   = 600
+	defaultPictureRateWindow  = 10 * time.Minute
+	defaultPictureMaxObjectMB = 20
 )
 
 // LookupEnv 定义查询环境变量的函数类型。
@@ -43,6 +48,7 @@ type Config struct {
 	GitHubBackup      GitHubBackup
 	VaultwardenBackup VaultwardenBackup
 	VPN               VPN
+	PictureProxy      PictureProxy
 	Clients           Clients
 	Finance           Finance
 	Scheduler         Scheduler
@@ -108,6 +114,19 @@ type VaultwardenBackup struct {
 type VPN struct {
 	SourceDir string
 	PublicURL string
+}
+
+// PictureProxy 描述通过 Go 读取私有 OSS 图片的配置。
+type PictureProxy struct {
+	Enabled           bool
+	Host              string
+	Endpoint          string
+	Bucket            string
+	AccessKeyID       string
+	AccessKeySecret   string
+	RequestsPerWindow int
+	Window            time.Duration
+	MaxObjectMB       int
 }
 
 // Clients 描述当前可达业务使用的外部 HTTP 服务配置。
@@ -222,6 +241,11 @@ func Load(lookup LookupEnv) (Config, error) {
 			Directory: "storage/backup/vaultwarden", RecoveryScriptsDirectory: "scripts", MaxAttachmentMB: 45,
 		},
 		VPN: VPN{SourceDir: defaultVPNSourceDir},
+		PictureProxy: PictureProxy{
+			Host: defaultPictureProxyHost, Endpoint: defaultPictureEndpoint,
+			RequestsPerWindow: defaultPictureRateLimit, Window: defaultPictureRateWindow,
+			MaxObjectMB: defaultPictureMaxObjectMB,
+		},
 		Clients: Clients{
 			WeRead: WeRead{
 				GatewayURL:   "https://i.weread.qq.com/api/agent/gateway",
@@ -277,6 +301,11 @@ func Load(lookup LookupEnv) (Config, error) {
 	loadString(lookup, "VAULTWARDEN_BACKUP_EMAIL_TO", &cfg.VaultwardenBackup.EmailTo)
 	loadString(lookup, "VPN_SOURCE_DIR", &cfg.VPN.SourceDir)
 	loadString(lookup, "VPN_PUBLIC_URL", &cfg.VPN.PublicURL)
+	loadString(lookup, "PICTURE_PROXY_HOST", &cfg.PictureProxy.Host)
+	loadString(lookup, "PICTURE_OSS_ENDPOINT", &cfg.PictureProxy.Endpoint)
+	loadString(lookup, "PICTURE_OSS_BUCKET", &cfg.PictureProxy.Bucket)
+	loadString(lookup, "PICTURE_OSS_ACCESS_KEY_ID", &cfg.PictureProxy.AccessKeyID)
+	loadString(lookup, "PICTURE_OSS_ACCESS_KEY_SECRET", &cfg.PictureProxy.AccessKeySecret)
 	repositoryNames := strings.Join(cfg.GitHubBackup.RequiredRepositories, ",")
 	loadString(lookup, "GITHUB_BACKUP_REQUIRED_REPOSITORIES", &repositoryNames)
 	cfg.GitHubBackup.RequiredRepositories = splitCommaSeparated(repositoryNames)
@@ -330,6 +359,20 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err := loadInt(lookup, "POSITION_UPLOAD_MAX_MB", &cfg.Clients.PositionOCR.UploadMaxMB, 1, 100); err != nil {
 		return Config{}, err
 	}
+	if err := loadBool(lookup, "PICTURE_PROXY_ENABLED", &cfg.PictureProxy.Enabled); err != nil {
+		return Config{}, err
+	}
+	if err := loadInt(lookup, "PICTURE_PROXY_RATE_LIMIT", &cfg.PictureProxy.RequestsPerWindow, 1, 100000); err != nil {
+		return Config{}, err
+	}
+	pictureRateWindowMinutes := int(cfg.PictureProxy.Window / time.Minute)
+	if err := loadInt(lookup, "PICTURE_PROXY_RATE_WINDOW_MINUTES", &pictureRateWindowMinutes, 1, 1440); err != nil {
+		return Config{}, err
+	}
+	cfg.PictureProxy.Window = time.Duration(pictureRateWindowMinutes) * time.Minute
+	if err := loadInt(lookup, "PICTURE_PROXY_MAX_OBJECT_MB", &cfg.PictureProxy.MaxObjectMB, 1, 1024); err != nil {
+		return Config{}, err
+	}
 	if err := loadBool(lookup, "FINANCE_ENABLE_REAL_TRADE", &cfg.Finance.EnableRealTrade); err != nil {
 		return Config{}, err
 	}
@@ -362,6 +405,11 @@ func Load(lookup LookupEnv) (Config, error) {
 	cfg.VaultwardenBackup.RecoveryScriptsDirectory = filepath.Clean(cfg.VaultwardenBackup.RecoveryScriptsDirectory)
 	cfg.VPN.SourceDir = filepath.Clean(cfg.VPN.SourceDir)
 	cfg.VPN.PublicURL = strings.TrimRight(strings.TrimSpace(cfg.VPN.PublicURL), "/")
+	cfg.PictureProxy.Host = normalizeHost(cfg.PictureProxy.Host)
+	cfg.PictureProxy.Endpoint = strings.TrimRight(strings.TrimSpace(cfg.PictureProxy.Endpoint), "/")
+	cfg.PictureProxy.Bucket = strings.TrimSpace(cfg.PictureProxy.Bucket)
+	cfg.PictureProxy.AccessKeyID = strings.TrimSpace(cfg.PictureProxy.AccessKeyID)
+	cfg.PictureProxy.AccessKeySecret = strings.TrimSpace(cfg.PictureProxy.AccessKeySecret)
 	if cfg.MigrationsDir != "" {
 		cfg.MigrationsDir = filepath.Clean(cfg.MigrationsDir)
 	}
@@ -392,8 +440,25 @@ func Load(lookup LookupEnv) (Config, error) {
 		cfg.Clients.Email.Sender == "" || cfg.Clients.Email.Password == "") {
 		return Config{}, fmt.Errorf("启用 Vaultwarden 邮件备份时必须配置 age 公钥、收件人与 SMTP 账号")
 	}
+	if cfg.PictureProxy.Enabled {
+		if cfg.PictureProxy.Host == "" || strings.ContainsAny(cfg.PictureProxy.Host, "/?#:") {
+			return Config{}, fmt.Errorf("启用图片代理时 PICTURE_PROXY_HOST 必须是域名")
+		}
+		if cfg.PictureProxy.Endpoint == "" || cfg.PictureProxy.Bucket == "" ||
+			cfg.PictureProxy.AccessKeyID == "" || cfg.PictureProxy.AccessKeySecret == "" {
+			return Config{}, fmt.Errorf("启用图片代理时必须配置图片 OSS 端点、桶和只读凭据")
+		}
+	}
 
 	return cfg, nil
+}
+
+// normalizeHost 清理 Host 配置并统一域名大小写。
+// 输入：可能包含空白或末尾点的域名。
+// 输出：返回小写、不带末尾点的域名。
+// 副作用：无。
+func normalizeHost(value string) string {
+	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(value), "."))
 }
 
 // splitCommaSeparated 清理逗号分隔配置并保持首次出现顺序。
