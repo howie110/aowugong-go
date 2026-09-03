@@ -5,9 +5,12 @@ VAULTWARDEN_VERSION="${VAULTWARDEN_VERSION:-1.37.1}"
 CADDY_VERSION="${CADDY_VERSION:-2.11.4-alpine}"
 VAULTWARDEN_HOST="${VAULTWARDEN_HOST:-vault.aowugong.top}"
 AOWUGONG_HOST="${AOWUGONG_HOST:-aowugong.top}"
+BLOG_HOST="${BLOG_HOST:-blog.aowugong.top}"
 MINIFLUX_HOST="${MINIFLUX_HOST:-miniflux.aowugong.top}"
 NEXTFLUX_HOST="${NEXTFLUX_HOST:-nextflux.aowugong.top}"
 APP_DIR="${APP_DIR:-/opt/vaultwarden}"
+BLOG_ROOT="${BLOG_ROOT:-/opt/aowugong-blog}"
+BLOG_DEPLOY_USER="${BLOG_DEPLOY_USER:-blog-deploy}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/aowugong-go/shared/storage/backup/vaultwarden}"
 POSTGRES_BIN="${POSTGRES_BIN:-/usr/pgsql-15/bin}"
 
@@ -72,10 +75,17 @@ ensure_postgres_database() {
 # 副作用：写 /opt/vaultwarden 下的运行文件。
 write_runtime_files() {
     local password="$1"
+    local blog_group
 
-    # 1. 创建持久化数据、证书验证和备份目录。
+    # 1. 创建持久化数据、博客静态目录和备份目录。
     install -d -m 0750 "${APP_DIR}" "${APP_DIR}/data" "${APP_DIR}/caddy-data" "${APP_DIR}/caddy-config"
-    install -d -m 0755 "${APP_DIR}/caddy" /var/www/certbot
+    install -d -m 0755 "${APP_DIR}/caddy"
+    if ! id -u "${BLOG_DEPLOY_USER}" >/dev/null 2>&1; then
+        useradd --system --user-group --home-dir "${BLOG_ROOT}" --shell /bin/bash "${BLOG_DEPLOY_USER}"
+    fi
+    passwd --lock "${BLOG_DEPLOY_USER}" >/dev/null 2>&1 || true
+    blog_group="$(id -gn "${BLOG_DEPLOY_USER}")"
+    install -d -m 0755 -o "${BLOG_DEPLOY_USER}" -g "${blog_group}" "${BLOG_ROOT}" "${BLOG_ROOT}/releases"
     install -d -m 0700 "${BACKUP_DIR}"
 
     # 2. 保存只供 root 读取的数据库地址和公开访问地址。
@@ -122,6 +132,7 @@ services:
       - ${APP_DIR}/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ${APP_DIR}/caddy-data:/data
       - ${APP_DIR}/caddy-config:/config
+      - ${BLOG_ROOT}:/srv/aowugong-blog:ro
     logging:
       driver: json-file
       options:
@@ -147,6 +158,17 @@ ${AOWUGONG_HOST} {
 
 www.${AOWUGONG_HOST} {
     redir https://${AOWUGONG_HOST}{uri} 308
+}
+
+${BLOG_HOST} {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "same-origin"
+    }
+    root * /srv/aowugong-blog/current
+    file_server
 }
 
 ${VAULTWARDEN_HOST} {
@@ -236,7 +258,7 @@ main() {
 
     # 1. 校验运行条件和公网入口端口。
     require_root
-    for host in "${AOWUGONG_HOST}" "${VAULTWARDEN_HOST}" "${MINIFLUX_HOST}" "${NEXTFLUX_HOST}"; do
+    for host in "${AOWUGONG_HOST}" "${BLOG_HOST}" "${VAULTWARDEN_HOST}" "${MINIFLUX_HOST}" "${NEXTFLUX_HOST}"; do
         if [[ ! "${host}" =~ ^[A-Za-z0-9.-]+$ ]]; then
             printf 'ERROR: 域名格式无效: %s\n' "${host}" >&2
             exit 1

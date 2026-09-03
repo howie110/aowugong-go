@@ -9,7 +9,7 @@
 - 数据库：PostgreSQL 15+，连接池默认 `8/4`，时区 `Asia/Shanghai`
 - 调度：`robfig/cron/v3`，任务统一经过并发锁、超时、panic 恢复、日志、结果入库和失败微信通知
 - 外部服务：微信读书、微信公众号原文、Miniflux、DeepSeek、Tushare、企业微信群机器人、阿里云 OCR
-- 生产：Linux amd64 发布产物、systemd；Go 服务无需 Go、Node、Python 或 MySQL，公网 TLS 复用 Vaultwarden 的 Caddy 容器与 IP 证书
+- 生产：Linux amd64 发布产物、systemd；Go 服务无需 Go、Node、Python 或 MySQL，公网 TLS 复用 Vaultwarden 的 Caddy 容器与域名证书
 
 ## 目录
 
@@ -146,7 +146,7 @@ VPN_SOURCE_DIR=storage/private/vpn
 VPN_PUBLIC_URL=https://aowugong.top
 ```
 
-原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每名登录用户独立的高强度 Token；管理员在“VPN 分配”管理订阅，`VPN 用户` 在“VPN 资源”中只读取自己的订阅并扫码。生产由 Caddy 自动申请和续期公开域名证书，只在 `80/443` 提供域名入口：根域名转发 Go 工作台，`vault`、`miniflux`、`nextflux` 分别转发对应服务，应用本身只监听服务器回环地址。
+原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每名登录用户独立的高强度 Token；管理员在“VPN 分配”管理订阅，`VPN 用户` 在“VPN 资源”中只读取自己的订阅并扫码。生产由 Caddy 自动申请和续期公开域名证书，只在 `80/443` 提供域名入口：根域名转发 Go 工作台，`blog` 提供 Astro 静态博客，`vault`、`miniflux`、`nextflux` 分别转发对应服务，应用本身只监听服务器回环地址。
 
 `FINANCE_ENABLE_REAL_TRADE` 默认 `false`。`AOWUGONG_SQLITE_SOURCE_PATH` 只供一次迁移工具读取，正式服务不使用。
 
