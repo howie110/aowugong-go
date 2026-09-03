@@ -4,7 +4,7 @@ set -euo pipefail
 ENV_FILE="${AOWUGONG_ENV_FILE:-/opt/aowugong-go/shared/.env}"
 TOKEN_FILE="${MINIFLUX_TOKEN_FILE:-/etc/miniflux/aowugong-api-token}"
 BASE_URL="${MINIFLUX_BASE_URL:-http://127.0.0.1:5000}"
-MONITOR_URL="${MINIFLUX_MONITOR_URL:-http://8.138.123.59:5000/}"
+MONITOR_URL="${MINIFLUX_MONITOR_URL:-https://miniflux.aowugong.top/}"
 CATEGORY="${MINIFLUX_CATEGORY:-投资文章}"
 
 # require_file 校验服务器私有配置文件存在且不为空。

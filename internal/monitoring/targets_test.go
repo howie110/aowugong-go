@@ -15,7 +15,7 @@ func TestBuildTargetsIncludesDefaultsAndDedupesExtras(t *testing.T) {
 	cfg := config.Clients{
 		Miniflux: config.Miniflux{
 			BaseURL:    "http://127.0.0.1:5000",
-			MonitorURL: "http://8.138.123.59:5000/",
+			MonitorURL: "https://miniflux.aowugong.top/",
 		},
 		ServiceMonitorTargets: `[
 			{"code":"demo","name":"Demo","url":"https://example.com/health"},
@@ -28,7 +28,7 @@ func TestBuildTargetsIncludesDefaultsAndDedupesExtras(t *testing.T) {
 	if len(targets) != 4 {
 		t.Fatalf("target count = %d, want 4: %#v", len(targets), targets)
 	}
-	if targets[2].Code != "miniflux" || targets[2].URL != "http://8.138.123.59:5000/" || targets[2].ProbeURL != "http://127.0.0.1:5000/healthcheck" {
+	if targets[2].Code != "miniflux" || targets[2].URL != "https://miniflux.aowugong.top/" || targets[2].ProbeURL != "http://127.0.0.1:5000/healthcheck" {
 		t.Errorf("miniflux target = %#v", targets[2])
 	}
 }

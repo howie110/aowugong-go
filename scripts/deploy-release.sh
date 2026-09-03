@@ -11,9 +11,7 @@ APP_ROOT="${APP_ROOT:-/opt/aowugong-go}"
 RUN_USER="${RUN_USER:-aowugong}"
 RUN_GROUP="${RUN_GROUP:-aowugong}"
 DEPLOY_MODE="${DEPLOY_MODE:-main}"
-PUBLIC_IP="${PUBLIC_IP:-8.138.123.59}"
 PUBLIC_URL="${PUBLIC_URL:-https://aowugong.top}"
-MAIN_PUBLIC_PORT="${MAIN_PUBLIC_PORT:-2345}"
 ENV_FILE="${ENV_FILE:-}"
 RELEASE_ARCHIVE="${RELEASE_ARCHIVE:-}"
 HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-60}"
@@ -32,8 +30,8 @@ case "$DEPLOY_MODE" in
     ;;
   canary)
     APP_PORT="${APP_PORT:-2346}"
-    BIND_ADDRESS="0.0.0.0:$APP_PORT"
-    VPN_PUBLIC_URL="http://${PUBLIC_IP}:${APP_PORT}"
+    BIND_ADDRESS="127.0.0.1:$APP_PORT"
+    VPN_PUBLIC_URL="${PUBLIC_URL%/}"
     SCHEDULER_ENABLED=false
     SERVICE_NAME="$CANARY_SERVICE"
     RELEASE_LINK="$APP_ROOT/canary"
@@ -49,10 +47,6 @@ done
 [ -n "$VERSION" ] || die "用法: deploy-release.sh <v版本号>"
 printf '%s' "$VERSION" | grep -Eq '^v[0-9A-Za-z._-]+$' || die "版本号格式无效: $VERSION"
 printf '%s' "$APP_PORT" | grep -Eq '^[0-9]+$' || die "APP_PORT 必须是数字"
-if [ "$DEPLOY_MODE" = "canary" ] && [ "$APP_PORT" = "2345" ]; then
-  die "canary 不能占用正式 2345 端口"
-fi
-
 ensure_swap
 if ! id "$RUN_USER" >/dev/null 2>&1; then
   useradd --system --home-dir "$APP_ROOT" --create-home --shell /usr/sbin/nologin "$RUN_USER"
@@ -200,11 +194,6 @@ if [ -f /etc/systemd/system/vaultwarden-backup.service ] && [ -f "$release_direc
   find "$vaultwarden_backup_dir" -maxdepth 1 -type f \( -name 'vaultwarden-*.tar.gz' -o -name 'vaultwarden-*.tar.gz.sha256' \) \
     -exec chown root:"$RUN_GROUP" {} + -exec chmod 0640 {} +
 fi
-if [ -f /etc/systemd/system/vaultwarden-certificate-renew.service ] && [ -f "$release_directory/scripts/renew-vaultwarden-certificate.sh" ]; then
-  install -m 0750 -o root -g root "$release_directory/scripts/renew-vaultwarden-certificate.sh" \
-    /usr/local/sbin/vaultwarden-certificate-renew
-fi
-
 if [ ! -f "$shared_env" ]; then
   [ -n "$ENV_FILE" ] || die "首次部署必须通过 ENV_FILE 提供生产配置"
   install -m 0600 -o "$RUN_USER" -g "$RUN_GROUP" "$ENV_FILE" "$shared_env"

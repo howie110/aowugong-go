@@ -59,7 +59,7 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 
 ## 本地运行
 
-本地默认只启动前端和 Go 代理，业务请求通过 HTTPS 转发到线上 `2345`，因此看到的是线上 PostgreSQL 数据，不创建本地业务数据库，也不会启动定时任务：
+本地默认只启动前端和 Go 代理，业务请求通过 HTTPS 转发到线上根域名，因此看到的是线上 PostgreSQL 数据，不创建本地业务数据库，也不会启动定时任务：
 
 ```powershell
 ./scripts/run-local.ps1
@@ -73,7 +73,7 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 
 正式公网入口按路径区分：`/` 是公开的“嗷呜公 · 工具分享”备案主页，`/work` 是登录后的工作台，`/work/navigation` 是工作导航页面，`/api/`（包括 VPN 订阅接口）继续由同一 Go 服务处理。根页面不依赖登录，工作台不会占用根路径，也不会从根页面暴露入口。
 
-投资文章不再依赖外部 RSS 聚合接口。在“投资研究 > 投资文章抓取”中扫码绑定一个微信读书账号，服务会从书架发现公众号；人工启用的公众号由 08:00、20:00 任务各检查最近 20 篇，只为数据库未知文章读取详情和微信公众号原文。登录凭据使用 `AOWUGONG_ENCRYPTION_KEY` 派生的 AES-256-GCM 密钥加密后存入 PostgreSQL，二维码中间态只保存在当前 Go 进程内。Go 同时按公众号从已入库文章生成 `http://127.0.0.1:2345/feeds/weread/{account_id}.xml`，仅允许服务器回环地址访问，供同机 Miniflux 分源保存和阅读公众号全文。
+投资文章不再依赖外部 RSS 聚合接口。在“投资研究 > 投资文章抓取”中扫码绑定一个微信读书账号，服务会从书架发现公众号；人工启用的公众号由 08:00、20:00 任务各检查最近 20 篇，只为数据库未知文章读取详情和微信公众号原文。登录凭据使用 `AOWUGONG_ENCRYPTION_KEY` 派生的 AES-256-GCM 密钥加密后存入 PostgreSQL，二维码中间态只保存在当前 Go 进程内。Go 同时按公众号从已入库文章生成 `http://127.0.0.1:12345/feeds/weread/{account_id}.xml`，仅允许服务器回环地址访问，供同机 Miniflux 分源保存和阅读公众号全文。
 
 “资源分享 > VPN 分配”仅管理员可见，用于给登录用户分配、重新发布、轮换或撤销 VPN 资源。“资源分享 > VPN 资源”只展示当前登录用户获配的资源，用户选择客户端格式后扫码即可配置。服务从 `storage/private/vpn` 读取被 Git 忽略的 Clash、Xray、Shadowrocket 和 Surge 文件，按文件名中的资源编码归组，并统一生成 Clash/FlClash、Shadowrocket、Surge、v2rayN/v2rayNG 四种订阅。分配时会自动加入 `VPN 用户` 角色；用户 Token 由 `AOWUGONG_ENCRYPTION_KEY`、订阅主键和版本通过 HMAC 派生，数据库不保存 Token 或节点正文。
 
@@ -121,7 +121,7 @@ storage/private/backup/age.exe --decrypt -i storage/private/backup/vaultwarden-a
 
 ```bash
 # 2. 在全新服务器安装 Docker Engine 和 PostgreSQL 15 后，上传明文备份和恢复包内的 scripts。
-PUBLIC_IP=新服务器公网IP bash scripts/install-vaultwarden.sh
+VAULTWARDEN_HOST=vault.aowugong.top bash scripts/install-vaultwarden.sh
 BACKUP_ARCHIVE=/root/vaultwarden-backup.tar.gz CONFIRM_DISASTER_RESTORE=YES \
   bash scripts/restore-vaultwarden-disaster.sh
 ```
@@ -146,7 +146,7 @@ VPN_SOURCE_DIR=storage/private/vpn
 VPN_PUBLIC_URL=https://aowugong.top
 ```
 
-原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每名登录用户独立的高强度 Token；管理员在“VPN 分配”管理订阅，`VPN 用户` 在“VPN 资源”中只读取自己的订阅并扫码。生产使用 Let’s Encrypt 公网 IP 短期证书，由 Caddy 在 `2345` 终止 TLS 并转发到仅监听 `127.0.0.1:12345` 的 Go 服务；同端口收到 HTTP 请求时自动跳转到 HTTPS。systemd 每日检查续期，证书变化后自动重启 Caddy。
+原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每名登录用户独立的高强度 Token；管理员在“VPN 分配”管理订阅，`VPN 用户` 在“VPN 资源”中只读取自己的订阅并扫码。生产由 Caddy 自动申请和续期公开域名证书，只在 `80/443` 提供域名入口：根域名转发 Go 工作台，`vault`、`miniflux`、`nextflux` 分别转发对应服务，应用本身只监听服务器回环地址。
 
 `FINANCE_ENABLE_REAL_TRADE` 默认 `false`。`AOWUGONG_SQLITE_SOURCE_PATH` 只供一次迁移工具读取，正式服务不使用。
 

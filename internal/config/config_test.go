@@ -10,7 +10,7 @@ import (
 
 // TestLoadUsesDevelopmentDefaults 验证开发环境的默认运行配置。
 // 输入：空环境查询函数。
-// 输出：返回 2345、72 小时令牌和 PostgreSQL 默认参数。
+// 输出：返回本机回环监听、72 小时令牌和 PostgreSQL 默认参数。
 // 副作用：无。
 func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 	// 1. 使用空环境加载默认配置。
@@ -23,7 +23,7 @@ func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 	if cfg.Environment != "development" {
 		t.Errorf("Environment = %q, want development", cfg.Environment)
 	}
-	if cfg.HTTP.Address != "0.0.0.0:2345" || cfg.HTTP.PublicURL != "https://aowugong.top" {
+	if cfg.HTTP.Address != "127.0.0.1:2345" || cfg.HTTP.PublicURL != "https://aowugong.top" {
 		t.Errorf("HTTP = %#v", cfg.HTTP)
 	}
 
@@ -233,7 +233,7 @@ func TestLoadUsesMinifluxOverrides(t *testing.T) {
 	// 1. 提供完整的 Miniflux API 配置。
 	cfg, err := Load(newLookup(map[string]string{
 		"MINIFLUX_BASE_URL":    "http://127.0.0.1:5000/",
-		"MINIFLUX_MONITOR_URL": "http://8.138.123.59:5000/",
+		"MINIFLUX_MONITOR_URL": "https://miniflux.aowugong.top/",
 		"MINIFLUX_API_TOKEN":   "test-token",
 		"MINIFLUX_CATEGORY":    "投资文章",
 	}))
@@ -243,7 +243,7 @@ func TestLoadUsesMinifluxOverrides(t *testing.T) {
 
 	// 2. 断言文章客户端参数进入唯一配置结构。
 	if cfg.Clients.Miniflux.BaseURL != "http://127.0.0.1:5000/" ||
-		cfg.Clients.Miniflux.MonitorURL != "http://8.138.123.59:5000/" ||
+		cfg.Clients.Miniflux.MonitorURL != "https://miniflux.aowugong.top/" ||
 		cfg.Clients.Miniflux.APIToken != "test-token" || cfg.Clients.Miniflux.Category != "投资文章" {
 		t.Errorf("Clients.Miniflux = %#v", cfg.Clients.Miniflux)
 	}
@@ -311,7 +311,7 @@ func TestLoadRejectsProductionDevelopmentUpstream(t *testing.T) {
 		"AOWUGONG_ENV":              "production",
 		"AOWUGONG_JWT_SECRET":       "jwt-secret",
 		"AOWUGONG_ENCRYPTION_KEY":   "encryption-key",
-		"AOWUGONG_DEV_UPSTREAM_URL": "http://8.138.123.59:2345",
+		"AOWUGONG_DEV_UPSTREAM_URL": "https://aowugong.top",
 	}))
 
 	// 2. 断言配置加载失败且错误指向开发上游。

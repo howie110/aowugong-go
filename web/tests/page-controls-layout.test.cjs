@@ -191,7 +191,7 @@ test("本地访问使用 2345 且生产 Go 只监听反向代理内部端口", (
   // 2. 确认本地保持 2345，生产 Go 仅在回环内部端口接受 Caddy 转发。
   assert.match(viteSource, /http:\/\/127\.0\.0\.1:2345/);
   assert.match(localScript, /AOWUGONG_HTTP_ADDRESS = "127\.0\.0\.1:2345"/);
-  assert.match(localScript, /https:\/\/8\.138\.123\.59:2345/);
+  assert.match(localScript, /https:\/\/aowugong\.top/);
   assert.match(envExample, /^AOWUGONG_HTTP_ADDRESS=127\.0\.0\.1:12345$/m);
   assert.match(envExample, /^VPN_PUBLIC_URL=https:\/\/aowugong\.top$/m);
 });

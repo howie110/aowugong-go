@@ -3,8 +3,10 @@ set -Eeuo pipefail
 
 VAULTWARDEN_VERSION="${VAULTWARDEN_VERSION:-1.37.1}"
 CADDY_VERSION="${CADDY_VERSION:-2.11.4-alpine}"
-CERTBOT_VERSION="${CERTBOT_VERSION:-v5.4.0}"
-PUBLIC_IP="${PUBLIC_IP:-}"
+VAULTWARDEN_HOST="${VAULTWARDEN_HOST:-vault.aowugong.top}"
+AOWUGONG_HOST="${AOWUGONG_HOST:-aowugong.top}"
+MINIFLUX_HOST="${MINIFLUX_HOST:-miniflux.aowugong.top}"
+NEXTFLUX_HOST="${NEXTFLUX_HOST:-nextflux.aowugong.top}"
 APP_DIR="${APP_DIR:-/opt/vaultwarden}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/aowugong-go/shared/storage/backup/vaultwarden}"
 POSTGRES_BIN="${POSTGRES_BIN:-/usr/pgsql-15/bin}"
@@ -79,7 +81,7 @@ write_runtime_files() {
     # 2. 保存只供 root 读取的数据库地址和公开访问地址。
     cat >"${APP_DIR}/.env" <<EOF
 VAULTWARDEN_DATABASE_URL=postgresql://vaultwarden:${password}@127.0.0.1:5432/vaultwarden
-VAULTWARDEN_DOMAIN=https://${PUBLIC_IP}
+VAULTWARDEN_DOMAIN=https://${VAULTWARDEN_HOST}
 EOF
     chmod 0600 "${APP_DIR}/.env"
 
@@ -120,8 +122,6 @@ services:
       - ${APP_DIR}/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ${APP_DIR}/caddy-data:/data
       - ${APP_DIR}/caddy-config:/config
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-      - /var/www/certbot:/var/www/certbot:ro
     logging:
       driver: json-file
       options:
@@ -129,31 +129,27 @@ services:
         max-file: "3"
 EOF
 
-    # 4. 使用公网 IP 证书终止 TLS，并把 HTTP 请求统一跳转到 HTTPS。
+    # 4. 只为正式域名启用 HTTPS，所有应用仍只通过本机回环地址互通。
     cat >"${APP_DIR}/caddy/Caddyfile" <<EOF
 {
-    auto_https off
     admin off
-    servers :2345 {
-        listener_wrappers {
-            http_redirect
-            tls
-        }
-    }
 }
 
-:80 {
-    handle /.well-known/acme-challenge/* {
-        root * /var/www/certbot
-        file_server
+${AOWUGONG_HOST} {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "same-origin"
     }
-    handle {
-        redir https://${PUBLIC_IP}{uri} 308
-    }
+    reverse_proxy 127.0.0.1:12345
 }
 
-:443 {
-    tls /etc/letsencrypt/live/vaultwarden-ip/fullchain.pem /etc/letsencrypt/live/vaultwarden-ip/privkey.pem
+www.${AOWUGONG_HOST} {
+    redir https://${AOWUGONG_HOST}{uri} 308
+}
+
+${VAULTWARDEN_HOST} {
     encode zstd gzip
     header {
         Strict-Transport-Security "max-age=31536000"
@@ -163,66 +159,43 @@ EOF
     reverse_proxy 127.0.0.1:8222
 }
 
-:2345 {
-    tls /etc/letsencrypt/live/vaultwarden-ip/fullchain.pem /etc/letsencrypt/live/vaultwarden-ip/privkey.pem
+${MINIFLUX_HOST} {
     encode zstd gzip
     header {
         Strict-Transport-Security "max-age=31536000"
         X-Content-Type-Options "nosniff"
         Referrer-Policy "same-origin"
     }
-    reverse_proxy 127.0.0.1:12345
+    reverse_proxy 127.0.0.1:5000
+}
+
+${NEXTFLUX_HOST} {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "same-origin"
+    }
+    reverse_proxy 127.0.0.1:5001
 }
 EOF
 }
 
-# issue_ip_certificate 首次申请 Let’s Encrypt 公网 IP 短期证书。
+# install_systemd_units 安装备份定时器并清理旧的 IP 证书任务。
 # 输入：无。
-# 输出：证书已存在或申请成功时正常返回。
-# 副作用：临时监听 80 端口、写证书目录并访问 Let’s Encrypt。
-issue_ip_certificate() {
-    local certificate_path="/etc/letsencrypt/live/vaultwarden-ip/fullchain.pem"
-
-    # 1. 已有未损坏证书时不重复申请。
-    if [[ -s "${certificate_path}" ]]; then
-        return
-    fi
-
-    # 2. 临时启动只服务 ACME 文件的轻量 HTTP 容器。
-    docker pull busybox:1.37
-    docker rm -f vaultwarden-acme-http >/dev/null 2>&1 || true
-    docker run -d --rm --name vaultwarden-acme-http \
-        -p 80:80 -v /var/www/certbot:/www:ro busybox:1.37 \
-        httpd -f -p 80 -h /www >/dev/null
-    trap 'docker rm -f vaultwarden-acme-http >/dev/null 2>&1 || true' RETURN
-
-    # 3. 使用 Certbot 5.4 的 IP 地址支持申请 6 天短期证书。
-    docker run --rm \
-        -v /etc/letsencrypt:/etc/letsencrypt \
-        -v /var/lib/letsencrypt:/var/lib/letsencrypt \
-        -v /var/log/letsencrypt:/var/log/letsencrypt \
-        -v /var/www/certbot:/var/www/certbot \
-        "certbot/certbot:${CERTBOT_VERSION}" certonly \
-        --non-interactive --agree-tos --register-unsafely-without-email \
-        --preferred-profile shortlived --webroot --webroot-path /var/www/certbot \
-        --cert-name vaultwarden-ip --ip-address "${PUBLIC_IP}"
-
-    # 4. 停止临时入口，正式入口随后由 Caddy 接管。
-    docker rm -f vaultwarden-acme-http >/dev/null 2>&1 || true
-    docker image rm busybox:1.37 >/dev/null 2>&1 || true
-    trap - RETURN
-}
-
-# install_systemd_units 安装备份和证书续期定时器。
-# 输入：无。
-# 输出：两个定时器已启用。
+# 输出：备份定时器已启用。
 # 副作用：写 systemd unit 并重载管理器。
 install_systemd_units() {
-    # 1. 安装脚本到固定系统路径，避免发布目录切换影响任务。
+    # 1. 安装备份脚本到固定系统路径，避免发布目录切换影响任务。
     install -m 0750 "$(dirname "$0")/backup-vaultwarden.sh" /usr/local/sbin/vaultwarden-backup
-    install -m 0750 "$(dirname "$0")/renew-vaultwarden-certificate.sh" /usr/local/sbin/vaultwarden-certificate-renew
 
-    # 2. 安装每日备份服务和定时器。
+    # 2. 停用并移除旧的 IP 证书续期任务，保留证书文件便于回滚检查。
+    systemctl disable --now vaultwarden-certificate-renew.timer >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/vaultwarden-certificate-renew.service \
+        /etc/systemd/system/vaultwarden-certificate-renew.timer \
+        /usr/local/sbin/vaultwarden-certificate-renew
+
+    # 3. 安装每日备份服务和定时器。
     cat >/etc/systemd/system/vaultwarden-backup.service <<'EOF'
 [Unit]
 Description=Backup Vaultwarden PostgreSQL and files
@@ -249,38 +222,13 @@ RandomizedDelaySec=5m
 WantedBy=timers.target
 EOF
 
-    # 3. 安装每日证书续期服务和定时器。
-    cat >/etc/systemd/system/vaultwarden-certificate-renew.service <<'EOF'
-[Unit]
-Description=Renew Vaultwarden IP certificate
-After=docker.service network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/vaultwarden-certificate-renew
-EOF
-
-    cat >/etc/systemd/system/vaultwarden-certificate-renew.timer <<'EOF'
-[Unit]
-Description=Daily Vaultwarden IP certificate renewal check
-
-[Timer]
-OnCalendar=*-*-* 04:20:00
-Persistent=true
-RandomizedDelaySec=10m
-
-[Install]
-WantedBy=timers.target
-EOF
-
-    # 4. 重载 systemd 并启用两个定时器。
+    # 4. 重载 systemd 并只启用备份定时器。
     systemctl daemon-reload
-    systemctl enable --now vaultwarden-backup.timer vaultwarden-certificate-renew.timer
+    systemctl enable --now vaultwarden-backup.timer
 }
 
-# main 部署 Vaultwarden、HTTPS 和自动维护任务。
-# 输入：通过环境变量覆盖版本、IP 和目录。
+# main 部署 Vaultwarden、域名 HTTPS 和自动备份任务。
+# 输入：通过环境变量覆盖版本、域名和目录。
 # 输出：打印访问地址和服务状态。
 # 副作用：启动 Docker、写 PostgreSQL、申请证书并启动容器。
 main() {
@@ -288,10 +236,12 @@ main() {
 
     # 1. 校验运行条件和公网入口端口。
     require_root
-	if [[ -z "${PUBLIC_IP}" ]]; then
-		printf 'ERROR: 请通过 PUBLIC_IP 提供当前服务器公网 IP\n' >&2
-		exit 1
-	fi
+    for host in "${AOWUGONG_HOST}" "${VAULTWARDEN_HOST}" "${MINIFLUX_HOST}" "${NEXTFLUX_HOST}"; do
+        if [[ ! "${host}" =~ ^[A-Za-z0-9.-]+$ ]]; then
+            printf 'ERROR: 域名格式无效: %s\n' "${host}" >&2
+            exit 1
+        fi
+    done
     ensure_port_available 80
     ensure_port_available 443
     command -v docker >/dev/null
@@ -312,24 +262,22 @@ main() {
     write_runtime_files "${database_password}"
     docker pull "vaultwarden/server:${VAULTWARDEN_VERSION}-alpine"
     docker pull "caddy:${CADDY_VERSION}"
-    docker pull "certbot/certbot:${CERTBOT_VERSION}"
 
-    # 4. 申请公网 IP 证书并启动正式容器。
-    issue_ip_certificate
+    # 4. 启动正式容器，Caddy 根据域名自动申请和续期证书。
     docker compose --project-directory "${APP_DIR}" up -d
     docker compose --project-directory "${APP_DIR}" restart caddy
 
     # 5. 安装维护任务，等待 HTTPS 就绪后生成首份备份。
     install_systemd_units
     for attempt in $(seq 1 30); do
-        if curl --fail --silent "https://${PUBLIC_IP}/api/config" >/dev/null; then
+        if curl --fail --silent "https://${VAULTWARDEN_HOST}/api/config" >/dev/null; then
             break
         fi
         sleep 1
     done
-    curl --fail --silent --show-error "https://${PUBLIC_IP}/api/config" >/dev/null
+    curl --fail --silent --show-error "https://${VAULTWARDEN_HOST}/api/config" >/dev/null
     /usr/local/sbin/vaultwarden-backup
-    printf 'Vaultwarden 已部署: https://%s\n' "${PUBLIC_IP}"
+    printf 'Vaultwarden 已部署: https://%s\n' "${VAULTWARDEN_HOST}"
 }
 
 main "$@"

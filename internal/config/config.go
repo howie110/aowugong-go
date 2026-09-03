@@ -11,7 +11,7 @@ import (
 
 const (
 	defaultEnvironment        = "development"
-	defaultHTTPAddress        = "0.0.0.0:2345"
+	defaultHTTPAddress        = "127.0.0.1:2345"
 	defaultPublicURL          = "https://aowugong.top"
 	defaultPostgresURL        = "postgres://aowugong@127.0.0.1:5432/aowugong?sslmode=disable"
 	defaultPostgresMaxOpen    = 8
@@ -228,7 +228,7 @@ func Load(lookup LookupEnv) (Config, error) {
 				SkillVersion: "1.0.4",
 			},
 			Miniflux: Miniflux{
-				BaseURL: "http://127.0.0.1:5000", MonitorURL: "http://8.138.123.59:5000/", Category: "投资文章",
+				BaseURL: "http://127.0.0.1:5000", MonitorURL: "https://miniflux.aowugong.top/", Category: "投资文章",
 			},
 			DeepSeek: DeepSeek{BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"},
 			Tushare:  Tushare{BaseURL: "https://api.tushare.pro"},

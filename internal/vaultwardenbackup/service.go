@@ -18,12 +18,11 @@ import (
 
 const backupPattern = "vaultwarden-*.tar.gz"
 
-const recoveryInstructions = `这是旧服务器已经完全损坏或丢失时使用的 Vaultwarden 灾难恢复包，不需要也不应连接旧服务器。请把本 ZIP、vaultwarden-age-key.txt、一台全新 Linux 服务器的 SSH 管理权限以及新服务器公网 IP 一起交给可信 AI：AI 先在本地用 age 私钥解密 ZIP 内的 .tar.gz.age 文件并检查其中存在 vaultwarden.dump、vaultwarden-files.tar.gz 和 manifest.txt，私钥不得上传到任何服务器；然后在新服务器安装 Docker Engine 和 PostgreSQL 15，开放 80/443，上传解密后的备份和 ZIP 内 scripts 目录，执行 PUBLIC_IP=新公网IP bash scripts/install-vaultwarden.sh 建立全新的数据库账号、运行配置和 HTTPS 证书，再执行 BACKUP_ARCHIVE=解密后的备份路径 CONFIRM_DISASTER_RESTORE=YES bash scripts/restore-vaultwarden-disaster.sh 恢复数据库、附件、Send 和签名密钥，最后访问 https://新公网IP/api/config，检查网页登录、两步验证和至少一条密码记录。若目标服务器并非空白环境，AI 必须先停止并询问用户，不得覆盖已有 Vaultwarden；恢复完成后删除服务器上的明文备份，私钥只保留在用户本地。`
+const recoveryInstructions = `这是旧服务器已经完全损坏或丢失时使用的 Vaultwarden 灾难恢复包，不需要也不应连接旧服务器。请把本 ZIP、vaultwarden-age-key.txt、一台全新 Linux 服务器的 SSH 管理权限以及已备案域名的 DNS 管理权限一起交给可信 AI：AI 先在本地用 age 私钥解密 ZIP 内的 .tar.gz.age 文件并检查其中存在 vaultwarden.dump、vaultwarden-files.tar.gz 和 manifest.txt，私钥不得上传到任何服务器；然后在新服务器安装 Docker Engine 和 PostgreSQL 15，确保 aowugong.top、vault.aowugong.top、miniflux.aowugong.top、nextflux.aowugong.top 的 A 记录指向新服务器，上传解密后的备份和 ZIP 内 scripts 目录，执行 VAULTWARDEN_HOST=vault.aowugong.top bash scripts/install-vaultwarden.sh 建立全新的数据库账号、运行配置和 HTTPS 证书，再执行 BACKUP_ARCHIVE=解密后的备份路径 CONFIRM_DISASTER_RESTORE=YES bash scripts/restore-vaultwarden-disaster.sh 恢复数据库、附件、Send 和签名密钥，最后访问 https://vault.aowugong.top/api/config，检查网页登录、两步验证和至少一条密码记录。若目标服务器并非空白环境，AI 必须先停止并询问用户，不得覆盖已有 Vaultwarden；恢复完成后删除服务器上的明文备份，私钥只保留在用户本地。`
 
 var recoveryScriptNames = []string{
 	"install-vaultwarden.sh",
 	"backup-vaultwarden.sh",
-	"renew-vaultwarden-certificate.sh",
 	"restore-vaultwarden-disaster.sh",
 }
 
