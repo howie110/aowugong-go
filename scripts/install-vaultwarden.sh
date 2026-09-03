@@ -153,8 +153,8 @@ ${AOWUGONG_HOST} {
         X-Content-Type-Options "nosniff"
         Referrer-Policy "same-origin"
     }
-    @legacy_blog_rss path /blog/rss.xml
-    handle @legacy_blog_rss {
+    @legacy_blog_asset path /blog/rss.xml /feeds/rss-style.xsl
+    handle @legacy_blog_asset {
         root * /srv/aowugong-blog/current
         file_server
     }
@@ -164,8 +164,8 @@ ${AOWUGONG_HOST} {
 }
 
 www.${AOWUGONG_HOST} {
-    @legacy_blog_rss path /blog/rss.xml
-    handle @legacy_blog_rss {
+    @legacy_blog_asset path /blog/rss.xml /feeds/rss-style.xsl
+    handle @legacy_blog_asset {
         root * /srv/aowugong-blog/current
         file_server
     }
