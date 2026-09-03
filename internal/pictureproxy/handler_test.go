@@ -44,7 +44,7 @@ func (s *fakeStore) Get(_ context.Context, key string) (Object, error) {
 	return Object{Metadata: s.metadata[key], Body: io.NopCloser(strings.NewReader(string(body)))}, nil
 }
 
-const stringKey = "images/photo.jpg"
+const stringKey = "pic/photo.jpg"
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
@@ -78,7 +78,7 @@ func TestHandlerServesGetAndHead(t *testing.T) {
 	handler := newTestHandler(t, store)
 
 	getRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(getRecorder, httptest.NewRequest(http.MethodGet, "/images/photo.jpg", nil))
+	handler.ServeHTTP(getRecorder, httptest.NewRequest(http.MethodGet, "/pic/photo.jpg", nil))
 	if getRecorder.Code != http.StatusOK {
 		t.Fatalf("GET status = %d, want %d", getRecorder.Code, http.StatusOK)
 	}
@@ -96,7 +96,7 @@ func TestHandlerServesGetAndHead(t *testing.T) {
 	}
 
 	headRecorder := httptest.NewRecorder()
-	headRequest := httptest.NewRequest(http.MethodHead, "/images/photo.jpg", nil)
+	headRequest := httptest.NewRequest(http.MethodHead, "/pic/photo.jpg", nil)
 	handler.ServeHTTP(headRecorder, headRequest)
 	if headRecorder.Code != http.StatusOK {
 		t.Fatalf("HEAD status = %d, want %d", headRecorder.Code, http.StatusOK)
@@ -112,7 +112,7 @@ func TestHandlerServesGetAndHead(t *testing.T) {
 func TestHandlerReturnsNotModifiedForMatchingETag(t *testing.T) {
 	store := newFakeStore()
 	handler := newTestHandler(t, store)
-	request := httptest.NewRequest(http.MethodGet, "/images/photo.jpg", nil)
+	request := httptest.NewRequest(http.MethodGet, "/pic/photo.jpg", nil)
 	request.Header.Set("If-None-Match", `W/"photo-etag"`)
 	recorder := httptest.NewRecorder()
 
@@ -136,10 +136,10 @@ func TestHandlerRejectsUnsupportedMethodsAndUnsafePaths(t *testing.T) {
 		path string
 		want int
 	}{
-		{name: "post", path: "/images/photo.jpg", want: http.StatusMethodNotAllowed},
+		{name: "post", path: "/pic/photo.jpg", want: http.StatusMethodNotAllowed},
 		{name: "empty", path: "/", want: http.StatusNotFound},
-		{name: "traversal", path: "/legacy/../images/photo.jpg", want: http.StatusNotFound},
-		{name: "wrong prefix", path: "/private/photo.jpg", want: http.StatusNotFound},
+		{name: "traversal", path: "/pic/../photo.jpg", want: http.StatusNotFound},
+		{name: "wrong prefix", path: "/legacy/photo.jpg", want: http.StatusNotFound},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -162,7 +162,7 @@ func TestHandlerRateLimitsEachForwardedIP(t *testing.T) {
 
 	for index := 0; index < 2; index++ {
 		recorder := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodHead, "/images/photo.jpg", nil)
+		request := httptest.NewRequest(http.MethodHead, "/pic/photo.jpg", nil)
 		request.Header.Set("X-Forwarded-For", "203.0.113.10")
 		handler.ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusOK {
@@ -171,7 +171,7 @@ func TestHandlerRateLimitsEachForwardedIP(t *testing.T) {
 	}
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodHead, "/images/photo.jpg", nil)
+	request := httptest.NewRequest(http.MethodHead, "/pic/photo.jpg", nil)
 	request.Header.Set("X-Forwarded-For", "203.0.113.10")
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusTooManyRequests {
@@ -182,7 +182,7 @@ func TestHandlerRateLimitsEachForwardedIP(t *testing.T) {
 	}
 
 	otherRecorder := httptest.NewRecorder()
-	otherRequest := httptest.NewRequest(http.MethodHead, "/images/photo.jpg", nil)
+	otherRequest := httptest.NewRequest(http.MethodHead, "/pic/photo.jpg", nil)
 	otherRequest.Header.Set("X-Forwarded-For", "203.0.113.11")
 	handler.ServeHTTP(otherRecorder, otherRequest)
 	if otherRecorder.Code != http.StatusOK {
@@ -196,7 +196,7 @@ func TestHandlerMapsObjectErrorsAndSizeLimit(t *testing.T) {
 		store.headErr = ErrNotFound
 		handler := newTestHandler(t, store)
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/images/photo.jpg", nil))
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/pic/photo.jpg", nil))
 		if recorder.Code != http.StatusNotFound {
 			t.Errorf("status = %d, want %d", recorder.Code, http.StatusNotFound)
 		}
@@ -207,7 +207,7 @@ func TestHandlerMapsObjectErrorsAndSizeLimit(t *testing.T) {
 		store.headErr = errors.New("oss unavailable")
 		handler := newTestHandler(t, store)
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/images/photo.jpg", nil))
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/pic/photo.jpg", nil))
 		if recorder.Code != http.StatusBadGateway {
 			t.Errorf("status = %d, want %d", recorder.Code, http.StatusBadGateway)
 		}
@@ -218,7 +218,7 @@ func TestHandlerMapsObjectErrorsAndSizeLimit(t *testing.T) {
 		store.metadata[stringKey] = Metadata{ContentType: "image/jpeg", ContentLength: 21}
 		handler := newTestHandler(t, store)
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/images/photo.jpg", nil))
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/pic/photo.jpg", nil))
 		if recorder.Code != http.StatusRequestEntityTooLarge {
 			t.Errorf("status = %d, want %d", recorder.Code, http.StatusRequestEntityTooLarge)
 		}

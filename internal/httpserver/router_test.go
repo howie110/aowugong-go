@@ -107,7 +107,7 @@ func TestNewRouterRoutesPictureHost(t *testing.T) {
 
 	// 2. 使用带端口的图片 Host 发起请求。
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/images/photo.jpg", nil)
+	request := httptest.NewRequest(http.MethodGet, "/pic/photo.jpg", nil)
 	request.Host = "pic.example.com:12345"
 	handler.ServeHTTP(recorder, request)
 
@@ -131,7 +131,7 @@ func TestNewRouterKeepsPictureRouteHostScoped(t *testing.T) {
 
 	// 2. 使用主站 Host 请求同一路径。
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/images/photo.jpg", nil)
+	request := httptest.NewRequest(http.MethodGet, "/pic/photo.jpg", nil)
 	request.Host = "aowugong.top"
 	handler.ServeHTTP(recorder, request)
 

@@ -113,7 +113,7 @@ func NewHandler(options ...Option) (*Handler, error) {
 	}, nil
 }
 
-// ServeHTTP 读取允许前缀下的图片并返回带长期缓存的响应。
+// ServeHTTP 读取 pic/ 前缀下的图片并返回带长期缓存的响应。
 func (h *Handler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	// 1. 图片入口只提供读取方法，避免被误用为通用对象存储代理。
 	if request.Method != http.MethodGet && request.Method != http.MethodHead {
@@ -234,7 +234,7 @@ func objectKey(requestPath string) (string, bool) {
 	if key == "" || strings.ContainsRune(key, '\x00') || strings.ContainsRune(key, '\\') {
 		return "", false
 	}
-	if !strings.HasPrefix(key, "images/") && !strings.HasPrefix(key, "legacy/") {
+	if !strings.HasPrefix(key, "pic/") {
 		return "", false
 	}
 	for _, part := range strings.Split(key, "/") {

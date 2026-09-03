@@ -43,7 +43,7 @@ func TestNormalizeOSSErrorMapsNotFoundOnly(t *testing.T) {
 
 func TestNewOSSStoreRejectsIncompleteConfiguration(t *testing.T) {
 	// 1. 缺少任何一个必要参数时不应创建客户端。
-	if _, err := NewOSSStore("oss-cn-hangzhou.aliyuncs.com", "", "id", "secret", nil); err == nil {
+	if _, err := NewOSSStore("oss-cn-guangzhou.aliyuncs.com", "", "id", "secret", nil); err == nil {
 		t.Fatal("NewOSSStore() error = nil, want incomplete configuration error")
 	}
 }

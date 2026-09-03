@@ -26,7 +26,7 @@ const (
 	defaultPositionUploadDir  = "storage/uploads/positions"
 	defaultPositionTempDir    = "storage/temp/positions"
 	defaultPictureProxyHost   = "pic.aowugong.top"
-	defaultPictureEndpoint    = "oss-cn-hangzhou.aliyuncs.com"
+	defaultPictureEndpoint    = "oss-cn-guangzhou.aliyuncs.com"
 	defaultPictureRateLimit   = 600
 	defaultPictureRateWindow  = 10 * time.Minute
 	defaultPictureMaxObjectMB = 20

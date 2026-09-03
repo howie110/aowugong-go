@@ -368,7 +368,7 @@ func TestLoadUsesPictureProxyConfiguration(t *testing.T) {
 	cfg, err := Load(newLookup(map[string]string{
 		"PICTURE_PROXY_ENABLED":             "true",
 		"PICTURE_PROXY_HOST":                "pic.example.com",
-		"PICTURE_OSS_ENDPOINT":              "oss-cn-hangzhou.aliyuncs.com/",
+		"PICTURE_OSS_ENDPOINT":              "oss-cn-guangzhou.aliyuncs.com/",
 		"PICTURE_OSS_BUCKET":                "private-images",
 		"PICTURE_OSS_ACCESS_KEY_ID":         "read-id",
 		"PICTURE_OSS_ACCESS_KEY_SECRET":     "read-secret",
@@ -384,7 +384,7 @@ func TestLoadUsesPictureProxyConfiguration(t *testing.T) {
 	if !cfg.PictureProxy.Enabled || cfg.PictureProxy.Host != "pic.example.com" {
 		t.Errorf("PictureProxy identity = %#v", cfg.PictureProxy)
 	}
-	if cfg.PictureProxy.Endpoint != "oss-cn-hangzhou.aliyuncs.com" {
+	if cfg.PictureProxy.Endpoint != "oss-cn-guangzhou.aliyuncs.com" {
 		t.Errorf("PictureProxy.Endpoint = %q", cfg.PictureProxy.Endpoint)
 	}
 	if cfg.PictureProxy.Bucket != "private-images" || cfg.PictureProxy.AccessKeyID != "read-id" {
