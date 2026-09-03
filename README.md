@@ -71,7 +71,7 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 ./scripts/stop-local.ps1
 ```
 
-正式公网入口按路径区分：`/` 是公开的“嗷呜公 · 工具分享”备案主页，`/work` 是登录后的工作台，`/work/navigation` 是工作导航页面，`/api/`（包括 VPN 订阅接口）继续由同一 Go 服务处理。根页面不依赖登录，工作台不会占用根路径，也不会从根页面暴露入口。
+正式公网入口按路径区分：`/` 是公开的“嗷呜公 · 工具分享”备案主页，`/work` 是登录后的工作台，`/work/navigation` 是工作导航页面，`/api/`（包括 VPN 订阅接口）继续由同一 Go 服务处理。根页面不依赖登录，工作台不会占用根路径，也不会从根页面暴露入口。博客新 RSS 地址是 `https://blog.aowugong.top/blog/rss.xml`；为兼容已经提交到 V2EX 的旧订阅，`https://www.aowugong.top/blog/rss.xml` 和 `https://aowugong.top/blog/rss.xml` 会直接读取同一份当前 RSS，不做跳转。
 
 投资文章不再依赖外部 RSS 聚合接口。在“投资研究 > 投资文章抓取”中扫码绑定一个微信读书账号，服务会从书架发现公众号；人工启用的公众号由 08:00、20:00 任务各检查最近 20 篇，只为数据库未知文章读取详情和微信公众号原文。登录凭据使用 `AOWUGONG_ENCRYPTION_KEY` 派生的 AES-256-GCM 密钥加密后存入 PostgreSQL，二维码中间态只保存在当前 Go 进程内。Go 同时按公众号从已入库文章生成 `http://127.0.0.1:12345/feeds/weread/{account_id}.xml`，仅允许服务器回环地址访问，供同机 Miniflux 分源保存和阅读公众号全文。
 
@@ -146,7 +146,7 @@ VPN_SOURCE_DIR=storage/private/vpn
 VPN_PUBLIC_URL=https://aowugong.top
 ```
 
-原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每名登录用户独立的高强度 Token；管理员在“VPN 分配”管理订阅，`VPN 用户` 在“VPN 资源”中只读取自己的订阅并扫码。生产由 Caddy 自动申请和续期公开域名证书，只在 `80/443` 提供域名入口：根域名转发 Go 工作台，`blog` 提供 Astro 静态博客，`vault`、`miniflux`、`nextflux` 分别转发对应服务，应用本身只监听服务器回环地址。
+原始 VPN 文件需单独放入生产 `shared/storage/private/vpn`，不得加入 Git、发布包或日志。公开接口不提供资源列表，客户端 URL 使用每名登录用户独立的高强度 Token；管理员在“VPN 分配”管理订阅，`VPN 用户` 在“VPN 资源”中只读取自己的订阅并扫码。生产由 Caddy 自动申请和续期公开域名证书，只在 `80/443` 提供域名入口：根域名转发 Go 工作台，`blog` 提供 Astro 静态博客，根域名和 `www` 仅额外直出旧博客 RSS 兼容路径，`vault`、`miniflux`、`nextflux` 分别转发对应服务，应用本身只监听服务器回环地址。
 
 `FINANCE_ENABLE_REAL_TRADE` 默认 `false`。`AOWUGONG_SQLITE_SOURCE_PATH` 只供一次迁移工具读取，正式服务不使用。
 

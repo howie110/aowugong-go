@@ -153,11 +153,25 @@ ${AOWUGONG_HOST} {
         X-Content-Type-Options "nosniff"
         Referrer-Policy "same-origin"
     }
-    reverse_proxy 127.0.0.1:12345
+    @legacy_blog_rss path /blog/rss.xml
+    handle @legacy_blog_rss {
+        root * /srv/aowugong-blog/current
+        file_server
+    }
+    handle {
+        reverse_proxy 127.0.0.1:12345
+    }
 }
 
 www.${AOWUGONG_HOST} {
-    redir https://${AOWUGONG_HOST}{uri} 308
+    @legacy_blog_rss path /blog/rss.xml
+    handle @legacy_blog_rss {
+        root * /srv/aowugong-blog/current
+        file_server
+    }
+    handle {
+        redir https://${AOWUGONG_HOST}{uri} 308
+    }
 }
 
 ${BLOG_HOST} {
