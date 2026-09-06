@@ -125,12 +125,12 @@ export function VPNDistributionPage() {
   async function handleCopyCommonRouting() {
     const body = summary?.common_routing?.body.trim();
     if (!body) {
-      notify.warning("暂无公共规则配置", "请让 AI 更新 common-routing.json 后再查看。 ");
+      notify.warning("暂无公共规则配置", "请让 AI 更新 common-routing.json 后再查看。");
       return;
     }
     const success = await copyTextToClipboard(body);
     if (!success) {
-      notify.error("复制失败", "当前浏览器不允许写入剪贴板。 ");
+      notify.error("复制失败", "当前浏览器不允许写入剪贴板。");
       return;
     }
     notify.success("公共分流规则已复制");
@@ -343,12 +343,12 @@ export function VPNResourcesPage() {
 
   async function handleCopyRouting(subscription: VPNUserSubscription) {
     if (!subscription.routing_url) {
-      notify.warning("当前分流规则链接不可用", "请联系管理员重新发布资源。 ");
+      notify.warning("当前分流规则链接不可用", "请联系管理员重新发布资源。");
       return;
     }
     const success = await copyTextToClipboard(subscription.routing_url);
     if (!success) {
-      notify.error("复制失败", "当前浏览器不允许写入剪贴板。 ");
+      notify.error("复制失败", "当前浏览器不允许写入剪贴板。");
       return;
     }
     notify.success("v2rayN 分流规则链接已复制");
