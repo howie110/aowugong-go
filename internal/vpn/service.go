@@ -343,7 +343,6 @@ func (s *Service) publishStored(ctx context.Context, stored storedSubscription) 
 func (s *Service) publicSubscription(stored storedSubscription, profiles []Profile) UserSubscription {
 	// 1. 仅给未撤销设备生成当前资源仍支持的订阅地址。
 	subscriptions := make(map[string]string)
-	routingURL := ""
 	if stored.Status != StatusRevoked && stored.PublishedAt != nil && s.distributor.BaseURL() != "" {
 		token := s.deriveToken(stored.ID, stored.TokenVersion)
 		for _, profile := range profiles {
@@ -355,14 +354,12 @@ func (s *Service) publicSubscription(stored storedSubscription, profiles []Profi
 					strconv.FormatInt(stored.ID, 10) + "/" + url.PathEscape(token) + "/" + format.Code
 			}
 		}
-		routingURL = s.distributor.BaseURL() + "/api/v1/vpn/subscriptions/" +
-			strconv.FormatInt(stored.ID, 10) + "/" + url.PathEscape(token) + "/routing"
 	}
 	return UserSubscription{
 		ID: stored.ID, UserID: stored.UserID, Username: stored.Username, ProfileCode: stored.ProfileCode,
 		TokenVersion: stored.TokenVersion, Status: stored.Status, PublishedAt: stored.PublishedAt,
 		LastError: stored.LastError, CreatedAt: stored.CreatedAt, UpdatedAt: stored.UpdatedAt,
-		Subscriptions: subscriptions, RoutingURL: routingURL,
+		Subscriptions: subscriptions,
 	}
 }
 
@@ -371,13 +368,17 @@ func (s *Service) publicSubscription(stored storedSubscription, profiles []Profi
 // 输出：返回不泄露其他资源名称的最小列表。
 // 副作用：无。
 func visibleProfiles(profiles []Profile, subscriptions []storedSubscription) []Profile {
-	// 1. 没有订阅时返回空列表，有订阅时按资源编码筛选。
+	// 1. 没有订阅时返回空列表，有多条订阅时按资源编码去重筛选。
 	if len(subscriptions) == 0 {
 		return []Profile{}
 	}
-	visible := make([]Profile, 0, 1)
+	assigned := make(map[string]struct{}, len(subscriptions))
+	for _, subscription := range subscriptions {
+		assigned[subscription.ProfileCode] = struct{}{}
+	}
+	visible := make([]Profile, 0, len(assigned))
 	for _, profile := range profiles {
-		if profile.Code == subscriptions[0].ProfileCode {
+		if _, exists := assigned[profile.Code]; exists {
 			visible = append(visible, profile)
 		}
 	}

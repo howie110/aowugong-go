@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add one file-backed, read-only public routing policy that is embedded in Clash/Surge/Shadowrocket subscriptions and exposed as a separate authenticated routing URL for v2rayN.
+**Goal:** Add one file-backed, read-only public routing policy that is embedded in Clash/Surge/Shadowrocket subscriptions while keeping v2rayN as a standard node subscription without a new standalone rules resource.
 
-**Architecture:** SourceCatalog reads storage/private/vpn/common-routing.json on every build, validates the Xray routing object, and converts supported field rules into each client syntax. Existing node formats and device-token lifecycle remain unchanged; Build adds a routing payload and the service exposes its URL as routing_url. The admin summary returns the raw file only to administrators, while the UI only renders and copies it.
+**Architecture:** SourceCatalog reads storage/private/vpn/common-routing.json on every build, validates the Xray routing object, and converts supported field rules into each client syntax. Existing node formats and device-token lifecycle remain unchanged; the legacy routing payload remains available for old links but is no longer exposed as a new URL. The admin summary returns the raw file only to administrators, while the UI only renders and copies it.
 
 **Tech Stack:** Go 1.26, encoding/json, gopkg.in/yaml.v3, chi HTTP handlers, React/TypeScript, existing Go and Node test runners.
 
@@ -16,7 +16,7 @@
 - The page must not provide an editor, save endpoint, draft, publish, version, or rollback flow.
 - Rules are read on each subscription build so the next client refresh sees the latest deployed file.
 - Missing or empty rules preserve the existing four node subscription outputs; invalid or unsupported rules fail generation explicitly.
-- routing is an additive v2rayN custom-routing response; existing client URL formats remain stable.
+- v2rayN remains a standard node subscription; legacy routing responses are compatibility-only and no new standalone rules link is exposed.
 - Never log or persist node credentials or routing file contents outside the intended response/payload.
 - Preserve the existing untracked LOG/ directory and do not add it to commits.
 
@@ -101,7 +101,7 @@ Expected: all VPN source and service tests pass.
 
 Run: git add internal/vpn/source.go internal/vpn/source_test.go storage/private/vpn/README.md && git commit -m "feat: merge common routing into vpn configs"
 
-### Task 3: Expose read-only routing metadata and the v2rayN routing URL
+### Task 3: Expose read-only routing metadata and remove new standalone routing metadata
 
 **Files:**
 - Modify: internal/vpn/model.go
@@ -111,12 +111,11 @@ Run: git add internal/vpn/source.go internal/vpn/source_test.go storage/private/
 
 **Interfaces:**
 - Add CommonRouting { Filename string; Body string } and Summary.CommonRouting *CommonRouting with omitempty.
-- Add UserSubscription.RoutingURL string serialized as routing_url.
-- publicSubscription creates routing_url at the same device/token path with format routing; the existing four subscriptions map entries remain unchanged.
+- Do not add a new UserSubscription routing URL field. Keep the existing four subscription map entries unchanged.
 
 - [ ] Step 1: Write failing service tests.
 
-Add common-routing.json to a service fixture. After Create, assert routing_url uses the same device/token path as v2ray. Request service.Subscription with routing and assert the JSON body. Modify the file and request again to prove the newest disk contents are returned without republishing. Assert administrator Summary includes raw CommonRouting and ordinary-user Summary has nil CommonRouting.
+Add common-routing.json to a service fixture. After Create, assert the serialized subscription has no routing_url. Request service.Subscription with the legacy routing format and assert the JSON body. Modify the file and request again to prove the newest disk contents are returned without republishing. Assert administrator Summary includes raw CommonRouting and ordinary-user Summary has nil CommonRouting.
 
 - [ ] Step 2: Run focused service tests and verify red.
 
@@ -126,7 +125,7 @@ Expected: compilation/assertion failures because the model and service do not ex
 
 - [ ] Step 3: Implement model and service changes.
 
-Populate Summary.CommonRouting only when canManage is true by calling SourceCatalog.CommonRouting. Keep ordinary-user summaries free of the raw rules. Add routing_url for active/published devices with a configured distributor. The existing Subscription method already delegates to Build, so routing uses the existing token validation.
+Populate Summary.CommonRouting only when canManage is true by calling SourceCatalog.CommonRouting. Keep ordinary-user summaries free of the raw rules. Do not add routing_url to active/published devices. The existing Subscription method already delegates to Build, so legacy routing uses the existing token validation.
 
 - [ ] Step 4: Add HTTP assertions.
 
@@ -146,7 +145,7 @@ Expected: all service and HTTP tests pass.
 
 Run: git add internal/vpn/model.go internal/vpn/service.go internal/vpn/service_test.go internal/httpserver/vpn_handlers_test.go && git commit -m "feat: expose vpn routing subscription metadata"
 
-### Task 4: Add read-only administrator and v2rayN user UI
+### Task 4: Add read-only administrator UI and support multiple resources per user
 
 **Files:**
 - Modify: web/src/lib/vpn.ts
@@ -155,12 +154,12 @@ Run: git add internal/vpn/model.go internal/vpn/service.go internal/vpn/service_
 
 **Interfaces:**
 - VPNSummary adds optional common_routing { filename: string; body: string }.
-- VPNUserSubscription adds routing_url: string.
+- VPNUserSubscription keeps only the four client subscription fields.
 - Reuse copyTextToClipboard; no write API or editable form is added.
 
 - [ ] Step 1: Write failing static UI tests.
 
-Create Node tests that read web/src/pages/vpn.tsx and assert labels 公共分流规则 and 只读, a non-editable pre/read-only display, and copyTextToClipboard for raw rules. Assert v2rayN 分流规则 and subscription.routing_url. Assert no common-rule save/update request exists.
+Create Node tests that read web/src/pages/vpn.tsx and assert labels 公共分流规则 and 只读, a non-editable pre/read-only display, and copyTextToClipboard for raw rules. Assert the absence of the independent v2rayN rules card. Assert no common-rule save/update request exists.
 
 - [ ] Step 2: Run the UI tests and verify red.
 
@@ -172,9 +171,9 @@ Expected: failures because the labels, types, and rendering do not exist.
 
 In VPNDistributionPage, render a card below the status cards when summary.can_manage is true. Show the fixed filename, summary.common_routing?.body || 暂无公共规则配置 in a pre block, a read-only description saying AI/deployment updates the file, and a copy button using the existing notifier. Do not add textarea, form state, save handler, or mutation API.
 
-- [ ] Step 4: Add the v2rayN routing-link copy action.
+- [ ] Step 4: Remove the standalone v2rayN routing-link action.
 
-In VPNResourcesPage, render a fifth small card only when subscription.routing_url is non-empty. Label it v2rayN 分流规则, explain that v2rayN imports custom routing separately, and copy it with the existing clipboard helper. Keep QR actions limited to the four client formats.
+In VPNResourcesPage, render only the four client formats. Keep QR actions limited to those formats; v2rayN receives its standard node subscription and no separate rules resource is shown.
 
 - [ ] Step 5: Run UI tests and the TypeScript build.
 

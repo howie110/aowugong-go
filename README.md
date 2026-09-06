@@ -75,7 +75,7 @@ pg_restore --no-owner --no-privileges -d aowugong_restore storage/backup/aowugon
 
 投资文章不再依赖外部 RSS 聚合接口。在“投资研究 > 投资文章抓取”中扫码绑定一个微信读书账号，服务会从书架发现公众号；人工启用的公众号由 08:00、20:00 任务各检查最近 20 篇，只为数据库未知文章读取详情和微信公众号原文。登录凭据使用 `AOWUGONG_ENCRYPTION_KEY` 派生的 AES-256-GCM 密钥加密后存入 PostgreSQL，二维码中间态只保存在当前 Go 进程内。Go 同时按公众号从已入库文章生成 `http://127.0.0.1:12345/feeds/weread/{account_id}.xml`，仅允许服务器回环地址访问，供同机 Miniflux 分源保存和阅读公众号全文。
 
-“资源分享 > VPN 分配”仅管理员可见，用于给登录用户分配、重新发布、轮换或撤销 VPN 资源。“资源分享 > VPN 资源”只展示当前登录用户获配的资源，用户选择客户端格式后扫码即可配置。服务从 `storage/private/vpn` 读取被 Git 忽略的 Clash、Xray、Shadowrocket 和 Surge 文件，按文件名中的资源编码归组，并统一生成 Clash/FlClash、Shadowrocket、Surge、v2rayN/v2rayNG 四种订阅。分配时会自动加入 `VPN 用户` 角色；用户 Token 由 `AOWUGONG_ENCRYPTION_KEY`、订阅主键和版本通过 HMAC 派生，数据库不保存 Token 或节点正文。
+“资源分享 > VPN 分配”仅管理员可见，用于给登录用户分配、重新发布、轮换或撤销 VPN 资源；同一用户可以获配多套资源。“资源分享 > VPN 资源”只展示当前登录用户获配的资源，用户选择客户端格式后扫码即可配置。服务从 `storage/private/vpn` 读取被 Git 忽略的 Clash、Xray、Shadowrocket 和 Surge 文件，按文件名中的资源编码归组，并统一生成 Clash/FlClash、Shadowrocket、Surge、v2rayN/v2rayNG 四种订阅。公共规则会合并进 Clash、Surge、Shadowrocket 配置；v2rayN 保持标准节点订阅，不额外提供独立规则资源。分配时会自动加入 `VPN 用户` 角色；用户 Token 由 `AOWUGONG_ENCRYPTION_KEY`、订阅主键和版本通过 HMAC 派生，数据库不保存 Token 或节点正文。
 
 需要补跑或修改线上数据时，通过 SSH 在服务器加载正式环境并调用统一 CLI：
 

@@ -61,7 +61,7 @@ func (r *Repository) List(ctx context.Context) ([]storedSubscription, error) {
 
 // ListForUser 返回当前登录用户自己的 VPN 订阅。
 // 输入：ctx 是调用上下文，userID 是当前用户主键。
-// 输出：返回零或一条用户订阅。
+// 输出：返回零或多条用户订阅。
 // 副作用：读取 PostgreSQL。
 func (r *Repository) ListForUser(ctx context.Context, userID int64) ([]storedSubscription, error) {
 	// 1. 使用用户外键限制查询范围，避免普通用户读取他人地址。
@@ -79,8 +79,8 @@ func (r *Repository) ListForUser(ctx context.Context, userID int64) ([]storedSub
 	}
 	defer rows.Close()
 
-	// 2. 扫描当前用户唯一订阅。
-	devices := make([]storedSubscription, 0, 1)
+	// 2. 扫描当前用户的全部订阅。
+	devices := make([]storedSubscription, 0, 2)
 	for rows.Next() {
 		device, scanErr := scanStoredDevice(rows)
 		if scanErr != nil {
@@ -99,15 +99,18 @@ func (r *Repository) ListForUser(ctx context.Context, userID int64) ([]storedSub
 // 输出：返回用户以及是否已经开通订阅。
 // 副作用：读取 PostgreSQL。
 func (r *Repository) ListUsers(ctx context.Context) ([]UserOption, error) {
-	// 1. 左连接订阅表，在一个查询中得到用户占用状态。
+	// 1. 用 EXISTS 计算占用状态，避免一个用户多套资源时重复返回用户。
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT app_user.id, app_user.username, app_user.email,
-		       CASE WHEN subscription.id IS NULL THEN 0 ELSE 1 END
+		       CASE WHEN EXISTS (
+		           SELECT 1 FROM vpn_subscription_device AS subscription
+		           WHERE subscription.user_id = app_user.id
+		             AND subscription.status <> ?
+		       ) THEN 1 ELSE 0 END
 		FROM aowugong_fastapi_users AS app_user
-		LEFT JOIN vpn_subscription_device AS subscription ON subscription.user_id = app_user.id
 		WHERE app_user.is_active = 1
 		ORDER BY app_user.username
-	`)
+	`, StatusRevoked)
 	if err != nil {
 		return nil, fmt.Errorf("查询 VPN 可分配用户: %w", err)
 	}
@@ -167,13 +170,14 @@ func (r *Repository) Create(ctx context.Context, request CreateRequest) (storedS
 		return storedSubscription{}, fmt.Errorf("查询 VPN 订阅用户: %w", err)
 	}
 
-	// 2. 写入用户外键和资源，不保存订阅明文密钥。
+	// 2. 写入用户外键和资源，不保存订阅明文密钥；name 仅保留数据库兼容用途。
 	var deviceID int64
+	name := fmt.Sprintf("%s-%s-%d", username, request.ProfileCode, time.Now().UnixNano())
 	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO vpn_subscription_device (name, user_id, profile_code)
 		VALUES (?, ?, ?)
 		RETURNING id
-	`, username, request.UserID, request.ProfileCode).Scan(&deviceID)
+	`, name, request.UserID, request.ProfileCode).Scan(&deviceID)
 	if err != nil {
 		if appdatabase.IsDuplicateKey(err) {
 			return storedSubscription{}, ErrConflict

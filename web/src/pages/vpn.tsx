@@ -123,9 +123,9 @@ export function VPNDistributionPage() {
   }
 
   async function handleCopyCommonRouting() {
-    const body = summary?.common_routing?.body.trim();
+    const body = summary?.common_routing?.body?.trim() ?? "";
     if (!body) {
-      notify.warning("暂无公共规则配置", "请让 AI 更新 common-routing.json 后再查看。");
+      notify.warning("暂无公共规则配置");
       return;
     }
     const success = await copyTextToClipboard(body);
@@ -133,7 +133,7 @@ export function VPNDistributionPage() {
       notify.error("复制失败", "当前浏览器不允许写入剪贴板。");
       return;
     }
-    notify.success("公共分流规则已复制");
+    notify.success("公共规则已复制");
   }
 
   async function handlePublish(device: VPNUserSubscription) {
@@ -228,7 +228,7 @@ export function VPNDistributionPage() {
         <CardHeader className="flex flex-row items-start justify-between gap-3">
           <div>
             <CardTitle>用户分配</CardTitle>
-            <CardDescription>一名登录用户分配一个 VPN 资源，可在多台终端中使用。</CardDescription>
+            <CardDescription>同一登录用户可以分配多套 VPN 资源，每套资源可在多台终端中共用。</CardDescription>
           </div>
           {summary?.can_manage ? <Button
             type="button"
@@ -341,19 +341,6 @@ export function VPNResourcesPage() {
     notify.success("订阅链接已复制", format.name);
   }
 
-  async function handleCopyRouting(subscription: VPNUserSubscription) {
-    if (!subscription.routing_url) {
-      notify.warning("当前分流规则链接不可用", "请联系管理员重新发布资源。");
-      return;
-    }
-    const success = await copyTextToClipboard(subscription.routing_url);
-    if (!success) {
-      notify.error("复制失败", "当前浏览器不允许写入剪贴板。");
-      return;
-    }
-    notify.success("v2rayN 分流规则链接已复制");
-  }
-
   return (
     <div className="space-y-4">
       {subscriptions.map((subscription) => {
@@ -396,18 +383,6 @@ export function VPNResourcesPage() {
                     </div>
                   </div>
                 ))}
-                {subscription.routing_url ? (
-                  <div className="rounded-lg border border-dashed p-3">
-                    <div className="font-medium">v2rayN 分流规则</div>
-                    <div className="mt-1 text-xs text-muted-foreground">公共分流规则需要在 v2rayN 中单独导入。</div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button type="button" variant="outline" size="sm" onClick={() => void handleCopyRouting(subscription)}>
-                        <Copy className="h-4 w-4" />
-                        复制规则链接
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
               </div>
               {!formats.length ? (
                 <Empty className="border-0 py-8">
@@ -555,7 +530,7 @@ function CreateUserDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>开通用户订阅</DialogTitle>
-          <DialogDescription>一个登录用户使用一组地址，可在多台终端中共用。</DialogDescription>
+          <DialogDescription>同一登录用户可以分配多套 VPN 资源，每套资源可在多台终端中共用。</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <Field>
@@ -565,7 +540,7 @@ function CreateUserDialog({
                 <SelectValue placeholder="选择用户" />
               </SelectTrigger>
               <SelectContent>
-                {users.filter((user) => !user.has_subscription).map((user) => (
+                {users.map((user) => (
                   <SelectItem key={user.id} value={String(user.id)}>{user.username} · {user.email}</SelectItem>
                 ))}
               </SelectContent>

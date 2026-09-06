@@ -46,7 +46,6 @@ type UserSubscription struct {
 	CreatedAt     string            `json:"created_at"`
 	UpdatedAt     string            `json:"updated_at"`
 	Subscriptions map[string]string `json:"subscriptions"`
-	RoutingURL    string            `json:"routing_url"`
 }
 
 // CreateRequest 描述给登录用户开通订阅需要的最小字段。

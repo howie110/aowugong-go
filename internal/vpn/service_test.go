@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -126,8 +127,15 @@ func TestServiceCreatesRotatesAndRevokesUserSubscription(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 	oldURL := created.Subscriptions["v2ray"]
-	if !strings.HasPrefix(oldURL, "https://vpn.example.test/api/v1/vpn/subscriptions/") || created.RoutingURL == "" || created.Status != StatusActive || len(distributor.values) != 1 {
+	if !strings.HasPrefix(oldURL, "https://vpn.example.test/api/v1/vpn/subscriptions/") || created.Status != StatusActive || len(distributor.values) != 1 {
 		t.Fatalf("created device = %#v, remote count = %d", created, len(distributor.values))
+	}
+	encodedCreated, marshalErr := json.Marshal(created)
+	if marshalErr != nil {
+		t.Fatalf("json.Marshal(created) error = %v", marshalErr)
+	}
+	if strings.Contains(string(encodedCreated), `"routing_url"`) {
+		t.Fatalf("created device unexpectedly exposes routing_url: %s", encodedCreated)
 	}
 	routing, err := service.Subscription(context.Background(), created.ID, subscriptionToken(t, oldURL), "routing")
 	if err != nil || routing.ContentType != "application/json; charset=utf-8" || !strings.Contains(routing.Body, "example.com") {
@@ -237,6 +245,57 @@ func TestServiceScopesSubscriptionsByLoginUser(t *testing.T) {
 	// 3. 第一名用户不能读取第二名用户的二维码。
 	if _, err := service.QRCode(context.Background(), second.ID, firstUserID, false, "v2ray"); err != ErrNotFound {
 		t.Fatalf("QRCode(other user) error = %v, want ErrNotFound", err)
+	}
+}
+
+// TestServiceAllowsMultipleProfilesForOneUser 验证一名用户可以同时获配不同 VPN 资源。
+// 输入：同一登录用户、DMIT 和魔戒两套资源。
+// 输出：两条订阅均可发布，普通用户看到两张资源卡，管理员用户列表不重复。
+// 副作用：创建临时文件并写入隔离 SQLite。
+func TestServiceAllowsMultipleProfilesForOneUser(t *testing.T) {
+	// 1. 准备两套最小 Clash 资源和直连分发器。
+	db := testdatabase.Open(t)
+	directory := t.TempDir()
+	content := "proxies:\n  - name: Test\n    type: vmess\n    server: test.example.com\n    port: 443\n    uuid: 00000000-0000-0000-0000-000000000001\n    alterId: 0\n    cipher: auto\n"
+	for _, profile := range []string{"dmit", "mojie"} {
+		if err := os.WriteFile(filepath.Join(directory, "clash_"+profile+".yaml"), []byte(content), 0o600); err != nil {
+			t.Fatalf("os.WriteFile(%s) error = %v", profile, err)
+		}
+	}
+	distributor := &memoryDistributor{baseURL: "https://vpn.example.test", values: make(map[string]DistributionPayload)}
+	service := NewService(NewRepository(db), NewSourceCatalog(directory), distributor, "test-secret")
+	userID := createVPNTestUser(t, db, "admin")
+
+	// 2. 同一用户分别开通 DMIT 和魔戒，重复同一资源仍应被拒绝。
+	dmit, err := service.Create(context.Background(), CreateRequest{UserID: userID, ProfileCode: "dmit"})
+	if err != nil {
+		t.Fatalf("Create(dmit) error = %v", err)
+	}
+	mojie, err := service.Create(context.Background(), CreateRequest{UserID: userID, ProfileCode: "mojie"})
+	if err != nil {
+		t.Fatalf("Create(mojie) error = %v", err)
+	}
+	if dmit.ID == mojie.ID || len(distributor.values) != 2 {
+		t.Fatalf("subscriptions = %#v, remote count = %d", []UserSubscription{dmit, mojie}, len(distributor.values))
+	}
+	if _, err := service.Create(context.Background(), CreateRequest{UserID: userID, ProfileCode: "dmit"}); err != ErrConflict {
+		t.Fatalf("duplicate profile error = %v, want %v", err, ErrConflict)
+	}
+
+	// 3. 普通用户看见两套资源，管理员用户列表仍只出现一次。
+	viewerSummary, err := service.Summary(context.Background(), userID, false)
+	if err != nil {
+		t.Fatalf("Summary(viewer) error = %v", err)
+	}
+	if len(viewerSummary.Subscriptions) != 2 || len(viewerSummary.Profiles) != 2 {
+		t.Fatalf("viewer summary = %#v", viewerSummary)
+	}
+	adminSummary, err := service.Summary(context.Background(), userID, true)
+	if err != nil {
+		t.Fatalf("Summary(admin) error = %v", err)
+	}
+	if len(adminSummary.Subscriptions) != 2 || len(adminSummary.Users) != 1 {
+		t.Fatalf("admin summary = %#v", adminSummary)
 	}
 }
 

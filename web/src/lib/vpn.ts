@@ -23,7 +23,6 @@ export type VPNUserSubscription = {
   created_at: string;
   updated_at: string;
   subscriptions: Record<string, string>;
-  routing_url: string;
 };
 
 export type VPNUserOption = {

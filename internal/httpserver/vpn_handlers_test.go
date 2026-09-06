@@ -153,11 +153,15 @@ func TestVPNSubscriptionUsesDeviceTokenWithoutLogin(t *testing.T) {
 	if recorder.Code != http.StatusOK || strings.TrimSpace(recorder.Body.String()) == "" {
 		t.Fatalf("subscription status = %d, body = %q", recorder.Code, recorder.Body.String())
 	}
-	routingURL, err := url.Parse(device.RoutingURL)
-	if err != nil {
-		t.Fatalf("url.Parse(routing) error = %v", err)
+	serializedDevice, marshalErr := json.Marshal(device)
+	if marshalErr != nil {
+		t.Fatalf("json.Marshal(device) error = %v", marshalErr)
 	}
-	routingRequest := httptest.NewRequest(http.MethodGet, routingURL.RequestURI(), nil)
+	if strings.Contains(string(serializedDevice), `"routing_url"`) {
+		t.Fatalf("device unexpectedly exposes routing_url: %s", serializedDevice)
+	}
+	routingPath := strings.TrimSuffix(parsed.Path, "/v2ray") + "/routing"
+	routingRequest := httptest.NewRequest(http.MethodGet, routingPath, nil)
 	routingRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(routingRecorder, routingRequest)
 	if routingRecorder.Code != http.StatusOK || !strings.HasPrefix(routingRecorder.Header().Get("Content-Type"), "application/json") || !strings.Contains(routingRecorder.Body.String(), "example.com") {

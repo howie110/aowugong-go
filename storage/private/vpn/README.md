@@ -32,9 +32,10 @@ AI/deployment when the shared rules change. Supported outbound targets are
 ```
 
 Clash, Surge, and Shadowrocket receive converted rules inside their configs.
-v2rayN keeps its standard node subscription and receives a separate custom
-routing JSON URL because its standard node subscription cannot carry routing
-rules.
+v2rayN keeps its standard node subscription. Its normal subscription format
+cannot carry the full routing configuration, so the user page does not expose
+an additional standalone rules resource; v2rayN routing remains a local client
+setting when needed.
 
 The production Xray client reads `/usr/local/etc/xray/config.json` and exposes
 HTTP/SOCKS listeners only on `127.0.0.1`. Use `scripts/install-xray-client.sh`
