@@ -23,6 +23,7 @@ export type VPNUserSubscription = {
   created_at: string;
   updated_at: string;
   subscriptions: Record<string, string>;
+  routing_url: string;
 };
 
 export type VPNUserOption = {
@@ -39,6 +40,10 @@ export type VPNSummary = {
   profiles: VPNProfile[];
   user_subscriptions: VPNUserSubscription[];
   users: VPNUserOption[];
+  common_routing?: {
+    filename: string;
+    body: string;
+  };
 };
 
 // fetchVPNDistributionSummary 读取管理员 VPN 分配状态。

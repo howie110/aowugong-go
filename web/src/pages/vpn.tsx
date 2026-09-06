@@ -122,6 +122,20 @@ export function VPNDistributionPage() {
     }
   }
 
+  async function handleCopyCommonRouting() {
+    const body = summary?.common_routing?.body.trim();
+    if (!body) {
+      notify.warning("暂无公共规则配置", "请让 AI 更新 common-routing.json 后再查看。 ");
+      return;
+    }
+    const success = await copyTextToClipboard(body);
+    if (!success) {
+      notify.error("复制失败", "当前浏览器不允许写入剪贴板。 ");
+      return;
+    }
+    notify.success("公共分流规则已复制");
+  }
+
   async function handlePublish(device: VPNUserSubscription) {
     await runDeviceAction(device, publishVPNUserSubscription, "订阅配置已重新发布", "重新发布失败");
   }
@@ -187,6 +201,27 @@ export function VPNDistributionPage() {
           <AlertTitle>Go 直连订阅地址尚未配置</AlertTitle>
           <AlertDescription>现在可以先创建用户订阅草稿；配置无需代理即可访问的服务器地址后，再从菜单发布订阅。</AlertDescription>
         </Alert>
+      ) : null}
+
+      {summary?.can_manage ? (
+        <Card>
+          <CardHeader className="flex flex-row items-start justify-between gap-3">
+            <div>
+              <CardTitle>公共分流规则</CardTitle>
+              <CardDescription>只读查看所有 VPN 订阅共用的最新规则；规则文件由 AI 更新并随部署生效。</CardDescription>
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={() => void handleCopyCommonRouting()}>
+              <Copy className="h-4 w-4" />
+              复制规则
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="mb-2 text-xs text-muted-foreground">{summary.common_routing?.filename || "common-routing.json"}</div>
+            <pre className="max-h-72 overflow-auto rounded-lg border bg-muted/30 p-4 text-xs leading-5 whitespace-pre-wrap">
+              {summary.common_routing?.body || "暂无公共规则配置"}
+            </pre>
+          </CardContent>
+        </Card>
       ) : null}
 
       <Card>
@@ -306,6 +341,19 @@ export function VPNResourcesPage() {
     notify.success("订阅链接已复制", format.name);
   }
 
+  async function handleCopyRouting(subscription: VPNUserSubscription) {
+    if (!subscription.routing_url) {
+      notify.warning("当前分流规则链接不可用", "请联系管理员重新发布资源。 ");
+      return;
+    }
+    const success = await copyTextToClipboard(subscription.routing_url);
+    if (!success) {
+      notify.error("复制失败", "当前浏览器不允许写入剪贴板。 ");
+      return;
+    }
+    notify.success("v2rayN 分流规则链接已复制");
+  }
+
   return (
     <div className="space-y-4">
       {subscriptions.map((subscription) => {
@@ -348,6 +396,18 @@ export function VPNResourcesPage() {
                     </div>
                   </div>
                 ))}
+                {subscription.routing_url ? (
+                  <div className="rounded-lg border border-dashed p-3">
+                    <div className="font-medium">v2rayN 分流规则</div>
+                    <div className="mt-1 text-xs text-muted-foreground">公共分流规则需要在 v2rayN 中单独导入。</div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => void handleCopyRouting(subscription)}>
+                        <Copy className="h-4 w-4" />
+                        复制规则链接
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
               {!formats.length ? (
                 <Empty className="border-0 py-8">
