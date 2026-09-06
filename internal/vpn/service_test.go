@@ -109,6 +109,13 @@ func TestServiceCreatesRotatesAndRevokesUserSubscription(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "clash_demo.yaml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("os.WriteFile() error = %v", err)
 	}
+	commonRouting := `{
+  "domainStrategy": "IPIfNonMatch",
+  "rules": [{"type":"field","domain":["domain:example.com"],"outboundTag":"direct"}]
+}`
+	if err := os.WriteFile(filepath.Join(directory, "common-routing.json"), []byte(commonRouting), 0o600); err != nil {
+		t.Fatalf("os.WriteFile(common-routing.json) error = %v", err)
+	}
 	distributor := &memoryDistributor{baseURL: "https://vpn.example.test", values: make(map[string]DistributionPayload)}
 	service := NewService(NewRepository(db), NewSourceCatalog(directory), distributor, "test-secret")
 	userID := createVPNTestUser(t, db, "android-user")
@@ -119,8 +126,20 @@ func TestServiceCreatesRotatesAndRevokesUserSubscription(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 	oldURL := created.Subscriptions["v2ray"]
-	if !strings.HasPrefix(oldURL, "https://vpn.example.test/api/v1/vpn/subscriptions/") || created.Status != StatusActive || len(distributor.values) != 1 {
+	if !strings.HasPrefix(oldURL, "https://vpn.example.test/api/v1/vpn/subscriptions/") || created.RoutingURL == "" || created.Status != StatusActive || len(distributor.values) != 1 {
 		t.Fatalf("created device = %#v, remote count = %d", created, len(distributor.values))
+	}
+	routing, err := service.Subscription(context.Background(), created.ID, subscriptionToken(t, oldURL), "routing")
+	if err != nil || routing.ContentType != "application/json; charset=utf-8" || !strings.Contains(routing.Body, "example.com") {
+		t.Fatalf("routing subscription = %#v, error = %v", routing, err)
+	}
+	updatedRouting := `{"domainStrategy":"IPIfNonMatch","rules":[{"type":"field","domain":["domain:updated.example.com"],"outboundTag":"proxy"}]}`
+	if err := os.WriteFile(filepath.Join(directory, "common-routing.json"), []byte(updatedRouting), 0o600); err != nil {
+		t.Fatalf("os.WriteFile(updated common-routing.json) error = %v", err)
+	}
+	routing, err = service.Subscription(context.Background(), created.ID, subscriptionToken(t, oldURL), "routing")
+	if err != nil || !strings.Contains(routing.Body, "updated.example.com") {
+		t.Fatalf("updated routing subscription = %#v, error = %v", routing, err)
 	}
 	rows, err := db.QueryContext(context.Background(), `PRAGMA table_info(vpn_subscription_device)`)
 	if err != nil {
@@ -176,6 +195,10 @@ func TestServiceScopesSubscriptionsByLoginUser(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "clash_demo.yaml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("os.WriteFile() error = %v", err)
 	}
+	commonRouting := `{"domainStrategy":"IPIfNonMatch","rules":[{"type":"field","domain":["domain:example.com"],"outboundTag":"direct"}]}`
+	if err := os.WriteFile(filepath.Join(directory, "common-routing.json"), []byte(commonRouting), 0o600); err != nil {
+		t.Fatalf("os.WriteFile(common-routing.json) error = %v", err)
+	}
 	distributor := &memoryDistributor{baseURL: "https://vpn.example.test", values: make(map[string]DistributionPayload)}
 	service := NewService(NewRepository(db), NewSourceCatalog(directory), distributor, "test-secret")
 	firstUserID := createVPNTestUser(t, db, "first-user")
@@ -197,12 +220,18 @@ func TestServiceScopesSubscriptionsByLoginUser(t *testing.T) {
 	if len(viewerSummary.Subscriptions) != 1 || viewerSummary.Subscriptions[0].ID != first.ID || len(viewerSummary.Users) != 0 || viewerSummary.CanManage {
 		t.Fatalf("viewer summary = %#v", viewerSummary)
 	}
+	if viewerSummary.CommonRouting != nil {
+		t.Fatalf("viewer summary leaked common routing: %#v", viewerSummary.CommonRouting)
+	}
 	adminSummary, err := service.Summary(context.Background(), firstUserID, true)
 	if err != nil {
 		t.Fatalf("Summary(admin) error = %v", err)
 	}
 	if len(adminSummary.Subscriptions) != 2 || len(adminSummary.Users) != 2 || !adminSummary.CanManage {
 		t.Fatalf("admin summary = %#v", adminSummary)
+	}
+	if adminSummary.CommonRouting == nil || !strings.Contains(adminSummary.CommonRouting.Body, "example.com") {
+		t.Fatalf("admin common routing = %#v", adminSummary.CommonRouting)
 	}
 
 	// 3. 第一名用户不能读取第二名用户的二维码。

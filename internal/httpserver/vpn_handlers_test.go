@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -30,8 +31,12 @@ func TestVPNRoutesSeparateViewerAndAdministratorPermissions(t *testing.T) {
 		t.Fatalf("SyncDefaults() error = %v", err)
 	}
 	authService := auth.NewService(auth.NewRepository(db), auth.NewTokenManager("vpn-http-secret", 72*time.Hour))
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "common-routing.json"), []byte(`{"domainStrategy":"IPIfNonMatch","rules":[]}`), 0o600); err != nil {
+		t.Fatalf("os.WriteFile(common-routing.json) error = %v", err)
+	}
 	vpnService := vpn.NewService(
-		vpn.NewRepository(db), vpn.NewSourceCatalog(t.TempDir()),
+		vpn.NewRepository(db), vpn.NewSourceCatalog(directory),
 		vpn.NewDirectDistributor(""), "vpn-token-secret",
 	)
 	handler := NewRouter(Dependencies{Auth: authService, RBAC: rbacService, VPN: vpnService})
@@ -64,6 +69,28 @@ func TestVPNRoutesSeparateViewerAndAdministratorPermissions(t *testing.T) {
 			t.Errorf("summary status = %d, want %d, body = %s", recorder.Code, testCase.want, recorder.Body.String())
 		}
 	}
+	adminSummaryRequest := httptest.NewRequest(http.MethodGet, "/api/v1/vpn/distribution/summary", nil)
+	adminSummaryRequest.Header.Set("Authorization", "Bearer "+adminToken)
+	adminSummaryRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(adminSummaryRecorder, adminSummaryRequest)
+	var adminSummary vpn.Summary
+	if err := json.Unmarshal(adminSummaryRecorder.Body.Bytes(), &adminSummary); err != nil {
+		t.Fatalf("admin summary JSON error = %v", err)
+	}
+	if adminSummary.CommonRouting == nil {
+		t.Fatal("admin summary common routing = nil")
+	}
+	userSummaryRequest := httptest.NewRequest(http.MethodGet, "/api/v1/vpn/resources/summary", nil)
+	userSummaryRequest.Header.Set("Authorization", "Bearer "+vpnUserToken)
+	userSummaryRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(userSummaryRecorder, userSummaryRequest)
+	var userSummary map[string]any
+	if err := json.Unmarshal(userSummaryRecorder.Body.Bytes(), &userSummary); err != nil {
+		t.Fatalf("user summary JSON error = %v", err)
+	}
+	if _, exists := userSummary["common_routing"]; exists {
+		t.Fatal("user summary unexpectedly contains common_routing")
+	}
 
 	// 4. VPN 用户不能调用管理员分配入口。
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/vpn/distribution/users", strings.NewReader(`{"user_id":1,"profile_code":"demo"}`))
@@ -88,6 +115,9 @@ func TestVPNSubscriptionUsesDeviceTokenWithoutLogin(t *testing.T) {
 	content := "proxies:\n  - name: Test\n    type: vmess\n    server: test.example.com\n    port: 443\n    uuid: 00000000-0000-0000-0000-000000000001\n    alterId: 0\n    cipher: auto\n"
 	if err := os.WriteFile(filepath.Join(directory, "clash_demo.yaml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "common-routing.json"), []byte(`{"domainStrategy":"IPIfNonMatch","rules":[{"type":"field","domain":["domain:example.com"],"outboundTag":"direct"}]}`), 0o600); err != nil {
+		t.Fatalf("os.WriteFile(common-routing.json) error = %v", err)
 	}
 	vpnService := vpn.NewService(
 		vpn.NewRepository(db), vpn.NewSourceCatalog(directory),
@@ -122,6 +152,16 @@ func TestVPNSubscriptionUsesDeviceTokenWithoutLogin(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || strings.TrimSpace(recorder.Body.String()) == "" {
 		t.Fatalf("subscription status = %d, body = %q", recorder.Code, recorder.Body.String())
+	}
+	routingURL, err := url.Parse(device.RoutingURL)
+	if err != nil {
+		t.Fatalf("url.Parse(routing) error = %v", err)
+	}
+	routingRequest := httptest.NewRequest(http.MethodGet, routingURL.RequestURI(), nil)
+	routingRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(routingRecorder, routingRequest)
+	if routingRecorder.Code != http.StatusOK || !strings.HasPrefix(routingRecorder.Header().Get("Content-Type"), "application/json") || !strings.Contains(routingRecorder.Body.String(), "example.com") {
+		t.Fatalf("routing status = %d, content-type = %q, body = %q", routingRecorder.Code, routingRecorder.Header().Get("Content-Type"), routingRecorder.Body.String())
 	}
 
 	// 3. 修改 Token 后统一返回 404，不泄露设备或格式状态。

@@ -58,17 +58,23 @@ func (s *Service) Summary(ctx context.Context, viewerID int64, canManage bool) (
 	}
 	// 2. 管理员额外取得可开通用户；普通用户不接触私有资源目录清单。
 	users := make([]UserOption, 0)
+	var commonRouting *CommonRouting
 	if canManage {
 		users, err = s.repository.ListUsers(ctx)
 		if err != nil {
 			return Summary{}, fmt.Errorf("列出 VPN 可分配用户: %w", err)
 		}
+		content, routingErr := s.sources.CommonRouting()
+		if routingErr != nil {
+			return Summary{}, fmt.Errorf("读取公共 VPN 分流规则: %w", routingErr)
+		}
+		commonRouting = &CommonRouting{Filename: content.Filename, Body: content.Body}
 	} else {
 		profiles = visibleProfiles(profiles, storedSubscriptions)
 	}
 	return Summary{
 		DistributorConfigured: s.distributor.Configured(), DistributorURL: s.distributor.BaseURL(),
-		CanManage: canManage, Profiles: profiles, Subscriptions: subscriptions, Users: users,
+		CanManage: canManage, Profiles: profiles, Subscriptions: subscriptions, Users: users, CommonRouting: commonRouting,
 	}, nil
 }
 
@@ -337,6 +343,7 @@ func (s *Service) publishStored(ctx context.Context, stored storedSubscription) 
 func (s *Service) publicSubscription(stored storedSubscription, profiles []Profile) UserSubscription {
 	// 1. 仅给未撤销设备生成当前资源仍支持的订阅地址。
 	subscriptions := make(map[string]string)
+	routingURL := ""
 	if stored.Status != StatusRevoked && stored.PublishedAt != nil && s.distributor.BaseURL() != "" {
 		token := s.deriveToken(stored.ID, stored.TokenVersion)
 		for _, profile := range profiles {
@@ -348,12 +355,14 @@ func (s *Service) publicSubscription(stored storedSubscription, profiles []Profi
 					strconv.FormatInt(stored.ID, 10) + "/" + url.PathEscape(token) + "/" + format.Code
 			}
 		}
+		routingURL = s.distributor.BaseURL() + "/api/v1/vpn/subscriptions/" +
+			strconv.FormatInt(stored.ID, 10) + "/" + url.PathEscape(token) + "/routing"
 	}
 	return UserSubscription{
 		ID: stored.ID, UserID: stored.UserID, Username: stored.Username, ProfileCode: stored.ProfileCode,
 		TokenVersion: stored.TokenVersion, Status: stored.Status, PublishedAt: stored.PublishedAt,
 		LastError: stored.LastError, CreatedAt: stored.CreatedAt, UpdatedAt: stored.UpdatedAt,
-		Subscriptions: subscriptions,
+		Subscriptions: subscriptions, RoutingURL: routingURL,
 	}
 }
 

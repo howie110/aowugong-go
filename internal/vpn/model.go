@@ -46,6 +46,7 @@ type UserSubscription struct {
 	CreatedAt     string            `json:"created_at"`
 	UpdatedAt     string            `json:"updated_at"`
 	Subscriptions map[string]string `json:"subscriptions"`
+	RoutingURL    string            `json:"routing_url"`
 }
 
 // CreateRequest 描述给登录用户开通订阅需要的最小字段。
@@ -70,6 +71,13 @@ type Summary struct {
 	Profiles              []Profile          `json:"profiles"`
 	Subscriptions         []UserSubscription `json:"user_subscriptions"`
 	Users                 []UserOption       `json:"users"`
+	CommonRouting         *CommonRouting     `json:"common_routing,omitempty"`
+}
+
+// CommonRouting 描述管理员页面只读展示的公共规则原文。
+type CommonRouting struct {
+	Filename string `json:"filename"`
+	Body     string `json:"body"`
 }
 
 // ConfigContent 描述公开订阅接口返回的一份客户端配置。
