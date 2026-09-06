@@ -51,8 +51,11 @@ func TestSourceCatalogDiscoversAndConvertsClashProfile(t *testing.T) {
 	if !strings.HasPrefix(string(decoded), "vmess://") || configs["clash"].Body != content {
 		t.Errorf("generated configs are invalid")
 	}
-	if len(configs) != 4 || configs["shadowrocket"].Body == "" || configs["surge"].Body == "" {
+	if len(configs) < 4 || configs["shadowrocket"].Body == "" || configs["surge"].Body == "" {
 		t.Errorf("Build() formats = %#v", configs)
+	}
+	if configs["routing"].Body == "" {
+		t.Errorf("Build() routing config is empty")
 	}
 }
 
@@ -159,7 +162,7 @@ func TestSourceCatalogBuildsAvailableLocalPrivateProfiles(t *testing.T) {
 		if buildErr != nil {
 			t.Fatalf("Build(%q) error = %v", profile.Code, buildErr)
 		}
-		if len(configs) != 4 {
+		if len(configs) < 4 {
 			t.Errorf("Build(%q) returned %d configs, want 4", profile.Code, len(configs))
 		}
 		for format, config := range configs {
@@ -167,5 +170,125 @@ func TestSourceCatalogBuildsAvailableLocalPrivateProfiles(t *testing.T) {
 				t.Errorf("Build(%q) format %q is empty", profile.Code, format)
 			}
 		}
+	}
+}
+
+func TestSourceCatalogMergesCommonRoutingIntoClientConfigs(t *testing.T) {
+	directory := t.TempDir()
+	clashContent := `proxies:
+  - name: Test
+    type: vmess
+    server: test.example.com
+    port: 443
+    uuid: 00000000-0000-0000-0000-000000000001
+    alterId: 0
+    cipher: auto
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies: [Test, DIRECT]
+rules:
+  - FINAL,DIRECT
+`
+	surgeContent := `[General]
+loglevel = notify
+
+[Proxy]
+Test = vmess, test.example.com, 443, username=00000000-0000-0000-0000-000000000001
+
+[Proxy Group]
+PROXY = select, Test, DIRECT
+
+[Rule]
+FINAL,DIRECT
+`
+	shadowrocketContent := `[General]
+loglevel = notify
+
+[Proxy]
+Test = vmess, test.example.com, 443, username=00000000-0000-0000-0000-000000000001
+
+[Proxy Group]
+PROXY = select, Test, DIRECT
+
+[Rule]
+FINAL,DIRECT
+`
+	commonRouting := `{
+  "domainStrategy": "IPIfNonMatch",
+  "rules": [
+    {"type":"field","domain":["domain:example.com"],"outboundTag":"direct"},
+    {"type":"field","ip":["1.1.1.1/32"],"outboundTag":"block"}
+  ]
+}`
+	for name, content := range map[string]string{
+		"clash_demo.yaml":        clashContent,
+		"surge_demo.conf":        surgeContent,
+		"shadowrocket_demo.conf": shadowrocketContent,
+		"common-routing.json":    commonRouting,
+	} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("os.WriteFile(%q) error = %v", name, err)
+		}
+	}
+
+	configs, err := NewSourceCatalog(directory).Build("demo")
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	for _, format := range []string{"clash", "surge", "shadowrocket"} {
+		if !strings.Contains(configs[format].Body, "DOMAIN-SUFFIX,example.com,DIRECT") || !strings.Contains(configs[format].Body, "IP-CIDR,1.1.1.1/32,REJECT") {
+			t.Errorf("%s config does not contain common rules: %q", format, configs[format].Body)
+		}
+	}
+	if !strings.Contains(configs["routing"].Body, `"domainStrategy"`) {
+		t.Errorf("routing config = %q", configs["routing"].Body)
+	}
+}
+
+func TestSourceCatalogBuildsEmptyRoutingWhenCommonFileIsMissing(t *testing.T) {
+	directory := t.TempDir()
+	content := `proxies:
+  - name: Test
+    type: vmess
+    server: test.example.com
+    port: 443
+    uuid: 00000000-0000-0000-0000-000000000001
+    alterId: 0
+    cipher: auto
+`
+	if err := os.WriteFile(filepath.Join(directory, "clash_demo.yaml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+	configs, err := NewSourceCatalog(directory).Build("demo")
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if len(configs) < 4 || !strings.Contains(configs["routing"].Body, `"rules": []`) {
+		t.Fatalf("configs = %#v", configs)
+	}
+}
+
+func TestSourceCatalogRejectsInvalidCommonRouting(t *testing.T) {
+	directory := t.TempDir()
+	content := `proxies:
+  - name: Test
+    type: vmess
+    server: test.example.com
+    port: 443
+    uuid: 00000000-0000-0000-0000-000000000001
+    alterId: 0
+    cipher: auto
+`
+	for name, value := range map[string]string{
+		"clash_demo.yaml":     content,
+		"common-routing.json": "{",
+	} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(value), 0o600); err != nil {
+			t.Fatalf("os.WriteFile(%q) error = %v", name, err)
+		}
+	}
+	if _, err := NewSourceCatalog(directory).Build("demo"); err == nil {
+		t.Fatal("Build() error = nil, want invalid common routing error")
 	}
 }

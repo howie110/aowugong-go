@@ -17,6 +17,8 @@ import (
 
 const maxSourceFileBytes = 2 * 1024 * 1024
 
+const commonRoutingFilename = "common-routing.json"
+
 var formatNames = map[string]string{
 	"clash":        "Clash / FlClash",
 	"v2ray":        "v2rayN / v2rayNG",
@@ -38,6 +40,44 @@ type SourceCatalog struct {
 func NewSourceCatalog(directory string) *SourceCatalog {
 	// 1. 保存清理后的目录路径，后续只读取其直接子文件。
 	return &SourceCatalog{directory: filepath.Clean(directory)}
+}
+
+// CommonRouting 返回管理员页面只读展示的公共规则原文。
+// 输入：无。
+// 输出：返回固定文件名和原文；文件尚未配置时正文为空。
+// 副作用：读取 VPN 私有规则文件。
+func (c *SourceCatalog) CommonRouting() (ConfigContent, error) {
+	// 1. 规则文件是目录中的固定文件，不参与资源归组。
+	path := filepath.Join(c.directory, commonRoutingFilename)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return ConfigContent{
+			ContentType: "application/json; charset=utf-8",
+			Filename:    commonRoutingFilename,
+		}, nil
+	} else if err != nil {
+		return ConfigContent{}, fmt.Errorf("检查公共 VPN 分流规则: %w", err)
+	}
+	content, err := readPrivateSource(path)
+	if err != nil {
+		return ConfigContent{}, err
+	}
+	return ConfigContent{
+		ContentType: "application/json; charset=utf-8",
+		Filename:    commonRoutingFilename,
+		Body:        string(content),
+	}, nil
+}
+
+func (c *SourceCatalog) loadCommonRouting() (commonRouting, error) {
+	content, err := c.CommonRouting()
+	if err != nil {
+		return commonRouting{}, err
+	}
+	routing, err := parseCommonRouting([]byte(content.Body))
+	if err != nil {
+		return commonRouting{}, err
+	}
+	return routing, nil
 }
 
 // Profiles 返回当前目录可用的资源和客户端格式。
@@ -96,9 +136,23 @@ func (c *SourceCatalog) Build(profileCode string) (map[string]ConfigContent, err
 	if len(matched) == 0 {
 		return nil, ErrProfileNotFound
 	}
+	routing, err := c.loadCommonRouting()
+	if err != nil {
+		return nil, err
+	}
+	routingBody, err := routing.JSON()
+	if err != nil {
+		return nil, err
+	}
 
 	// 2. 优先保留各客户端原生配置，避免跨格式转换丢失 TLS 安全参数。
-	configs := make(map[string]ConfigContent)
+	configs := map[string]ConfigContent{
+		"routing": {
+			ContentType: "application/json; charset=utf-8",
+			Filename:    profileCode + "-routing.json",
+			Body:        routingBody,
+		},
+	}
 	clashPath := matched["clash"]
 	if clashPath == "" {
 		clashPath = matched["flclash"]
@@ -108,8 +162,15 @@ func (c *SourceCatalog) Build(profileCode string) (map[string]ConfigContent, err
 		if readErr != nil {
 			return nil, readErr
 		}
+		body := string(content)
+		if len(routing.Rules) > 0 {
+			body, err = mergeClashRouting(content, routing)
+			if err != nil {
+				return nil, fmt.Errorf("合并 %s Clash 公共分流规则: %w", profileCode, err)
+			}
+		}
 		configs["clash"] = ConfigContent{
-			ContentType: "text/yaml; charset=utf-8", Filename: profileCode + "-clash.yaml", Body: string(content),
+			ContentType: "text/yaml; charset=utf-8", Filename: profileCode + "-clash.yaml", Body: body,
 		}
 	}
 	for _, exact := range []struct {
@@ -129,8 +190,15 @@ func (c *SourceCatalog) Build(profileCode string) (map[string]ConfigContent, err
 		if readErr != nil {
 			return nil, readErr
 		}
+		body := string(content)
+		if len(routing.Rules) > 0 {
+			body, err = mergeTextRouting(body, exact.format, routing)
+			if err != nil {
+				return nil, fmt.Errorf("合并 %s %s 公共分流规则: %w", profileCode, exact.format, err)
+			}
+		}
 		configs[exact.format] = ConfigContent{
-			ContentType: exact.contentType, Filename: profileCode + "-" + exact.format + exact.extension, Body: string(content),
+			ContentType: exact.contentType, Filename: profileCode + "-" + exact.format + exact.extension, Body: body,
 		}
 	}
 	if matched["v2rayn"] != "" {
@@ -165,19 +233,42 @@ func (c *SourceCatalog) Build(profileCode string) (map[string]ConfigContent, err
 		if convertErr != nil {
 			return nil, fmt.Errorf("转换 %s Clash 配置: %w", profileCode, convertErr)
 		}
+		if len(routing.Rules) > 0 {
+			body, convertErr = mergeClashRouting([]byte(body), routing)
+			if convertErr != nil {
+				return nil, fmt.Errorf("合并 %s Clash 公共分流规则: %w", profileCode, convertErr)
+			}
+		}
 		configs["clash"] = ConfigContent{
 			ContentType: "text/yaml; charset=utf-8", Filename: profileCode + "-clash.yaml", Body: body,
 		}
 	}
 	if _, exists := configs["shadowrocket"]; !exists {
+		body := v2rayConfig.Body
+		if len(routing.Rules) > 0 {
+			body, err = vmessSubscriptionToSurge(v2rayConfig.Body)
+			if err != nil {
+				return nil, fmt.Errorf("转换 %s Shadowrocket 配置: %w", profileCode, err)
+			}
+			body, err = mergeTextRouting(body, "shadowrocket", routing)
+			if err != nil {
+				return nil, fmt.Errorf("合并 %s Shadowrocket 公共分流规则: %w", profileCode, err)
+			}
+		}
 		configs["shadowrocket"] = ConfigContent{
-			ContentType: "text/plain; charset=utf-8", Filename: profileCode + "-shadowrocket.txt", Body: v2rayConfig.Body,
+			ContentType: "text/plain; charset=utf-8", Filename: profileCode + "-shadowrocket.txt", Body: body,
 		}
 	}
 	if _, exists := configs["surge"]; !exists {
 		body, convertErr := vmessSubscriptionToSurge(v2rayConfig.Body)
 		if convertErr != nil {
 			return nil, fmt.Errorf("转换 %s Surge 配置: %w", profileCode, convertErr)
+		}
+		if len(routing.Rules) > 0 {
+			body, convertErr = mergeTextRouting(body, "surge", routing)
+			if convertErr != nil {
+				return nil, fmt.Errorf("合并 %s Surge 公共分流规则: %w", profileCode, convertErr)
+			}
 		}
 		configs["surge"] = ConfigContent{
 			ContentType: "text/plain; charset=utf-8", Filename: profileCode + "-surge.conf", Body: body,

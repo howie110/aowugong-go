@@ -16,6 +16,26 @@ Suggested files from the current set:
 - `surge_flowercloud.conf`
 - `v2rayn_dmit.json`
 
+The optional `common-routing.json` file is the single public routing policy for
+all assigned users. It is read-only on the web page and should be updated by
+AI/deployment when the shared rules change. Supported outbound targets are
+`proxy`, `direct`, and `block`; the file uses the Xray routing shape:
+
+```json
+{
+  "domainStrategy": "IPIfNonMatch",
+  "rules": [
+    {"type": "field", "domain": ["domain:example.com"], "outboundTag": "proxy"},
+    {"type": "field", "ip": ["geoip:private"], "outboundTag": "direct"}
+  ]
+}
+```
+
+Clash, Surge, and Shadowrocket receive converted rules inside their configs.
+v2rayN keeps its standard node subscription and receives a separate custom
+routing JSON URL because its standard node subscription cannot carry routing
+rules.
+
 The production Xray client reads `/usr/local/etc/xray/config.json` and exposes
 HTTP/SOCKS listeners only on `127.0.0.1`. Use `scripts/install-xray-client.sh`
 to install a locally prepared configuration. Never force-add live node files to
