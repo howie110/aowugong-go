@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { type FinancePageKey, getFinancePagePath } from "@/lib/finance";
 import { notify } from "@/lib/notify";
 import { pageGroupLabelMap, pageLabelMap } from "./app-navigation";
@@ -66,32 +67,4 @@ export function AppBreadcrumb({ activePage, onNavigate }: { activePage: FinanceP
       </Tooltip>
     </div>
   );
-}
-
-async function copyTextToClipboard(text: string) {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      // 旧浏览器或权限受限时，退回临时 textarea 复制。
-    }
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.focus({ preventScroll: true });
-  textarea.select();
-  textarea.setSelectionRange(0, text.length);
-  try {
-    return document.execCommand("copy");
-  } catch {
-    return false;
-  } finally {
-    document.body.removeChild(textarea);
-  }
 }

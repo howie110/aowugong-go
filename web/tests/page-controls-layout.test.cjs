@@ -86,6 +86,19 @@ test("资源分享将管理员分配与用户扫码拆成两个页面", () => {
   assert.match(vpnSource, /尚未分配 VPN 资源/);
 });
 
+test("VPN 资源同时提供复制订阅链接和扫码入口", () => {
+  // 1. 读取用户 VPN 资源页面和页面描述。
+  const vpnSource = readSource("src/pages/vpn.tsx");
+  const financeSource = readSource("src/lib/finance.ts");
+
+  // 2. 复制当前格式对应的私有订阅地址，并保留二维码配置入口。
+  assert.match(vpnSource, /copyTextToClipboard/);
+  assert.match(vpnSource, /subscription\.subscriptions\[format\.code\]/);
+  assert.match(vpnSource, /复制订阅链接/);
+  assert.match(vpnSource, /扫码配置/);
+  assert.match(financeSource, /扫码或复制订阅链接配置客户端/);
+});
+
 test("综合趋势仅在指针进入图表后显示浮层并在左侧展示精简图例", () => {
   // 1. 读取综合趋势组件并检查指针跟随行为。
   const source = readSource("src/pages/finance/stock-analysis/trend-chart.tsx");

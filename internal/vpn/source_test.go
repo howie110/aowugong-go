@@ -56,6 +56,34 @@ func TestSourceCatalogDiscoversAndConvertsClashProfile(t *testing.T) {
 	}
 }
 
+// TestSourceCatalogUsesFriendlyMagicRingName 验证魔戒私有资源使用用户熟悉的显示名。
+// 输入：名为 v2rayn_mojie.json 的私有资源文件。
+// 输出：资源名称显示为“魔戒”，并提供 v2ray 格式。
+// 副作用：创建并读取测试临时文件。
+func TestSourceCatalogUsesFriendlyMagicRingName(t *testing.T) {
+	// 1. 只写入用于发现资源的最小私有文件，不解析节点正文。
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "v2rayn_mojie.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+
+	// 2. 断言页面资源名称和客户端格式符合魔戒资源约定。
+	profiles, err := NewSourceCatalog(directory).Profiles()
+	if err != nil {
+		t.Fatalf("Profiles() error = %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].Code != "mojie" || profiles[0].Name != "魔戒" {
+		t.Fatalf("Profiles() = %#v", profiles)
+	}
+	hasV2rayFormat := false
+	for _, format := range profiles[0].Formats {
+		hasV2rayFormat = hasV2rayFormat || format.Code == "v2ray"
+	}
+	if len(profiles[0].Formats) != 4 || !hasV2rayFormat {
+		t.Fatalf("magic ring formats = %#v", profiles[0].Formats)
+	}
+}
+
 // TestSourceCatalogPrefersNativeXrayForV2ray 验证 v2rayNG 订阅优先使用原生 Xray 配置。
 // 输入：同名 Clash 和 Xray 测试配置，Clash 故意开启跳过证书校验。
 // 输出：生成节点来自 Xray，且不包含新版 Xray 禁用的不安全参数。

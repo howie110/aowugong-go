@@ -1,5 +1,6 @@
 import {
   Ban,
+  Copy,
   Cloud,
   Ellipsis,
   KeyRound,
@@ -46,6 +47,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { notify } from "@/lib/notify";
 import {
   createVPNUserSubscription,
@@ -289,6 +291,21 @@ export function VPNResourcesPage() {
   }
 
   const subscriptions = summary?.user_subscriptions ?? [];
+
+  async function handleCopySubscription(subscription: VPNUserSubscription, format: VPNFormat) {
+    const subscriptionURL = subscription.subscriptions[format.code];
+    if (!subscriptionURL) {
+      notify.warning("当前订阅链接不可用", "请联系管理员重新发布资源。");
+      return;
+    }
+    const success = await copyTextToClipboard(subscriptionURL);
+    if (!success) {
+      notify.error("复制失败", "当前浏览器不允许写入剪贴板。");
+      return;
+    }
+    notify.success("订阅链接已复制", format.name);
+  }
+
   return (
     <div className="space-y-4">
       {subscriptions.map((subscription) => {
@@ -299,7 +316,7 @@ export function VPNResourcesPage() {
             <CardHeader className="flex flex-row items-start justify-between gap-3">
               <div>
                 <CardTitle>{profile?.name || subscription.profile_code}</CardTitle>
-                <CardDescription>选择客户端后扫码导入，手机和电脑可共用当前账号的资源。</CardDescription>
+                <CardDescription>可扫码导入，也可复制订阅链接到客户端；手机和电脑可共用当前账号的资源。</CardDescription>
               </div>
               <DeviceStatusBadge device={subscription} />
             </CardHeader>
@@ -312,19 +329,24 @@ export function VPNResourcesPage() {
               ) : null}
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {formats.map((format) => (
-                  <Button
-                    key={format.code}
-                    type="button"
-                    variant="outline"
-                    className="h-auto min-h-20 justify-between px-4 py-3"
-                    onClick={() => setQRTarget({ subscription, format, profileName: profile?.name || subscription.profile_code })}
-                  >
-                    <span className="text-left">
-                      <span className="block font-medium">{format.name}</span>
-                      <span className="mt-1 block text-xs font-normal text-muted-foreground">扫码配置</span>
-                    </span>
-                    <QrCode className="h-5 w-5" />
-                  </Button>
+                  <div key={format.code} className="rounded-lg border p-3">
+                    <div className="font-medium">{format.name}</div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setQRTarget({ subscription, format, profileName: profile?.name || subscription.profile_code })}
+                      >
+                        <QrCode className="h-4 w-4" />
+                        扫码配置
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => void handleCopySubscription(subscription, format)}>
+                        <Copy className="h-4 w-4" />
+                        复制链接
+                      </Button>
+                    </div>
+                  </div>
                 ))}
               </div>
               {!formats.length ? (

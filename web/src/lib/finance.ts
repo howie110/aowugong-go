@@ -152,7 +152,7 @@ export const pageMetaMap: Record<FinancePageKey, { title: string; description: s
   },
   vpnResources: {
     title: "VPN 资源",
-    description: "查看当前账号获配的 VPN 资源并扫码配置客户端。",
+    description: "查看当前账号获配的 VPN 资源，扫码或复制订阅链接配置客户端。",
   },
   permissions: {
     title: "权限管理",

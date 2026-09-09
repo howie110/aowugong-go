@@ -442,10 +442,13 @@ func validProfileCode(value string) bool {
 
 // profileDisplayName 把资源编码转换为页面显示名。
 // 输入：code 是资源编码。
-// 输出：返回不改变语义的大写显示名。
+// 输出：返回用户可识别的资源显示名。
 // 副作用：无。
 func profileDisplayName(code string) string {
-	// 1. 当前私有资源均使用供应方简称，统一大写便于识别。
+	// 1. 对已约定的中文供应方保留用户熟悉的名称，其余简称统一大写便于识别。
+	if code == "mojie" {
+		return "魔戒"
+	}
 	return strings.ToUpper(strings.ReplaceAll(code, "_", " "))
 }
 
