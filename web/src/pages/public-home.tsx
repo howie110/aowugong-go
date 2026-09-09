@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-const filingRecord = "备案号：待审核";
+const filingRecord = "粤ICP备2026133766号";
 
 // 公开首页只维护白名单，避免把工作导航中的私有入口带到公网。
 const publicLinkGroups = [
@@ -185,9 +185,16 @@ export function PublicHomePage() {
       </section>
 
       <footer className="border-t">
-        <div className="mx-auto flex max-w-5xl flex-col gap-1 px-5 py-5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className="mx-auto flex max-w-5xl flex-col items-center gap-1 px-5 py-5 text-center text-xs text-muted-foreground sm:px-6">
           <span>© {new Date().getFullYear()} 嗷呜公</span>
-          <span>{filingRecord}</span>
+          <a
+            href="http://beian.miit.gov.cn/"
+            target="_blank"
+            rel="noreferrer"
+            className="transition-colors hover:text-foreground hover:underline"
+          >
+            {filingRecord}
+          </a>
         </div>
       </footer>
     </main>
