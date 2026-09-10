@@ -23,12 +23,46 @@ func TestBuildTargetsIncludesDefaultsAndDedupesExtras(t *testing.T) {
 		]`,
 	}
 
-	// 2. 结果应包含四个唯一目标，重复 code 只保留第一项。
+	// 2. 当前五个服务加一个额外目标，重复 code 只保留第一项。
 	targets := BuildTargets(cfg)
-	if len(targets) != 4 {
-		t.Fatalf("target count = %d, want 4: %#v", len(targets), targets)
+	if len(targets) != 6 {
+		t.Fatalf("target count = %d, want 6: %#v", len(targets), targets)
 	}
-	if targets[2].Code != "miniflux" || targets[2].URL != "https://miniflux.aowugong.top/" || targets[2].ProbeURL != "http://127.0.0.1:5000/healthcheck" {
-		t.Errorf("miniflux target = %#v", targets[2])
+	byCode := make(map[string]Target, len(targets))
+	for _, target := range targets {
+		byCode[target.Code] = target
+	}
+	if target := byCode["miniflux"]; target.URL != "https://miniflux.aowugong.top/" || target.ProbeURL != "http://127.0.0.1:5000/healthcheck" {
+		t.Errorf("miniflux target = %#v", target)
+	}
+	if target := byCode["aowugong-blog"]; target.URL != "https://blog.aowugong.top/" {
+		t.Errorf("blog target was overridden: %#v", target)
+	}
+}
+
+func TestBuildTargetsUsesCurrentPublicServices(t *testing.T) {
+	targets := BuildTargets(config.Clients{})
+	want := map[string]string{
+		"aowugong-home": "https://aowugong.top/",
+		"aowugong-blog": "https://blog.aowugong.top/",
+		"nextflux":      "https://nextflux.aowugong.top/",
+		"vaultwarden":   "https://vault.aowugong.top/",
+	}
+	if len(targets) != len(want) {
+		t.Fatalf("target count = %d, want %d: %#v", len(targets), len(want), targets)
+	}
+	for _, target := range targets {
+		address, ok := want[target.Code]
+		if !ok {
+			t.Errorf("unexpected or retired target: %#v", target)
+			continue
+		}
+		if target.URL != address || target.ProbeURL != address {
+			t.Errorf("target %q: display=%q probe=%q, want %q", target.Code, target.URL, target.ProbeURL, address)
+		}
+		delete(want, target.Code)
+	}
+	for code := range want {
+		t.Errorf("missing target %q", code)
 	}
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/howiedata/aowugong-go/internal/mahjong"
 	"github.com/howiedata/aowugong-go/internal/monitoring"
 	"github.com/howiedata/aowugong-go/internal/notification"
+	"github.com/howiedata/aowugong-go/internal/pictureproxy"
 	"github.com/howiedata/aowugong-go/internal/rbac"
 	"github.com/howiedata/aowugong-go/internal/scheduler"
 	"github.com/howiedata/aowugong-go/internal/subscription"
@@ -174,7 +175,13 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 		return &appRuntime{handler: handler}, nil
 	}
 
-	// 2. 需要迁移时先解析目录，避免配置错误发生后才连接生产数据库。
+	// 2. 图片域名使用私有 OSS 只读身份，不影响工作台主站启动路径。
+	pictureHandler, err := newPictureHandler(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("创建图片代理: %w", err)
+	}
+
+	// 3. 需要迁移时先解析目录，避免配置错误发生后才连接生产数据库。
 	migrationsDirectory := ""
 	if !cfg.Database.SkipMigrations {
 		executablePath, err := os.Executable()
@@ -187,7 +194,7 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 		}
 	}
 
-	// 3. 打开 PostgreSQL 小型连接池，失败时确保释放已建立连接。
+	// 4. 打开 PostgreSQL 小型连接池，失败时确保释放已建立连接。
 	db, err := database.OpenPostgres(ctx, cfg.Database)
 	if err != nil {
 		return nil, fmt.Errorf("打开数据库: %w", err)
@@ -199,14 +206,14 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 		}
 	}()
 
-	// 4. 服务器默认应用版本迁移，CLI 任务入口显式跳过 DDL。
+	// 5. 服务器默认应用版本迁移，CLI 任务入口显式跳过 DDL。
 	if !cfg.Database.SkipMigrations {
 		if err := database.MigratePostgres(ctx, db, migrationsDirectory); err != nil {
 			return nil, fmt.Errorf("迁移数据库: %w", err)
 		}
 	}
 
-	// 5. 构造认证、权限和普通业务服务并同步代码维护的基线。
+	// 6. 构造认证、权限和普通业务服务并同步代码维护的基线。
 	rbacService := rbac.NewService(rbac.NewRepository(db))
 	if err := rbacService.SyncDefaults(ctx); err != nil {
 		return nil, fmt.Errorf("初始化角色权限: %w", err)
@@ -222,7 +229,7 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 	wereadService := weread.NewService(client.NewWeReadClient(cfg.Clients.WeRead, httpClient))
 	tasks := newTaskServices(cfg, db)
 
-	// 6. 构造 finance 页面、仓位、分析、文章、行情和统一通知服务。
+	// 7. 构造 finance 页面、仓位、分析、文章、行情和统一通知服务。
 	financeService := financeservice.NewDashboardService(db, financeservice.DashboardOptions{
 		HTTPAddress: cfg.HTTP.Address, WeComBotConfigured: client.NewWeComBotClient(cfg.Clients.WeComBot, nil).Configured(),
 		SchedulerEnabled: cfg.Scheduler.Enabled, GitHubBackupEnabled: cfg.GitHubBackup.Enabled,
@@ -253,7 +260,7 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 		return nil, fmt.Errorf("初始化投资文章来源: %w", err)
 	}
 
-	// 7. 建立定时与手动任务的唯一注册表和 Asia/Shanghai Cron 调度器。
+	// 8. 建立定时与手动任务的唯一注册表和 Asia/Shanghai Cron 调度器。
 	jobRegistry, err := newJobRegistry(cfg, db, tasks)
 	if err != nil {
 		return nil, err
@@ -264,17 +271,44 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 	}
 	cronScheduler := scheduler.NewCronScheduler(jobRegistry, location)
 
-	// 8. 把同一业务服务和任务注册表交给 HTTP 路由。
+	// 9. 把同一业务服务和任务注册表交给 HTTP 路由。
 	handler := httpserver.NewRouter(httpserver.Dependencies{
 		StaticDir: cfg.HTTP.StaticDir, Auth: authService, RBAC: rbacService,
 		Subscription: tasks.subscriptions, Mahjong: mahjongService, Work: workService,
 		WeRead: wereadService, Monitoring: tasks.monitoring, Finance: financeService,
 		Position: positionService, StockAnalysis: stockAnalysisService, ArticleAnalysis: tasks.articles,
 		Jobs: jobRegistry, Database: databaseview.NewService(db),
-		VPN: vpnService,
+		VPN: vpnService, Picture: pictureHandler, PictureHost: cfg.PictureProxy.Host,
 	})
 	success = true
 	return &appRuntime{db: db, handler: handler, registry: jobRegistry, scheduler: cronScheduler}, nil
+}
+
+// newPictureHandler 创建启用时使用私有 OSS 的图片读取处理器。
+// 输入：cfg 提供图片代理和 OSS 只读配置。
+// 输出：返回图片 HTTP 处理器；未启用时返回 nil。
+// 副作用：只初始化 SDK 和内存限流器，不读取 OSS 对象。
+func newPictureHandler(cfg config.Config) (http.Handler, error) {
+	if !cfg.PictureProxy.Enabled {
+		return nil, nil
+	}
+	store, err := pictureproxy.NewOSSStore(
+		cfg.PictureProxy.Endpoint, cfg.PictureProxy.Bucket,
+		cfg.PictureProxy.AccessKeyID, cfg.PictureProxy.AccessKeySecret,
+		&http.Client{Timeout: 30 * time.Second},
+	)
+	if err != nil {
+		return nil, err
+	}
+	handler, err := pictureproxy.NewHandler(
+		pictureproxy.WithStore(store),
+		pictureproxy.WithRateLimit(cfg.PictureProxy.RequestsPerWindow, cfg.PictureProxy.Window),
+		pictureproxy.WithMaxObjectBytes(int64(cfg.PictureProxy.MaxObjectMB)*1024*1024),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return handler, nil
 }
 
 // newTaskServices 构造自动调度、页面手动执行和 CLI 补跑共用的业务服务。

@@ -10,8 +10,10 @@ import (
 )
 
 const (
-	defaultBlogURL  = "https://blog.aowugong.top/"
-	defaultMovieURL = "https://movie.aowugong.top/"
+	defaultHomeURL        = "https://aowugong.top/"
+	defaultBlogURL        = "https://blog.aowugong.top/"
+	defaultNextfluxURL    = "https://nextflux.aowugong.top/"
+	defaultVaultwardenURL = "https://vault.aowugong.top/"
 )
 
 var nonCodeCharacters = regexp.MustCompile(`[^a-zA-Z0-9]+`)
@@ -21,10 +23,12 @@ var nonCodeCharacters = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 // 输出：返回按 code 去重的目标列表。
 // 副作用：无。
 func BuildTargets(cfg config.Clients) []Target {
-	// 1. 加入两个固定公开站点。
+	// 1. 加入当前仍在部署的域名入口。
 	targets := []Target{
-		{Code: "aowugong-blog", Name: "howie110/astro-theme-retypeset", URL: defaultBlogURL, ProbeURL: defaultBlogURL, Description: textPointer("个人博客站点")},
-		{Code: "movie-carousel", Name: "howie110/Movie-Images", URL: defaultMovieURL, ProbeURL: defaultMovieURL, Description: textPointer("电影画面轮播页面")},
+		{Code: "aowugong-home", Name: "嗷呜公", URL: defaultHomeURL, ProbeURL: defaultHomeURL, Description: textPointer("工具分享主页与工作台")},
+		{Code: "aowugong-blog", Name: "个人博客", URL: defaultBlogURL, ProbeURL: defaultBlogURL, Description: textPointer("个人博客站点")},
+		{Code: "nextflux", Name: "Nextflux", URL: defaultNextfluxURL, ProbeURL: defaultNextfluxURL, Description: textPointer("RSS 阅读界面")},
+		{Code: "vaultwarden", Name: "Vaultwarden", URL: defaultVaultwardenURL, ProbeURL: defaultVaultwardenURL, Description: textPointer("密码管理服务")},
 	}
 
 	// 2. 为内部服务分别保留公网展示地址和本机探测地址。

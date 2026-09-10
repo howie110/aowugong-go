@@ -53,6 +53,9 @@ func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 	if cfg.Clients.DeepSeek.BaseURL != "https://api.deepseek.com" || cfg.Clients.DeepSeek.Model != "deepseek-v4-pro" {
 		t.Errorf("DeepSeek defaults = %#v", cfg.Clients.DeepSeek)
 	}
+	if cfg.PictureProxy.Endpoint != "oss-cn-guangzhou-internal.aliyuncs.com" {
+		t.Errorf("PictureProxy.Endpoint = %q, want Guangzhou internal OSS endpoint", cfg.PictureProxy.Endpoint)
+	}
 }
 
 // TestEnvironmentExampleUsesPostgresRuntimeSettings 验证环境示例以 PostgreSQL 作为运行时数据库。
@@ -74,6 +77,7 @@ func TestEnvironmentExampleUsesPostgresRuntimeSettings(t *testing.T) {
 		"GITHUB_BACKUP_ENABLED=", "GITHUB_BACKUP_TOKEN=", "GITHUB_BACKUP_REQUIRED_REPOSITORIES=KES-IT/KES-SCM,KES-IT/KES-BIS",
 		"VAULTWARDEN_BACKUP_EMAIL_ENABLED=", "VAULTWARDEN_BACKUP_RECOVERY_SCRIPTS_DIR=", "VAULTWARDEN_BACKUP_AGE_RECIPIENT=", "SMTP_EMAIL=", "SMTP_PASSWORD=",
 		"DEEPSEEK_BASE_URL=", "DEEPSEEK_API_KEY=", "DEEPSEEK_MODEL=deepseek-v4-pro",
+		"PICTURE_OSS_ENDPOINT=oss-cn-guangzhou-internal.aliyuncs.com",
 		"WECOM_BOT_WEBHOOK_URL=",
 	} {
 		if !strings.Contains(string(content), key) {
@@ -356,6 +360,56 @@ func TestLoadUsesMigrationsDirectoryOverride(t *testing.T) {
 	want := filepath.Clean("deploy/../release/migrations")
 	if cfg.MigrationsDir != want {
 		t.Errorf("MigrationsDir = %q, want %q", cfg.MigrationsDir, want)
+	}
+}
+
+// TestLoadUsesPictureProxyConfiguration 验证图片代理只读取项目声明的配置。
+// 输入：完整的私有 OSS 图片代理配置。
+// 输出：配置被规范化并保留限制参数。
+// 副作用：无。
+func TestLoadUsesPictureProxyConfiguration(t *testing.T) {
+	// 1. 提供图片代理所需的最小完整配置。
+	cfg, err := Load(newLookup(map[string]string{
+		"PICTURE_PROXY_ENABLED":             "true",
+		"PICTURE_PROXY_HOST":                "pic.example.com",
+		"PICTURE_OSS_ENDPOINT":              "oss-cn-guangzhou.aliyuncs.com/",
+		"PICTURE_OSS_BUCKET":                "private-images",
+		"PICTURE_OSS_ACCESS_KEY_ID":         "read-id",
+		"PICTURE_OSS_ACCESS_KEY_SECRET":     "read-secret",
+		"PICTURE_PROXY_RATE_LIMIT":          "600",
+		"PICTURE_PROXY_RATE_WINDOW_MINUTES": "10",
+		"PICTURE_PROXY_MAX_OBJECT_MB":       "20",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// 2. 断言地址和限制参数已被清理并解析。
+	if !cfg.PictureProxy.Enabled || cfg.PictureProxy.Host != "pic.example.com" {
+		t.Errorf("PictureProxy identity = %#v", cfg.PictureProxy)
+	}
+	if cfg.PictureProxy.Endpoint != "oss-cn-guangzhou.aliyuncs.com" {
+		t.Errorf("PictureProxy.Endpoint = %q", cfg.PictureProxy.Endpoint)
+	}
+	if cfg.PictureProxy.Bucket != "private-images" || cfg.PictureProxy.AccessKeyID != "read-id" {
+		t.Errorf("PictureProxy OSS config = %#v", cfg.PictureProxy)
+	}
+	if cfg.PictureProxy.RequestsPerWindow != 600 || cfg.PictureProxy.Window != 10*time.Minute || cfg.PictureProxy.MaxObjectMB != 20 {
+		t.Errorf("PictureProxy limits = %#v", cfg.PictureProxy)
+	}
+}
+
+// TestLoadRequiresPictureProxyCredentials 验证启用图片代理时不会静默使用不完整配置。
+// 输入：开启代理但缺少 OSS 桶和凭据。
+// 输出：配置加载失败。
+// 副作用：无。
+func TestLoadRequiresPictureProxyCredentials(t *testing.T) {
+	// 1. 只打开图片代理开关。
+	_, err := Load(newLookup(map[string]string{"PICTURE_PROXY_ENABLED": "true"}))
+
+	// 2. 断言错误明确阻止不完整的生产配置。
+	if err == nil || !strings.Contains(err.Error(), "图片代理") {
+		t.Fatalf("Load() error = %v, want picture proxy validation error", err)
 	}
 }
 

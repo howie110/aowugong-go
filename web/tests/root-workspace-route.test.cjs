@@ -38,6 +38,9 @@ test("备案主页提供工具分享信息和备案号位置", () => {
   const homeSource = fs.readFileSync(homePath, "utf8");
   assert.match(homeSource, /工具分享/);
   assert.match(homeSource, /备案/);
+  assert.match(homeSource, /粤ICP备2026133766号/);
+  assert.match(homeSource, /beian\.miit\.gov\.cn/);
+  assert.match(homeSource, /text-center/);
 });
 
 test("备案主页使用公开网站导航布局和 shadcn 内容组件", () => {
