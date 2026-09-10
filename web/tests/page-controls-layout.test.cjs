@@ -196,15 +196,13 @@ test("综合趋势图例按钮可以控制曲线和Y轴显示", () => {
 });
 
 test("本地访问使用 2345 且生产 Go 只监听反向代理内部端口", () => {
-  // 1. 读取 Vite、本地启动脚本和公开环境变量模板。
+  // 1. 读取 Vite 和本地启动脚本。
   const viteSource = readSource("vite.config.ts");
   const localScript = readSource("../scripts/run-local.ps1");
-  const envExample = readSource("../configs/.env.example");
 
-  // 2. 确认本地保持 2345，生产 Go 仅在回环内部端口接受 Caddy 转发。
+  // 2. 确认本地使用根目录 .env 并保持 2345，生产 Go 仅在回环内部端口接受 Caddy 转发。
+  assert.match(localScript, /Join-Path \$root "\.env"/);
   assert.match(viteSource, /http:\/\/127\.0\.0\.1:2345/);
   assert.match(localScript, /AOWUGONG_HTTP_ADDRESS = "127\.0\.0\.1:2345"/);
   assert.match(localScript, /https:\/\/aowugong\.top/);
-  assert.match(envExample, /^AOWUGONG_HTTP_ADDRESS=127\.0\.0\.1:12345$/m);
-  assert.match(envExample, /^VPN_PUBLIC_URL=https:\/\/aowugong\.top$/m);
 });

@@ -170,7 +170,7 @@ fi
   tar -xzf "$archive"
 )
 source_release="$temporary_directory/$package"
-for required_path in aowugong aowugong-migrate web/dist/index.html migrations/postgres configs/.env.example \
+for required_path in aowugong aowugong-migrate web/dist/index.html migrations/postgres \
   "init/systemd/${SERVICE_NAME}.service"; do
   [ -e "$source_release/$required_path" ] || die "发布包缺少: $required_path"
 done

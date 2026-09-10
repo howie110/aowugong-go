@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -55,46 +54,6 @@ func TestLoadUsesDevelopmentDefaults(t *testing.T) {
 	}
 	if cfg.PictureProxy.Endpoint != "oss-cn-guangzhou-internal.aliyuncs.com" {
 		t.Errorf("PictureProxy.Endpoint = %q, want Guangzhou internal OSS endpoint", cfg.PictureProxy.Endpoint)
-	}
-}
-
-// TestEnvironmentExampleUsesPostgresRuntimeSettings 验证环境示例以 PostgreSQL 作为运行时数据库。
-// 输入：仓库 configs/.env.example。
-// 输出：示例包含 PostgreSQL、一次性 SQLite 来源和 Miniflux API 字段，不再包含旧 RSS 配置。
-// 副作用：读取配置模板文件。
-func TestEnvironmentExampleUsesPostgresRuntimeSettings(t *testing.T) {
-	// 1. 读取仓库中的环境变量示例。
-	content, err := os.ReadFile(filepath.Join("..", "..", "configs", ".env.example"))
-	if err != nil {
-		t.Fatalf("os.ReadFile() error = %v", err)
-	}
-
-	// 2. 断言示例包含 PostgreSQL、一次性 SQLite 来源和 Miniflux API。
-	for _, key := range []string{
-		"AOWUGONG_PUBLIC_URL=", "AOWUGONG_DATABASE_URL=", "AOWUGONG_DATABASE_MAX_OPEN_CONNS=",
-		"AOWUGONG_DATABASE_CONN_MAX_LIFETIME_MINUTES=", "AOWUGONG_SQLITE_SOURCE_PATH=",
-		"MINIFLUX_BASE_URL=", "MINIFLUX_MONITOR_URL=", "MINIFLUX_API_TOKEN=", "MINIFLUX_CATEGORY=",
-		"GITHUB_BACKUP_ENABLED=", "GITHUB_BACKUP_TOKEN=", "GITHUB_BACKUP_REQUIRED_REPOSITORIES=KES-IT/KES-SCM,KES-IT/KES-BIS",
-		"VAULTWARDEN_BACKUP_EMAIL_ENABLED=", "VAULTWARDEN_BACKUP_RECOVERY_SCRIPTS_DIR=", "VAULTWARDEN_BACKUP_AGE_RECIPIENT=", "SMTP_EMAIL=", "SMTP_PASSWORD=",
-		"DEEPSEEK_BASE_URL=", "DEEPSEEK_API_KEY=", "DEEPSEEK_MODEL=deepseek-v4-pro",
-		"PICTURE_OSS_ENDPOINT=oss-cn-guangzhou-internal.aliyuncs.com",
-		"WECOM_BOT_WEBHOOK_URL=",
-	} {
-		if !strings.Contains(string(content), key) {
-			t.Errorf(".env.example missing %s", key)
-		}
-	}
-
-	// 3. 旧 WeChatRSS 配置不能继续出现在唯一模板中。
-	for _, key := range []string{"INVESTMENT_ARTICLE_AGGREGATE_RSS_URL=", "WECHAT_RSS_MONITOR_URL="} {
-		if strings.Contains(string(content), key) {
-			t.Errorf(".env.example still contains retired %s", key)
-		}
-	}
-	for _, key := range []string{"SUB2API_BASE_URL=", "SUB2API_API_KEY=", "SUB2API_MODELS=", "SUB2API_DEFAULT_MODEL="} {
-		if strings.Contains(string(content), key) {
-			t.Errorf(".env.example still contains retired %s", key)
-		}
 	}
 }
 

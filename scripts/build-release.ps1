@@ -33,7 +33,7 @@ try {
     go build -trimpath -ldflags "-s -w" -o (Join-Path $PackageDir "aowugong-migrate") ./cmd/migrate
     Copy-Item "web/dist" (Join-Path $PackageDir "web/dist") -Recurse
     Copy-Item "migrations/postgres" (Join-Path $PackageDir "migrations/postgres") -Recurse
-    Copy-Item "configs", "init", "scripts" $PackageDir -Recurse
+    Copy-Item "init", "scripts" $PackageDir -Recurse
     Copy-Item "README.md" $PackageDir
     [IO.File]::WriteAllText((Join-Path $PackageDir "VERSION"), "$Version`n")
 
