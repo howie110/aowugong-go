@@ -1,4 +1,4 @@
-import { authorizedFetch } from "@/lib/auth";
+import { requestJSON } from "@/lib/request";
 
 export type RoleRead = {
   id: number;
@@ -20,14 +20,7 @@ export type PermissionUser = {
 async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   headers.set("Content-Type", "application/json");
-  const response = await authorizedFetch(url, { ...options, headers });
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(data?.detail || "请求失败");
-  }
-
-  return (await response.json()) as T;
+  return requestJSON<T>(url, { ...options, headers });
 }
 
 export function fetchPermissionUsers() {

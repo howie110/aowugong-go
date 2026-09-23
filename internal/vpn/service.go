@@ -15,7 +15,7 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 )
 
-// Service 统一处理 VPN 资源发现、设备密钥和 Go 直连分发。
+// Service 统一处理 VPN 资源发现、订阅密钥和 Go 直连分发。
 type Service struct {
 	repository  *Repository
 	sources     *SourceCatalog
@@ -24,7 +24,7 @@ type Service struct {
 }
 
 // NewService 创建 VPN 订阅服务。
-// 输入：repository 读写设备，sources 读取私有资源，distributor 发布配置，secret 派生设备密钥。
+// 输入：repository 读写订阅，sources 读取私有资源，distributor 发布配置，secret 派生订阅密钥。
 // 输出：返回 HTTP 页面可用服务。
 // 副作用：无，不访问数据库、文件或外部接口。
 func NewService(repository *Repository, sources *SourceCatalog, distributor Distributor, secret string) *Service {
@@ -36,7 +36,7 @@ func NewService(repository *Repository, sources *SourceCatalog, distributor Dist
 // Summary 返回当前登录用户可见的订阅及分发状态。
 // 输入：ctx 是调用上下文，viewerID 是当前用户，canManage 表示是否为管理员。
 // 输出：管理员获得全部用户订阅和可分配用户，普通用户只获得自己的订阅。
-// 副作用：读取 PostgreSQL 和 VPN 私有目录文件名。
+// 副作用：读取 PostgreSQL、VPN 私有目录和公共规则正文。
 func (s *Service) Summary(ctx context.Context, viewerID int64, canManage bool) (Summary, error) {
 	// 1. 读取资源以及当前身份允许查看的订阅。
 	profiles, err := s.sources.Profiles()
@@ -56,19 +56,18 @@ func (s *Service) Summary(ctx context.Context, viewerID int64, canManage bool) (
 	for _, stored := range storedSubscriptions {
 		subscriptions = append(subscriptions, s.publicSubscription(stored, profiles))
 	}
-	// 2. 管理员额外取得可开通用户；普通用户不接触私有资源目录清单。
+	// 2. 所有有权查看 VPN 资源的用户都能看到同一份公共规则原文；管理员额外取得可开通用户。
 	users := make([]UserOption, 0)
-	var commonRouting *CommonRouting
+	content, routingErr := s.sources.CommonRouting()
+	if routingErr != nil {
+		return Summary{}, fmt.Errorf("读取公共 VPN 分流规则: %w", routingErr)
+	}
+	commonRouting := &CommonRouting{Filename: content.Filename, Body: content.Body}
 	if canManage {
 		users, err = s.repository.ListUsers(ctx)
 		if err != nil {
 			return Summary{}, fmt.Errorf("列出 VPN 可分配用户: %w", err)
 		}
-		content, routingErr := s.sources.CommonRouting()
-		if routingErr != nil {
-			return Summary{}, fmt.Errorf("读取公共 VPN 分流规则: %w", routingErr)
-		}
-		commonRouting = &CommonRouting{Filename: content.Filename, Body: content.Body}
 	} else {
 		profiles = visibleProfiles(profiles, storedSubscriptions)
 	}
@@ -78,9 +77,9 @@ func (s *Service) Summary(ctx context.Context, viewerID int64, canManage bool) (
 	}, nil
 }
 
-// Create 新增设备并发布首次订阅。
-// 输入：ctx 是调用上下文，request 包含设备名和资源编码。
-// 输出：返回包含客户端订阅地址的设备。
+// Create 新增订阅并发布首次订阅。
+// 输入：ctx 是调用上下文，request 包含用户主键和资源编码。
+// 输出：返回包含客户端订阅地址的订阅。
 // 副作用：读取私有配置并写 PostgreSQL。
 func (s *Service) Create(ctx context.Context, request CreateRequest) (UserSubscription, error) {
 	// 1. 清理字段并确认资源当前可用。
@@ -117,13 +116,13 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (UserSubscr
 	return s.publicSubscription(stored, profiles), nil
 }
 
-// Publish 重新推送设备当前版本的全部订阅格式。
-// 输入：ctx 是调用上下文，deviceID 是设备主键。
-// 输出：返回更新发布状态后的设备。
+// Publish 校验当前版本的全部订阅格式并更新发布状态。
+// 输入：ctx 是调用上下文，subscriptionID 是订阅主键。
+// 输出：返回更新发布状态后的订阅。
 // 副作用：读取私有配置并写 PostgreSQL。
-func (s *Service) Publish(ctx context.Context, deviceID, viewerID int64, canManage bool) (UserSubscription, error) {
-	// 1. 读取设备并使用当前 Token 版本覆盖远端配置。
-	stored, err := s.repository.Get(ctx, deviceID)
+func (s *Service) Publish(ctx context.Context, subscriptionID, viewerID int64, canManage bool) (UserSubscription, error) {
+	// 1. 读取订阅并校验当前 Token 版本对应的配置。
+	stored, err := s.repository.Get(ctx, subscriptionID)
 	if err != nil {
 		return UserSubscription{}, err
 	}
@@ -145,13 +144,13 @@ func (s *Service) Publish(ctx context.Context, deviceID, viewerID int64, canMana
 	return s.publicSubscription(stored, profiles), nil
 }
 
-// Rotate 为设备生成新订阅地址并撤销旧地址。
-// 输入：ctx 是调用上下文，deviceID 是设备主键。
-// 输出：返回新版本设备。
+// Rotate 为订阅生成新订阅地址并撤销旧地址。
+// 输入：ctx 是调用上下文，subscriptionID 是订阅主键。
+// 输出：返回新版本订阅。
 // 副作用：读写 PostgreSQL并读取私有配置。
-func (s *Service) Rotate(ctx context.Context, deviceID, viewerID int64, canManage bool) (UserSubscription, error) {
+func (s *Service) Rotate(ctx context.Context, subscriptionID, viewerID int64, canManage bool) (UserSubscription, error) {
 	// 1. 先发布尚未写库的新版本，确保旧订阅在准备完成前继续可用。
-	stored, err := s.repository.Get(ctx, deviceID)
+	stored, err := s.repository.Get(ctx, subscriptionID)
 	if err != nil {
 		return UserSubscription{}, err
 	}
@@ -167,7 +166,7 @@ func (s *Service) Rotate(ctx context.Context, deviceID, viewerID int64, canManag
 		return UserSubscription{}, err
 	}
 
-	// 2. 提交新版本后删除旧 KV；旧值删除失败不回滚可用的新订阅。
+	// 2. 提交新版本后调用分发器撤销旧版本；直连分发器无需删除外部副本。
 	stored, err = s.repository.UpdateTokenVersion(ctx, stored.ID, newVersion)
 	if err != nil {
 		_ = s.distributor.Revoke(ctx, hashToken(s.deriveToken(prospective.ID, prospective.TokenVersion)))
@@ -188,13 +187,13 @@ func (s *Service) Rotate(ctx context.Context, deviceID, viewerID int64, canManag
 	return s.publicSubscription(stored, profiles), nil
 }
 
-// Revoke 撤销设备当前订阅并保留审计记录。
-// 输入：ctx 是调用上下文，deviceID 是设备主键。
-// 输出：返回已撤销设备。
+// Revoke 撤销订阅当前订阅并保留审计记录。
+// 输入：ctx 是调用上下文，subscriptionID 是订阅主键。
+// 输出：返回已撤销订阅。
 // 副作用：写 PostgreSQL，使旧 Token 立即失效。
-func (s *Service) Revoke(ctx context.Context, deviceID, viewerID int64, canManage bool) (UserSubscription, error) {
-	// 1. 草稿从未发布到远端，直接更新本地状态。
-	stored, err := s.repository.Get(ctx, deviceID)
+func (s *Service) Revoke(ctx context.Context, subscriptionID, viewerID int64, canManage bool) (UserSubscription, error) {
+	// 1. 读取并鉴权；未发布的草稿不需要调用分发器撤销。
+	stored, err := s.repository.Get(ctx, subscriptionID)
 	if err != nil {
 		return UserSubscription{}, err
 	}
@@ -202,7 +201,7 @@ func (s *Service) Revoke(ctx context.Context, deviceID, viewerID int64, canManag
 		return UserSubscription{}, ErrNotFound
 	}
 	if stored.PublishedAt != nil {
-		// 2. 已发布设备先删除远端订阅，成功后再更新本地状态。
+		// 2. 已发布订阅先调用分发器，再更新数据库状态；直连模式由状态阻断旧地址。
 		if err := s.distributor.Revoke(ctx, hashToken(s.deriveToken(stored.ID, stored.TokenVersion))); err != nil {
 			return UserSubscription{}, fmt.Errorf("撤销 VPN 远端订阅: %w", err)
 		}
@@ -218,13 +217,13 @@ func (s *Service) Revoke(ctx context.Context, deviceID, viewerID int64, canManag
 	return s.publicSubscription(stored, profiles), nil
 }
 
-// QRCode 生成设备某格式订阅地址的二维码 PNG。
-// 输入：ctx 是调用上下文，deviceID 是设备主键，format 是客户端格式。
+// QRCode 生成指定客户端格式的订阅地址二维码 PNG。
+// 输入：ctx 是调用上下文，subscriptionID 是订阅主键，format 是客户端格式。
 // 输出：返回 320 像素二维码；格式不可用时返回 ErrFormatNotFound。
 // 副作用：读取 PostgreSQL 和 VPN 私有目录文件名。
-func (s *Service) QRCode(ctx context.Context, deviceID, viewerID int64, canManage bool, format string) ([]byte, error) {
-	// 1. 读取当前设备并确认格式属于其资源。
-	stored, err := s.repository.Get(ctx, deviceID)
+func (s *Service) QRCode(ctx context.Context, subscriptionID, viewerID int64, canManage bool, format string) ([]byte, error) {
+	// 1. 读取当前订阅并确认格式属于其资源。
+	stored, err := s.repository.Get(ctx, subscriptionID)
 	if err != nil {
 		return nil, err
 	}
@@ -235,8 +234,8 @@ func (s *Service) QRCode(ctx context.Context, deviceID, viewerID int64, canManag
 	if err != nil {
 		return nil, err
 	}
-	device := s.publicSubscription(stored, profiles)
-	subscriptionURL, exists := device.Subscriptions[strings.TrimSpace(format)]
+	subscription := s.publicSubscription(stored, profiles)
+	subscriptionURL, exists := subscription.Subscriptions[strings.TrimSpace(format)]
 	if !exists || subscriptionURL == "" || stored.Status == StatusRevoked {
 		return nil, ErrFormatNotFound
 	}
@@ -288,13 +287,13 @@ func v2rayQRCodePayload(body, fallback string) string {
 	return fallback
 }
 
-// Subscription 校验设备密钥并返回指定客户端订阅正文。
-// 输入：ctx 是调用上下文，deviceID、token 和 format 来自公开订阅路径。
-// 输出：返回对应格式配置；设备、密钥或格式无效时统一返回 ErrNotFound。
+// Subscription 校验订阅密钥并返回指定客户端订阅正文。
+// 输入：ctx 是调用上下文，subscriptionID、token 和 format 来自公开订阅路径。
+// 输出：返回对应格式配置；订阅、密钥或格式无效时统一返回 ErrNotFound。
 // 副作用：读取 PostgreSQL 和 VPN 私有配置文件。
-func (s *Service) Subscription(ctx context.Context, deviceID int64, token, format string) (ConfigContent, error) {
+func (s *Service) Subscription(ctx context.Context, subscriptionID int64, token, format string) (ConfigContent, error) {
 	// 1. 读取有效用户订阅并使用恒定时间比较当前版本密钥。
-	stored, err := s.repository.Get(ctx, deviceID)
+	stored, err := s.repository.Get(ctx, subscriptionID)
 	if err != nil || stored.Status != StatusActive || stored.PublishedAt == nil {
 		return ConfigContent{}, ErrNotFound
 	}
@@ -315,12 +314,12 @@ func (s *Service) Subscription(ctx context.Context, deviceID int64, token, forma
 	return config, nil
 }
 
-// publishStored 构建并推送一台数据库设备的当前版本。
-// 输入：ctx 是调用上下文，stored 是设备内部记录。
+// publishStored 构建订阅的当前配置并调用分发器校验发布条件。
+// 输入：ctx 是调用上下文，stored 是订阅内部记录。
 // 输出：发布成功返回 nil。
 // 副作用：读取私有配置。
 func (s *Service) publishStored(ctx context.Context, stored storedSubscription) error {
-	// 1. 构建全部格式并使用 Token 哈希作为远端 KV 键。
+	// 1. 构建全部格式并向分发器传递 Token 哈希；直连模式不保存外部副本。
 	configs, err := s.sources.Build(stored.ProfileCode)
 	if err != nil {
 		return fmt.Errorf("生成 VPN 订阅配置: %w", err)
@@ -341,7 +340,7 @@ func (s *Service) publishStored(ctx context.Context, stored storedSubscription) 
 // 输出：返回可复制订阅地址，不包含派生密钥原料。
 // 副作用：无。
 func (s *Service) publicSubscription(stored storedSubscription, profiles []Profile) UserSubscription {
-	// 1. 仅给未撤销设备生成当前资源仍支持的订阅地址。
+	// 1. 仅给未撤销订阅生成当前资源仍支持的订阅地址。
 	subscriptions := make(map[string]string)
 	if stored.Status != StatusRevoked && stored.PublishedAt != nil && s.distributor.BaseURL() != "" {
 		token := s.deriveToken(stored.ID, stored.TokenVersion)
@@ -385,14 +384,14 @@ func visibleProfiles(profiles []Profile, subscriptions []storedSubscription) []P
 	return visible
 }
 
-// deriveToken 按设备和版本确定性派生高强度订阅密钥。
-// 输入：deviceID 是数据库主键，version 是轮换版本。
+// deriveToken 按订阅和版本确定性派生高强度订阅密钥。
+// 输入：subscriptionID 是数据库主键，version 是轮换版本。
 // 输出：返回 256 位 URL 安全 Token。
 // 副作用：无。
-func (s *Service) deriveToken(deviceID int64, version int) string {
-	// 1. HMAC 同时绑定业务域、设备和版本，数据库无需保存明文密钥。
+func (s *Service) deriveToken(subscriptionID int64, version int) string {
+	// 1. HMAC 绑定订阅和版本；保留历史 device: 前缀以兼容已发放链接。
 	mac := hmac.New(sha256.New, s.tokenKey)
-	_, _ = mac.Write([]byte("device:" + strconv.FormatInt(deviceID, 10) + ":version:" + strconv.Itoa(version)))
+	_, _ = mac.Write([]byte("device:" + strconv.FormatInt(subscriptionID, 10) + ":version:" + strconv.Itoa(version)))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
@@ -401,7 +400,7 @@ func (s *Service) deriveToken(deviceID int64, version int) string {
 // 输出：返回小写十六进制 SHA-256。
 // 副作用：无。
 func hashToken(token string) string {
-	// 1. 远端只按哈希索引配置，不存储原始 URL 密钥。
+	// 1. 分发器接口使用哈希标识，不传递原始 URL 密钥。
 	hash := sha256.Sum256([]byte(token))
 	return fmt.Sprintf("%x", hash[:])
 }

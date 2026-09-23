@@ -45,19 +45,19 @@ func registerVPNRoutes(router chi.Router, authService *auth.Service, rbacService
 	})
 }
 
-// subscription 返回无需登录但受设备随机密钥保护的订阅正文。
-// 输入：request 路径包含设备主键、Token 和客户端格式。
+// subscription 返回无需登录但受订阅随机密钥保护的订阅正文。
+// 输入：request 路径包含订阅主键、Token 和客户端格式。
 // 输出：成功写入对应配置文件，验证失败统一返回 404。
 // 副作用：读取 PostgreSQL 和 VPN 私有配置文件。
 func (h vpnHandlers) subscription(w http.ResponseWriter, request *http.Request) {
-	// 1. 严格解析设备主键并交给服务层验证密钥和状态。
-	deviceID, err := strconv.ParseInt(chi.URLParam(request, "deviceID"), 10, 64)
-	if err != nil || deviceID <= 0 {
+	// 1. 严格解析订阅主键并交给服务层验证密钥和状态。
+	subscriptionID, err := strconv.ParseInt(chi.URLParam(request, "deviceID"), 10, 64)
+	if err != nil || subscriptionID <= 0 {
 		http.NotFound(w, request)
 		return
 	}
 	config, err := h.service.Subscription(
-		request.Context(), deviceID, chi.URLParam(request, "token"), chi.URLParam(request, "format"),
+		request.Context(), subscriptionID, chi.URLParam(request, "token"), chi.URLParam(request, "format"),
 	)
 	if err != nil {
 		http.NotFound(w, request)
@@ -113,9 +113,9 @@ func (h vpnHandlers) resourceSummary(w http.ResponseWriter, request *http.Reques
 	writeJSON(w, http.StatusOK, summary)
 }
 
-// create 新增并发布一台 VPN 订阅设备。
-// 输入：request JSON 包含设备名和资源编码。
-// 输出：成功写入新设备 JSON。
+// create 为用户新增并发布一套 VPN 资源订阅。
+// 输入：request JSON 包含用户主键和资源编码。
+// 输出：成功写入新订阅 JSON。
 // 副作用：读取私有配置并写 PostgreSQL。
 func (h vpnHandlers) create(w http.ResponseWriter, request *http.Request) {
 	// 1. 限制并解析 JSON 请求体。
@@ -131,78 +131,78 @@ func (h vpnHandlers) create(w http.ResponseWriter, request *http.Request) {
 	}
 
 	// 3. 创建用户订阅并按当前分发配置尝试首次发布。
-	device, err := h.service.Create(request.Context(), payload)
+	subscription, err := h.service.Create(request.Context(), payload)
 	if err != nil {
 		writeVPNError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, device)
+	writeJSON(w, http.StatusCreated, subscription)
 }
 
-// publish 重新推送设备当前订阅配置。
-// 输入：request 路径包含设备主键。
-// 输出：成功写入更新后设备 JSON。
+// publish 校验当前订阅配置并更新发布状态。
+// 输入：request 路径包含订阅主键。
+// 输出：成功写入更新后订阅 JSON。
 // 副作用：读取私有配置并写 PostgreSQL。
 func (h vpnHandlers) publish(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析主键并调用统一重新发布入口。
-	deviceID, ok := parseVPNDeviceID(w, request)
+	subscriptionID, ok := parseVPNSubscriptionID(w, request)
 	if !ok {
 		return
 	}
 	user, _ := currentUser(request)
-	device, err := h.service.Publish(request.Context(), deviceID, user.ID, true)
+	subscription, err := h.service.Publish(request.Context(), subscriptionID, user.ID, true)
 	if err != nil {
 		writeVPNError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, device)
+	writeJSON(w, http.StatusOK, subscription)
 }
 
 // rotate 轮换用户订阅地址并撤销旧地址。
-// 输入：request 路径包含设备主键。
-// 输出：成功写入新版本设备 JSON。
-// 副作用：读写 PostgreSQL 并轮换设备 Token。
+// 输入：request 路径包含订阅主键。
+// 输出：成功写入新版本订阅 JSON。
+// 副作用：读写 PostgreSQL 并轮换订阅 Token。
 func (h vpnHandlers) rotate(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析主键并执行先发布后撤销的轮换流程。
-	deviceID, ok := parseVPNDeviceID(w, request)
+	subscriptionID, ok := parseVPNSubscriptionID(w, request)
 	if !ok {
 		return
 	}
 	user, _ := currentUser(request)
-	device, err := h.service.Rotate(request.Context(), deviceID, user.ID, true)
+	subscription, err := h.service.Rotate(request.Context(), subscriptionID, user.ID, true)
 	if err != nil {
 		writeVPNError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, device)
+	writeJSON(w, http.StatusOK, subscription)
 }
 
-// revoke 撤销设备当前订阅地址。
-// 输入：request 路径包含设备主键。
-// 输出：成功写入已撤销设备 JSON。
-// 副作用：删除 Worker KV 并写 PostgreSQL。
+// revoke 撤销用户的当前订阅地址。
+// 输入：request 路径包含订阅主键。
+// 输出：成功写入已撤销订阅 JSON。
+// 副作用：写入 PostgreSQL 订阅状态，旧地址随后由鉴权拒绝。
 func (h vpnHandlers) revoke(w http.ResponseWriter, request *http.Request) {
-	// 1. 解析主键并执行远端优先撤销。
-	deviceID, ok := parseVPNDeviceID(w, request)
+	// 1. 解析主键并通过服务层撤销订阅。
+	subscriptionID, ok := parseVPNSubscriptionID(w, request)
 	if !ok {
 		return
 	}
 	user, _ := currentUser(request)
-	device, err := h.service.Revoke(request.Context(), deviceID, user.ID, true)
+	subscription, err := h.service.Revoke(request.Context(), subscriptionID, user.ID, true)
 	if err != nil {
 		writeVPNError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, device)
+	writeJSON(w, http.StatusOK, subscription)
 }
 
-// qrCode 返回设备指定格式订阅地址二维码。
-// 输入：request 路径包含设备主键，format 查询参数指定客户端格式。
+// qrCode 返回指定客户端格式的订阅地址二维码。
+// 输入：request 路径包含订阅主键，format 查询参数指定客户端格式。
 // 输出：成功写入 PNG 图片。
 // 副作用：读取 PostgreSQL 和 VPN 私有目录。
 func (h vpnHandlers) qrCode(w http.ResponseWriter, request *http.Request) {
 	// 1. 解析主键和格式后生成内存二维码。
-	deviceID, ok := parseVPNDeviceID(w, request)
+	subscriptionID, ok := parseVPNSubscriptionID(w, request)
 	if !ok {
 		return
 	}
@@ -211,7 +211,7 @@ func (h vpnHandlers) qrCode(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "缺少当前用户")
 		return
 	}
-	image, err := h.service.QRCode(request.Context(), deviceID, user.ID, false, request.URL.Query().Get("format"))
+	image, err := h.service.QRCode(request.Context(), subscriptionID, user.ID, false, request.URL.Query().Get("format"))
 	if err != nil {
 		writeVPNError(w, err)
 		return
@@ -240,18 +240,18 @@ func decodeVPNJSON(request *http.Request, target any) error {
 	return nil
 }
 
-// parseVPNDeviceID 解析并校验路由中的设备主键。
+// parseVPNSubscriptionID 解析并校验路由中的订阅主键。
 // 输入：w 用于错误响应，request 包含 chi 路由参数。
 // 输出：返回正整数主键和成功标记。
 // 副作用：参数无效时写入 HTTP 400。
-func parseVPNDeviceID(w http.ResponseWriter, request *http.Request) (int64, bool) {
+func parseVPNSubscriptionID(w http.ResponseWriter, request *http.Request) (int64, bool) {
 	// 1. 只接受正十进制整数。
-	deviceID, err := strconv.ParseInt(chi.URLParam(request, "deviceID"), 10, 64)
-	if err != nil || deviceID <= 0 {
+	subscriptionID, err := strconv.ParseInt(chi.URLParam(request, "deviceID"), 10, 64)
+	if err != nil || subscriptionID <= 0 {
 		writeError(w, http.StatusBadRequest, "invalid_request", "VPN 设备编号无效")
 		return 0, false
 	}
-	return deviceID, true
+	return subscriptionID, true
 }
 
 // writeVPNError 把 VPN 业务错误转换为稳定 HTTP 状态。
@@ -259,7 +259,7 @@ func parseVPNDeviceID(w http.ResponseWriter, request *http.Request) (int64, bool
 // 输出：无。
 // 副作用：写入统一 JSON 错误响应。
 func writeVPNError(w http.ResponseWriter, err error) {
-	// 1. 区分参数、冲突、不存在、未配置和远端执行错误。
+	// 1. 区分参数、冲突、不存在、未配置和分发器执行错误。
 	switch {
 	case errors.Is(err, vpn.ErrInvalidInput), errors.Is(err, vpn.ErrProfileNotFound), errors.Is(err, vpn.ErrFormatNotFound), errors.Is(err, vpn.ErrUserNotFound):
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())

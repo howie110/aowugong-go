@@ -73,7 +73,7 @@ test("资源分享将管理员分配与用户扫码拆成两个页面", () => {
   // 1. 读取导航、路由和 VPN 页面源码。
   const navigationSource = readSource("src/components/layout/app-navigation.ts");
   const financeSource = readSource("src/lib/finance.ts");
-  const vpnSource = readSource("src/pages/vpn.tsx");
+  const vpnSource = readSource("src/pages/vpn/distribution-page.tsx") + readSource("src/pages/vpn/resources-page.tsx");
 
   // 2. 管理员在 VPN 分配操作，用户只在 VPN 资源查看自己的二维码。
   assert.match(navigationSource, /label: "资源分享"/);
@@ -88,7 +88,7 @@ test("资源分享将管理员分配与用户扫码拆成两个页面", () => {
 
 test("VPN 资源同时提供复制订阅链接和扫码入口", () => {
   // 1. 读取用户 VPN 资源页面和页面描述。
-  const vpnSource = readSource("src/pages/vpn.tsx");
+  const vpnSource = readSource("src/pages/vpn/resources-page.tsx");
   const financeSource = readSource("src/lib/finance.ts");
 
   // 2. 复制当前格式对应的私有订阅地址，并保留二维码配置入口。

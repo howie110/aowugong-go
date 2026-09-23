@@ -228,8 +228,8 @@ func TestServiceScopesSubscriptionsByLoginUser(t *testing.T) {
 	if len(viewerSummary.Subscriptions) != 1 || viewerSummary.Subscriptions[0].ID != first.ID || len(viewerSummary.Users) != 0 || viewerSummary.CanManage {
 		t.Fatalf("viewer summary = %#v", viewerSummary)
 	}
-	if viewerSummary.CommonRouting != nil {
-		t.Fatalf("viewer summary leaked common routing: %#v", viewerSummary.CommonRouting)
+	if viewerSummary.CommonRouting == nil || !strings.Contains(viewerSummary.CommonRouting.Body, "example.com") {
+		t.Fatalf("viewer summary common routing = %#v", viewerSummary.CommonRouting)
 	}
 	adminSummary, err := service.Summary(context.Background(), firstUserID, true)
 	if err != nil {

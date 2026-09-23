@@ -1,4 +1,4 @@
-import { authorizedFetch } from "@/lib/auth";
+import { requestJSON } from "@/lib/request";
 
 export type ServiceMonitorResult = {
   target_code: string;
@@ -34,10 +34,5 @@ export async function checkMonitoringServices() {
 }
 
 async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {
-  const response = await authorizedFetch(input, init);
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(data?.detail || "获取监控数据失败");
-  }
-  return (await response.json()) as T;
+  return requestJSON<T>(input, init, "获取监控数据失败");
 }

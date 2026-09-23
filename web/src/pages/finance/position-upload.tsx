@@ -19,33 +19,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { authorizedFetch } from "@/lib/auth";
+import { fetchRecentSnapshots, uploadPositionSnapshots, type AssetSnapshot, type UploadResult } from "@/lib/positions";
 import { notify } from "@/lib/notify";
-
-type AssetSnapshot = {
-  id: number;
-  snapshot_date: string;
-  broker_name: string;
-  source_app: string;
-  account_suffix: string;
-  account_alias?: string | null;
-  ocr_provider?: string | null;
-  warnings?: string[];
-  created_at?: string | null;
-  updated_at?: string | null;
-};
-
-type UploadResult = {
-  filename: string;
-  status: string;
-  snapshot?: AssetSnapshot | null;
-  error?: string | null;
-};
-
-type UploadResponse = {
-  snapshot_date: string;
-  results: UploadResult[];
-};
 
 function getTodayText() {
   const now = new Date();
@@ -69,11 +44,7 @@ export function PositionUploadPage() {
   async function loadRecent() {
     setIsLoadingRecent(true);
     try {
-      const response = await authorizedFetch("/api/v1/finance/positions/snapshots/recent?limit=20");
-      if (!response.ok) {
-        throw new Error("读取最近记录失败");
-      }
-      setRecent((await response.json()) as AssetSnapshot[]);
+      setRecent(await fetchRecentSnapshots());
     } catch (error) {
       notify.errorFrom(error, "读取最近记录失败", "加载失败");
     } finally {
@@ -89,21 +60,12 @@ export function PositionUploadPage() {
 
     setIsUploading(true);
     try {
-      const formData = new FormData();
-      formData.set("snapshot_date", snapshotDate);
-      formData.set("broker_name", "东莞证券");
-      formData.set("source_app", "同花顺");
-      files.forEach((file) => formData.append("files", file));
-
-      const response = await authorizedFetch("/api/v1/finance/positions/snapshots/upload", {
-        method: "POST",
-        body: formData,
+      const data = await uploadPositionSnapshots({
+        snapshotDate,
+        brokerName: "东莞证券",
+        sourceApp: "同花顺",
+        files,
       });
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.detail || "上传识别失败");
-      }
-      const data = (await response.json()) as UploadResponse;
       setResults(data.results);
       clearFiles();
       notify.success("识别保存完成", `${data.results.filter((item) => item.status === "saved").length} 张已保存。`);

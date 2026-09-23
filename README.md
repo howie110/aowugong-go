@@ -8,6 +8,8 @@
 - 再读 AGENTS.md，遵守删除文件、生产操作、部署和外部通知等安全约束。
 - 最后根据任务进入代码、脚本或配置。代码与旧文档和本手册冲突时，以用户最新明确确认的设计为准，并在同一次变更中更新本手册。
 
+文档维护要区分已确认设计、代码实现和线上状态。2026-09-23 本次刷新依据本地工作区与已有操作记录；未重新连接服务器核实。下文服务器布局是维护基线，不能代替部署前的现场检查；已知未完成项见第 13 节。
+
 ## 0. AI 开发前必读
 
 - 这是个人私有项目，不以对外分发或第三方复现为目标。
@@ -148,7 +150,7 @@ aowugong-go 是 Go 模块化单体，统一提供：
 
 | 区域 | 页面 | 访问规则 |
 |---|---|---|
-| 总览 | 控制台、工作导航 | 控制台是公开入口；工作导航需要登录 |
+| 总览 | 控制台、工作导航 | 工作台控制台与工作导航均需登录；根路径备案主页独立公开 |
 | 投资研究 | 投资文章分析、投资文章抓取、股票仓位分析、股票仓位导入 | 登录后按角色使用 |
 | 量化工具 | 回测、数据、交易 | 登录后使用；真实交易默认关闭 |
 | 内容服务 | 微信读书、麻将战绩、订阅管理 | 登录后使用 |
@@ -158,13 +160,13 @@ aowugong-go 是 Go 模块化单体，统一提供：
 权限和数据原则：
 
 - 普通用户只能读取自己的订阅、资源和个人数据。
-- 管理员可维护用户和资源分配，也可查看公共规则原文，但不能把私有节点内容暴露到普通用户页面。
+- 管理员可维护用户和资源分配，也可查看公共规则原文；VPN 资源页向已授权用户只读展示同一份规则，但不能把私有节点内容暴露到普通用户页面。
 - VPN 用户是使用 VPN 资源页面和订阅能力的角色；管理员账号也可以被分配 DMIT、魔戒等资源，管理员身份不代表自动拥有某一套资源。
 - 工作台入口不从公开根页面暴露；公开备案主页不依赖登录。
 
 ### 3.3 投资研究和内容服务
 
-- 微信读书通过扫码绑定账号并从书架发现公众号；人工启用的公众号由 08:00、20:00 任务检查最近 20 篇文章。
+- 微信读书通过扫码绑定账号并从书架发现公众号；人工启用的公众号由手动抓取任务检查最近 20 篇文章，不再按 08:00、20:00 自动抓取。
 - 只为数据库未知文章读取详情和微信公众号原文，不依赖外部 RSS 聚合。
 - 登录凭据使用 AOWUGONG_ENCRYPTION_KEY 派生的 AES-256-GCM 密钥加密后存入 PostgreSQL；二维码中间态只保存在当前 Go 进程内。
 - Go 按公众号生成回环地址 WeRead RSS，供同机 Miniflux 分源保存和阅读全文。
@@ -172,6 +174,32 @@ aowugong-go 是 Go 模块化单体，统一提供：
 - 股票仓位支持截图导入和敏感信息遮罩。
 - 私有工作导航保存在 storage/private/work/navigation.json，不放入数据库或公开页面。
 - 真实交易开关 FINANCE_ENABLE_REAL_TRADE 默认是 false，任何打开真实交易的动作都必须单独确认。
+
+### 3.4 接手开发的关键入口
+
+| 入口 | 职责与修改位置 |
+|---|---|
+| cmd/aowugong/main.go、internal/app/run.go | HTTP 与 CLI 启动、依赖组装、数据库和调度器生命周期 |
+| internal/config/config.go | 配置字段、默认值和环境变量加载；查询配置定义时从这里开始 |
+| internal/httpserver/router.go 与同目录 handlers | API 路由、鉴权和请求处理；业务实现进入对应 internal 模块 |
+| internal/finance/job/registry.go、internal/scheduler | 唯一任务定义、手动/定时边界、执行锁与任务结果 |
+| internal/vpn/source.go、source_build.go、convert_*.go、routing.go、service.go | 私有目录读取、配置组装、节点格式转换、公共规则转换、分配与订阅鉴权 |
+| internal/database、migrations/postgres | PostgreSQL 连接、迁移和备份；修改 schema 需考虑旧版本兼容 |
+| web/src/main.tsx、web/src/pages、web/src/lib | 公开页与工作台入口、业务页面和前端 API 调用 |
+| scripts、init/systemd | 本地启动、发布、回滚及服务器运行约定 |
+
+正式启动先连接 PostgreSQL，按配置执行迁移并同步权限基线，再装配 HTTP 与调度器。CLI 的 job 入口复用任务注册表，但不启动 HTTP/Cron，也不执行数据库迁移。开发代理模式提前分流，不组装本地业务后端，详见第 8 节。
+
+### 3.5 代码风格与结构约定
+
+- 新代码先归属业务模块，再按职责分文件；保持现有依赖方向，不因文件较长就新建包或抽象层。文件与函数长度只作为检查信号。
+- API 先封装再调用：页面通过 web/src/lib 下对应业务函数访问后端，不直接拼接地址或调用 fetch/authorizedFetch。request.ts 复用 auth.ts 的认证入口，统一 JSON 结果和错误解析；上传 FormData、二维码 Blob、业务错误提示和兼容分支按接口保留，不自动增加重试。
+- 仓位上传与报告接口分别由 positions.ts、stock-analysis.ts 管理；接口类型与封装放在一起，页面目录保留展示类型。后端第三方协议通过 client 封装；独立业务模块已有的客户端可留在本模块。
+- VPN 页面入口 web/src/pages/vpn.tsx 只负责导出；分配页、资源页和表格/弹窗在相邻 vpn 目录，公共规则卡片由两页复用。Go 的 source.go 管理文件发现，source_build.go 组装输出，convert_*.go 负责格式转换。
+- 投资文章分析保持在 internal/finance/articleanalysis 包内：service.go 管理依赖，sync.go/parse.go 管理抓取和正文解析，analysis.go/analysis_json.go 管理模型分析和响应解析，model_settings.go 管理模型设置，report.go/prompt.go 管理统计与提示词。业务流程、算法和事务不因拆文件而改变。
+- 使用清晰英文标识符和一致业务术语，重要函数与复杂流程使用中文说明；简单辅助函数不强制套注释模板。修改实现时同步核对输入、输出、副作用和特殊处理说明。
+- VPN 局部标识统一使用 subscriptionID；历史路由参数 deviceID、Token 派生中的 device: 字节前缀及旧数据契约为兼容性保留，不能机械替换。
+- 结构调整优先验证行为。API 测试检查请求、参数、响应与失败分支，VPN 页面测试检查渲染和复制回调；尚存的其他源码匹配测试不代表完整交互验证。
 
 ## 4. VPN 资源与订阅设计
 
@@ -189,6 +217,7 @@ aowugong-go 是 Go 模块化单体，统一提供：
 - 只展示当前登录用户已获配的资源。
 - 为同一账号提供手机和电脑共用的订阅。
 - 提供二维码和可复制的订阅链接。
+- 只读展示所有资源共用的公共规则原文，没有编辑或保存入口。
 
 DMIT、魔戒等只是不同的上游资源来源。进入系统后都走相同的资源分配、转换、订阅和刷新流程；资源来源不会改变用户使用方式。管理员账号和普通账号一样，只有被分配后才拥有对应资源。
 
@@ -199,7 +228,7 @@ DMIT、魔戒等只是不同的上游资源来源。进入系统后都走相同�
 - 本地原始文件位于 storage/private/vpn，生产原始文件位于 /opt/aowugong-go/shared/storage/private/vpn。
 - 目录被 Git 忽略，文件可能包含服务器地址、Token、UUID 和私有订阅链接。
 - 资源文件按文件名中的资源编码归组；资源来源可以不同，但统一转换为客户端可消费的订阅。
-- 每套输出都包含“资源节点配置 + 当前公共分流规则”，不是只返回孤立节点。
+- 设计目标是各资源订阅采用同一套分流策略。当前 Clash、Shadowrocket、Surge 输出合并公共规则；v2rayN/v2rayNG 的标准节点订阅存在下述限制，不能视为已经实现规则随订阅同步。
 
 四种客户端输出：
 
@@ -220,8 +249,8 @@ v2rayN/v2rayNG 的标准节点订阅无法像 Clash、Surge 那样携带完整�
 - 格式：Xray routing 对象。
 - 所有用户、所有资源只使用当前最新的一份。
 - 不使用数据库，不提供页面编辑，不保留草稿、版本、发布、回滚或多份并存。
-- 管理员页面只读展示规则原文；规则由 AI 按用户要求修改并部署。
-- 每次生成订阅都会重新读取该文件；部署新文件后，用户刷新订阅即可得到新规则。
+- 管理员分配页和用户资源页只读展示规则原文；规则由 AI 按用户要求修改并部署。
+- 每次生成订阅都会重新读取该文件；更新私有规则文件后，支持合并规则的客户端刷新订阅即可得到新规则。v2rayN/v2rayNG 标准节点订阅不携带这些规则。
 - 规则目标统一为 proxy、direct、block，分别表示代理、直连和拒绝。
 - 文件缺失或为空时保持无公共规则的兼容行为；文件存在但 JSON 无效或格式不支持时，阻止生成不完整的订阅。
 - 例如 geosite:cn 和私有 IP 可以统一指向 direct，具体内容以当前文件为准。
@@ -239,8 +268,8 @@ v2rayN/v2rayNG 的标准节点订阅无法像 Clash、Surge 那样携带完整�
 - VPN_PUBLIC_URL 当前为 https://aowugong.top，必须在设备尚未连接代理时也能访问。
 - 公开接口不提供资源列表，只接受每个用户独立的高强度 Token。
 - Token 由 AOWUGONG_ENCRYPTION_KEY、订阅主键和版本通过 HMAC 派生；数据库不保存 Token 或节点正文。
-- 普通用户不能读取其他用户的资源或公共规则原文。
-- 节点正文、规则正文和订阅 Token 不写入日志、数据库、浏览器或公开 Git。
+- 普通用户不能读取其他用户的资源、节点内容或订阅 Token；已授权用户可以在 VPN 资源页只读查看公共规则原文。
+- 节点正文、规则正文和订阅 Token 不写入日志、数据库或 Git。已授权用户的页面按功能需要接收自己的订阅链接、二维码和公共规则原文；不将私有资源嵌入前端静态发布文件。
 - 发布 VPN 代码或规则前，先用未连接代理的设备确认订阅 URL 可以访问，再在四类客户端分别测试刷新和导入。
 
 ## 5. 图片上传和阿里云凭证
@@ -349,7 +378,13 @@ PostgreSQL 启动时自动执行 migrations/postgres。连接默认使用 127.0.
 
 启动：
 
+    cd web
+    npm ci
+    npm run build
+    cd ..
     pwsh -File ./scripts/run-local.ps1
+
+开发工具链要求 Go 1.26.5（以 go.mod 为准）、Node/npm；上述 .ps1 脚本另需 PowerShell（pwsh）。旧版 Go 可通过 GOTOOLCHAIN=auto 选择项目要求的工具链。本地 Go 服务读取 web/dist，修改页面后需重新构建静态资源。
 
 访问 http://127.0.0.1:2345，停止时按 Ctrl+C。脚本会加载项目根目录 .env，并强制设置：
 
@@ -357,6 +392,8 @@ PostgreSQL 启动时自动执行 migrations/postgres。连接默认使用 127.0.
 - AOWUGONG_HTTP_ADDRESS=127.0.0.1:2345
 - AOWUGONG_SCHEDULER_ENABLED=false
 - FINANCE_ENABLE_REAL_TRADE=false
+
+此模式适合验证本地页面与线上 API 的联动，不会运行刚修改的 Go 业务 handler/service。页面写操作仍会请求线上 API，不能当作隔离测试环境；后端变更应通过相应测试或独立环境验证。
 
 如果要补跑或修改线上数据，应通过 SSH 在服务器加载正式环境，并调用统一 CLI，而不是让本地开发进程直接连接生产数据库：
 
@@ -368,7 +405,6 @@ PostgreSQL 启动时自动执行 migrations/postgres。连接默认使用 127.0.
 
 | 时间 | 任务 | 作用 |
 |---|---|---|
-| 08:00、20:00 | sync_investment_articles | 从微信读书书架公众号增量抓取并分析投资文章 |
 | 09:00 | test_crontab | 每日任务链路测试 |
 | 22:00 | check_service_monitors | 服务连通性检查 |
 | 每月 1 日 09:30 | check_subscription_expiry_notify | 汇总有效订阅并按到期日发送月报 |
@@ -384,6 +420,8 @@ PostgreSQL 启动时自动执行 migrations/postgres。连接默认使用 127.0.
 - rebuild_investment_signal_groups
 
 微信读书不再自动保活、定时探测或定时抓取；需要更新文章时先在页面重新扫码，再手动执行抓取。任务失败通知统一包含任务、时间、状态和信息；是否发送及发送到哪里取决于正式环境中明确启用的通知配置，Codex 不代发外部通知。
+
+手动任务的唯一依据是 internal/finance/job/registry.go 中的 ManualOnly 标记；sync_investment_articles 和 rebuild_investment_signal_groups 共用 investment_signal_groups 并发锁。Vaultwarden 03:45 备份由独立 systemd timer 执行，不属于 Go 进程内 Cron。CLI 补跑也可能触发任务自身的失败通知，执行前需核实通知影响及当次授权。
 
 常用 CLI：
 
@@ -413,7 +451,7 @@ PostgreSQL 启动时自动执行 migrations/postgres。连接默认使用 127.0.
 
 本地构建 Linux amd64 发布包：
 
-    ./scripts/build-release.ps1 -Version v1.0.0
+    GOTOOLCHAIN=auto pwsh -File ./scripts/build-release.ps1 -Version v1.0.0
 
 发布包包含：
 
@@ -429,6 +467,10 @@ PostgreSQL 启动时自动执行 migrations/postgres。连接默认使用 127.0.
     sudo DEPLOY_MODE=main /opt/aowugong-go/current/scripts/deploy-release.sh v1.0.0
 
 部署动作限于构建、上传、原子切换 current、重启 aowugong-go.service 和健康检查；不自动发送钉钉、邮件、微信等通知。正式发布前确认 migration 向后兼容，并保留数据库备份。
+
+现有 deploy-release.sh 还包含初始化操作：缺少 Swap 时创建 Swap、准备用户和目录、调整 shared 权限、更新运行环境和 systemd unit，并可能同步 Vaultwarden 备份脚本。执行前应核对这些副作用是否符合本次范围，不能把整个脚本视为仅切换二进制。脚本设置 AOWUGONG_DATABASE_SKIP_MIGRATIONS=false，因此服务重启会检查并执行尚未应用的 PostgreSQL 迁移；不能承诺普通部署绝不修改 schema。
+
+本地发布包可通过 RELEASE_ARCHIVE 指定，必须同时提供对应 .sha256 文件。使用与发布包匹配的部署脚本；旧服务器脚本可能仍要求已删除的 configs/.env.example，不能为绕过校验恢复废弃模板。每次使用新版本目录，并分别检查服务状态、内网/公网健康接口和本次变更涉及的功能。
 
 ### 10.3 Canary 和回滚
 
@@ -500,8 +542,15 @@ PostgreSQL 启动时自动执行 migrations/postgres。连接默认使用 127.0.
 - VPN 资源统一支持 Clash/FlClash、Shadowrocket、Surge、v2rayN/v2rayNG 四类客户端，但公共规则只有一份。
 - v2rayN/v2rayNG 只使用标准节点订阅，不维护独立的 v2rayN 规则资源。
 - DMIT、魔戒等资源使用同一套分配和转换流程；管理员也可以被分配资源。
-- 公共规则由 storage/private/vpn/common-routing.json 单文件维护，AI 修改后部署，用户刷新订阅生效。
+- 公共规则由 storage/private/vpn/common-routing.json 单文件维护，AI 修改后更新到生产私有目录，支持合并规则的客户端刷新订阅生效。
 - PicGo 使用阿里云 OSS 的 RAM 子账号；主账号 AccessKey 已禁用。
 - 生产应用只通过 Caddy 对外提供域名入口，内部服务和数据库不公开。
 - 服务器项目、域名和端口变化时，先更新第 1 节总览，再更新受影响的项目章节和部署边界。
 - 任何未来 AI 开发都必须先读本文件，并把新的明确设计沉淀到这里。
+
+已知交接状态（历史核实，不代表实时线上状态）：2026-09-12 已部署 v20260912-113811-vpn-routing，服务运行及公网健康检查通过；当时 common-routing.json 缺失或为空，因此规则只读展示功能上线不等于规则已配置。后续仍需补齐并验证公共规则、核实魔戒资源的实际展示与客户端订阅可用性。v2rayN 标准节点订阅无法满足规则一并同步的目标，不能仅凭页面展示规则宣称该缺口已解决。
+
+## 14. 后续优化方向
+
+- 日志与可观测性：系统复杂后，评估引入 Wide Event / Canonical Log Line，为请求、任务、消息、批量处理和人工覆盖统一记录上下文，让正常流程清晰、例外可追踪和可审计。当前只记录为优化方向，暂不实施具体架构。
+- 资料来源：[Logging Sucks](https://loggingsucks.com/)、[logging-best-practices skill](https://github.com/boristane/agent-skills/tree/main/skills/logging-best-practices)。

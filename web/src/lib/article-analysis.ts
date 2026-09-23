@@ -1,4 +1,5 @@
 import { authorizedFetch } from "@/lib/auth";
+import { requestJSON } from "@/lib/request";
 
 export type ArticleSource = {
   id: number;
@@ -279,14 +280,7 @@ async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}):
   if (init.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await authorizedFetch(input, { ...init, headers });
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    const error = new Error(data?.detail || "投资文章分析接口请求失败");
-    Object.assign(error, { status: response.status });
-    throw error;
-  }
-  return (await response.json()) as T;
+  return requestJSON<T>(input, { ...init, headers }, "投资文章分析接口请求失败");
 }
 
 function isMethodNotAllowed(error: unknown) {

@@ -84,12 +84,12 @@ func TestVPNRoutesSeparateViewerAndAdministratorPermissions(t *testing.T) {
 	userSummaryRequest.Header.Set("Authorization", "Bearer "+vpnUserToken)
 	userSummaryRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(userSummaryRecorder, userSummaryRequest)
-	var userSummary map[string]any
+	var userSummary vpn.Summary
 	if err := json.Unmarshal(userSummaryRecorder.Body.Bytes(), &userSummary); err != nil {
 		t.Fatalf("user summary JSON error = %v", err)
 	}
-	if _, exists := userSummary["common_routing"]; exists {
-		t.Fatal("user summary unexpectedly contains common_routing")
+	if userSummary.CommonRouting == nil || userSummary.CommonRouting.Filename != "common-routing.json" {
+		t.Fatalf("user summary common routing = %#v", userSummary.CommonRouting)
 	}
 
 	// 4. VPN 用户不能调用管理员分配入口。

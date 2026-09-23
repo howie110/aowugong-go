@@ -73,7 +73,7 @@ type Summary struct {
 	CommonRouting         *CommonRouting     `json:"common_routing,omitempty"`
 }
 
-// CommonRouting 描述管理员页面只读展示的公共规则原文。
+// CommonRouting 描述 VPN 分配页和资源页只读展示的公共规则原文。
 type CommonRouting struct {
 	Filename string `json:"filename"`
 	Body     string `json:"body"`

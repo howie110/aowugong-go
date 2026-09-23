@@ -1,4 +1,5 @@
 import { authorizedFetch } from "@/lib/auth";
+import { requestJSON, responseError } from "@/lib/request";
 
 export type VPNFormat = {
   code: string;
@@ -66,7 +67,7 @@ export async function fetchVPNResourceSummary(): Promise<VPNSummary> {
 // createVPNUserSubscription 给登录用户开通并发布订阅。
 // 输入：userID 是用户主键，profileCode 是资源编码。
 // 输出：返回已发布用户订阅。
-// 副作用：请求 Go API 写 PostgreSQL 并推送 Worker。
+// 副作用：请求 Go API 写入订阅状态；节点由 Go 服务按订阅请求实时提供。
 export async function createVPNUserSubscription(userID: number, profileCode: string): Promise<VPNUserSubscription> {
   // 1. 提交用户和资源编码，节点正文不会经过浏览器。
   return requestVPN<VPNUserSubscription>("/api/v1/vpn/distribution/users", {
@@ -79,7 +80,7 @@ export async function createVPNUserSubscription(userID: number, profileCode: str
 // publishVPNUserSubscription 重新发布用户当前配置。
 // 输入：subscriptionID 是订阅主键。
 // 输出：返回更新后的用户订阅。
-// 副作用：请求 Go API 推送 Worker。
+// 副作用：请求 Go API 校验配置并更新发布状态。
 export async function publishVPNUserSubscription(subscriptionID: number): Promise<VPNUserSubscription> {
   // 1. 调用用户订阅当前版本发布入口。
   return requestVPN<VPNUserSubscription>(`/api/v1/vpn/distribution/users/${subscriptionID}/publish`, { method: "POST" });
@@ -97,21 +98,21 @@ export async function rotateVPNUserSubscription(subscriptionID: number): Promise
 // revokeVPNUserSubscription 撤销用户当前订阅。
 // 输入：subscriptionID 是订阅主键。
 // 输出：返回已撤销用户订阅。
-// 副作用：请求 Go API 删除 Worker KV 并写 PostgreSQL。
+// 副作用：请求 Go API 更新 PostgreSQL 订阅状态，阻止旧地址继续访问。
 export async function revokeVPNUserSubscription(subscriptionID: number): Promise<VPNUserSubscription> {
   // 1. 使用 DELETE 表达撤销语义，保留本地审计记录。
   return requestVPN<VPNUserSubscription>(`/api/v1/vpn/distribution/users/${subscriptionID}`, { method: "DELETE" });
 }
 
 // fetchVPNQRCode 下载指定订阅格式二维码。
-// 输入：deviceID 是设备主键，format 是客户端格式。
+// 输入：subscriptionID 是订阅主键，format 是客户端格式。
 // 输出：返回 PNG Blob。
 // 副作用：请求 Go API。
-export async function fetchVPNQRCode(deviceID: number, format: string): Promise<Blob> {
+export async function fetchVPNQRCode(subscriptionID: number, format: string): Promise<Blob> {
   // 1. 认证读取不缓存二维码图片。
-  const response = await authorizedFetch(`/api/v1/vpn/resources/users/${deviceID}/qr?format=${encodeURIComponent(format)}`);
+  const response = await authorizedFetch(`/api/v1/vpn/resources/users/${subscriptionID}/qr?format=${encodeURIComponent(format)}`);
   if (!response.ok) {
-    throw await vpnResponseError(response, "读取订阅二维码失败");
+    throw await responseError(response, "读取订阅二维码失败");
   }
   return response.blob();
 }
@@ -122,19 +123,5 @@ export async function fetchVPNQRCode(deviceID: number, format: string): Promise<
 // 副作用：请求 Go API。
 async function requestVPN<T>(path: string, init: RequestInit = {}): Promise<T> {
   // 1. 使用工作台令牌请求并解析成功 JSON。
-  const response = await authorizedFetch(path, init);
-  if (!response.ok) {
-    throw await vpnResponseError(response, "VPN 操作失败");
-  }
-  return (await response.json()) as T;
-}
-
-// vpnResponseError 从统一错误信封提取可读消息。
-// 输入：response 是失败响应，fallback 是回退文案。
-// 输出：返回 Error。
-// 副作用：读取响应体。
-async function vpnResponseError(response: Response, fallback: string): Promise<Error> {
-  // 1. 优先使用服务端 detail，解析失败时保留稳定回退。
-  const body = await response.json().catch(() => null);
-  return new Error(body?.detail || fallback);
+  return requestJSON<T>(path, init, "VPN 操作失败");
 }

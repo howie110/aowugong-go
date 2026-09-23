@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { authorizedFetch } from "@/lib/auth";
+import { fetchStockAnalysisReport } from "@/lib/stock-analysis";
 import { AccountGrid } from "./stock-analysis/account-cards";
 import { EmptyAnalysis } from "./stock-analysis/empty-analysis";
 import { HoldingDistributionCard } from "./stock-analysis/holding-distribution-card";
@@ -25,11 +25,7 @@ export function StockAnalysisPage({ isSensitiveMasked }: { isSensitiveMasked: bo
     setIsLoading(true);
     setMessage(null);
     try {
-      const response = await authorizedFetch("/api/v1/finance/stock-analysis/report?limit=500");
-      if (!response.ok) {
-        throw new Error("读取股票仓位分析失败");
-      }
-      setReport((await response.json()) as StockAnalysisReport);
+      setReport(await fetchStockAnalysisReport());
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "读取股票仓位分析失败");
     } finally {
