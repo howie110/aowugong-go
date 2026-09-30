@@ -93,3 +93,15 @@ func TestArticleStoreSkipsLegacyStatus(t *testing.T) {
 		t.Fatalf("%v %v", articles, err)
 	}
 }
+
+func TestArticleYAMLTimestampPreservesCalendarDate(t *testing.T) {
+	dir := t.TempDir()
+	writeArticle(t, dir, "timestamp.md", strings.Replace(articleFixture, "2026-09-30", "2024-03-20 00:00:00", 1))
+	a, err := NewArticleStore(dir).Get("timestamp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Date != "2024-03-20" {
+		t.Fatalf("date %s", a.Date)
+	}
+}

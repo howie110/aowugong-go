@@ -44,10 +44,10 @@ func parseArticle(data []byte, root, filename string) (Article, error) {
 		return Article{}, err
 	}
 	var fm struct {
-		Title string   `yaml:"title"`
-		Date  string   `yaml:"date"`
-		Tags  []string `yaml:"tags"`
-		Image string   `yaml:"image"`
+		Title string    `yaml:"title"`
+		Date  time.Time `yaml:"date"`
+		Tags  []string  `yaml:"tags"`
+		Image string    `yaml:"image"`
 	}
 	if err := yaml.Unmarshal(meta, &fm); err != nil {
 		return Article{}, fmt.Errorf("无效元信息: %w", err)
@@ -55,8 +55,8 @@ func parseArticle(data []byte, root, filename string) (Article, error) {
 	if strings.TrimSpace(fm.Title) == "" {
 		return Article{}, fmt.Errorf("缺少标题")
 	}
-	date, err := time.Parse("2006-01-02", fm.Date)
-	if err != nil {
+	date := fm.Date
+	if date.IsZero() {
 		return Article{}, fmt.Errorf("日期应为 YYYY-MM-DD")
 	}
 	article := Article{Title: fm.Title, Date: date.Format("2006-01-02"), Tags: []string{}, TOC: []Heading{}}
