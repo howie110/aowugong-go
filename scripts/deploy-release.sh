@@ -184,7 +184,9 @@ if [ ! -d "$release_directory" ]; then
 fi
 chown -R root:root "$release_directory"
 chmod 0755 "$release_directory/aowugong" "$release_directory/aowugong-migrate" "$release_directory/scripts/"*.sh
-chown -R "$RUN_USER:$RUN_GROUP" "$APP_ROOT/shared"
+# 博客快照归受限发布账号所有；应用部署不能夺走它的写权限。
+find "$APP_ROOT/shared" -path "$APP_ROOT/shared/storage/blog" -prune -o \
+  -exec chown -h "$RUN_USER:$RUN_GROUP" {} +
 
 # 2.1 同步可选 Vaultwarden 备份和证书辅助脚本，并确保应用用户可读取 root 生成的归档。
 if [ -f /etc/systemd/system/vaultwarden-backup.service ] && [ -f "$release_directory/scripts/backup-vaultwarden.sh" ]; then
