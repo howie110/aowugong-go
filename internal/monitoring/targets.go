@@ -11,7 +11,7 @@ import (
 
 const (
 	defaultHomeURL        = "https://aowugong.top/"
-	defaultBlogURL        = "https://blog.aowugong.top/"
+	defaultBlogURL        = "https://aowugong.top/blog"
 	defaultNextfluxURL    = "https://nextflux.aowugong.top/"
 	defaultVaultwardenURL = "https://vault.aowugong.top/"
 )

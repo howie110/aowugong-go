@@ -10,8 +10,6 @@ MINIFLUX_HOST="${MINIFLUX_HOST:-miniflux.aowugong.top}"
 NEXTFLUX_HOST="${NEXTFLUX_HOST:-nextflux.aowugong.top}"
 PICTURE_HOST="${PICTURE_HOST:-pic.aowugong.top}"
 APP_DIR="${APP_DIR:-/opt/vaultwarden}"
-BLOG_ROOT="${BLOG_ROOT:-/opt/aowugong-blog}"
-BLOG_DEPLOY_USER="${BLOG_DEPLOY_USER:-blog-deploy}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/aowugong-go/shared/storage/backup/vaultwarden}"
 POSTGRES_BIN="${POSTGRES_BIN:-/usr/pgsql-15/bin}"
 
@@ -76,17 +74,10 @@ ensure_postgres_database() {
 # 副作用：写 /opt/vaultwarden 下的运行文件。
 write_runtime_files() {
     local password="$1"
-    local blog_group
 
-    # 1. 创建持久化数据、博客静态目录和备份目录。
+    # 1. 创建持久化数据和备份目录。
     install -d -m 0750 "${APP_DIR}" "${APP_DIR}/data" "${APP_DIR}/caddy-data" "${APP_DIR}/caddy-config"
     install -d -m 0755 "${APP_DIR}/caddy"
-    if ! id -u "${BLOG_DEPLOY_USER}" >/dev/null 2>&1; then
-        useradd --system --user-group --home-dir "${BLOG_ROOT}" --shell /bin/bash "${BLOG_DEPLOY_USER}"
-    fi
-    passwd --lock "${BLOG_DEPLOY_USER}" >/dev/null 2>&1 || true
-    blog_group="$(id -gn "${BLOG_DEPLOY_USER}")"
-    install -d -m 0755 -o "${BLOG_DEPLOY_USER}" -g "${blog_group}" "${BLOG_ROOT}" "${BLOG_ROOT}/releases"
     install -d -m 0700 "${BACKUP_DIR}"
 
     # 2. 保存只供 root 读取的数据库地址和公开访问地址。
@@ -133,7 +124,6 @@ services:
       - ${APP_DIR}/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ${APP_DIR}/caddy-data:/data
       - ${APP_DIR}/caddy-config:/config
-      - ${BLOG_ROOT}:/srv/aowugong-blog:ro
     logging:
       driver: json-file
       options:
@@ -154,36 +144,27 @@ ${AOWUGONG_HOST} {
         X-Content-Type-Options "nosniff"
         Referrer-Policy "same-origin"
     }
-    @legacy_blog_asset path /blog/rss.xml /feeds/rss-style.xsl
-    handle @legacy_blog_asset {
-        root * /srv/aowugong-blog/current
-        file_server
-    }
     handle {
         reverse_proxy 127.0.0.1:12345
     }
 }
 
 www.${AOWUGONG_HOST} {
-    @legacy_blog_asset path /blog/rss.xml /feeds/rss-style.xsl
-    handle @legacy_blog_asset {
-        root * /srv/aowugong-blog/current
-        file_server
-    }
     handle {
         redir https://${AOWUGONG_HOST}{uri} 308
     }
 }
 
 ${BLOG_HOST} {
-    encode zstd gzip
-    header {
-        Strict-Transport-Security "max-age=31536000"
-        X-Content-Type-Options "nosniff"
-        Referrer-Policy "same-origin"
-    }
-    root * /srv/aowugong-blog/current
-    file_server
+    @status path /posts/blog-2000-01-05 /posts/blog-2000-01-05/
+    redir @status https://${AOWUGONG_HOST}/blog/status 308
+    @feed path /blog/rss.xml /rss.xml
+    redir @feed https://${AOWUGONG_HOST}/blog/rss.xml 308
+    @sitemap path /sitemap-index.xml /sitemap-0.xml /sitemap.xml
+    redir @sitemap https://${AOWUGONG_HOST}/blog/sitemap.xml 308
+    @content path /posts/* /tags /tags/*
+    redir @content https://${AOWUGONG_HOST}/blog{uri} 308
+    redir https://${AOWUGONG_HOST}/blog 308
 }
 
 ${PICTURE_HOST} {

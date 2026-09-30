@@ -35,7 +35,7 @@ func TestBuildTargetsIncludesDefaultsAndDedupesExtras(t *testing.T) {
 	if target := byCode["miniflux"]; target.URL != "https://miniflux.aowugong.top/" || target.ProbeURL != "http://127.0.0.1:5000/healthcheck" {
 		t.Errorf("miniflux target = %#v", target)
 	}
-	if target := byCode["aowugong-blog"]; target.URL != "https://blog.aowugong.top/" {
+	if target := byCode["aowugong-blog"]; target.URL != "https://aowugong.top/blog" {
 		t.Errorf("blog target was overridden: %#v", target)
 	}
 }
@@ -44,7 +44,7 @@ func TestBuildTargetsUsesCurrentPublicServices(t *testing.T) {
 	targets := BuildTargets(config.Clients{})
 	want := map[string]string{
 		"aowugong-home": "https://aowugong.top/",
-		"aowugong-blog": "https://blog.aowugong.top/",
+		"aowugong-blog": "https://aowugong.top/blog",
 		"nextflux":      "https://nextflux.aowugong.top/",
 		"vaultwarden":   "https://vault.aowugong.top/",
 	}
