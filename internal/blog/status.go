@@ -77,7 +77,32 @@ func (s *StatusService) save(ctx context.Context, actorID int64, input StatusInp
 	if (input.Body == "" && len(input.Images) == 0) || utf8.RuneCountInString(input.Body) > 30000 {
 		return Status{}, fmt.Errorf("%w: 正文或图片至少填写一项，正文最多三万字", ErrInvalidInput)
 	}
-	if err := validateImages(input.Images, legacy); err != nil {
+	var existing *Status
+	imagesToValidate := input.Images
+	if !input.Create {
+		old, err := s.repository.Get(ctx, input.ID)
+		if err != nil {
+			return Status{}, err
+		}
+		existing = &old
+		imagesToValidate = []Image{}
+		for _, image := range input.Images {
+			known := false
+			for _, prior := range old.Images {
+				if image == prior {
+					known = true
+					break
+				}
+			}
+			if !known {
+				imagesToValidate = append(imagesToValidate, image)
+			}
+		}
+	}
+	if len(input.Images) > 9 {
+		return Status{}, fmt.Errorf("%w: 最多九张图片", ErrInvalidInput)
+	}
+	if err := validateImages(imagesToValidate, legacy); err != nil {
 		return Status{}, err
 	}
 	if input.Images == nil {
@@ -86,10 +111,7 @@ func (s *StatusService) save(ctx context.Context, actorID int64, input StatusInp
 	now := time.Now().UTC()
 	record := Status{ID: input.ID, AuthorID: actorID, Body: input.Body, Images: input.Images, Published: input.Published, PublishedAt: input.PublishedAt, CreatedAt: now, UpdatedAt: now}
 	if !input.Create {
-		old, err := s.repository.Get(ctx, input.ID)
-		if err != nil {
-			return Status{}, err
-		}
+		old := *existing
 		record.AuthorID = old.AuthorID
 		record.CreatedAt = old.CreatedAt
 		if record.PublishedAt == nil {

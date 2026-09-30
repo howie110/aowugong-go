@@ -321,7 +321,24 @@ func newPictureHandler(cfg config.Config) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return handler, nil
+	if cfg.BlogMedia.AccessKeyID == "" {
+		return handler, nil
+	}
+	blogStore, err := pictureproxy.NewOSSStore(cfg.BlogMedia.Endpoint, cfg.BlogMedia.Bucket,
+		cfg.BlogMedia.AccessKeyID, cfg.BlogMedia.AccessKeySecret, &http.Client{Timeout: 30 * time.Second})
+	if err != nil {
+		return nil, err
+	}
+	blogHandler, err := pictureproxy.NewHandler(pictureproxy.WithStore(blogStore), pictureproxy.WithBlogStatusPrefix(),
+		pictureproxy.WithRateLimit(cfg.PictureProxy.RequestsPerWindow, cfg.PictureProxy.Window),
+		pictureproxy.WithMaxObjectBytes(10<<20))
+	if err != nil {
+		return nil, err
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/blog/status/", blogHandler)
+	mux.Handle("/", handler)
+	return mux, nil
 }
 
 // newTaskServices 构造自动调度、页面手动执行和 CLI 补跑共用的业务服务。

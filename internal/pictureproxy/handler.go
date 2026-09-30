@@ -40,6 +40,7 @@ type Store interface {
 
 type handlerOptions struct {
 	store             Store
+	prefix            string
 	requestsPerWindow int
 	window            time.Duration
 	maxObjectBytes    int64
@@ -52,6 +53,11 @@ type Option func(*handlerOptions)
 // WithStore 设置对象存储实现。
 func WithStore(store Store) Option {
 	return func(options *handlerOptions) { options.store = store }
+}
+
+// WithBlogStatusPrefix 将此处理器限定为博客状态图片。
+func WithBlogStatusPrefix() Option {
+	return func(options *handlerOptions) { options.prefix = "blog/status/" }
 }
 
 // WithRateLimit 设置单客户端固定窗口请求限制。
@@ -75,6 +81,7 @@ func WithMaxConcurrent(maxConcurrent int) Option {
 // Handler 是私有 OSS 图片 HTTP 处理器。
 type Handler struct {
 	store          Store
+	prefix         string
 	limiter        *rateLimiter
 	maxObjectBytes int64
 	semaphore      chan struct{}
@@ -83,6 +90,7 @@ type Handler struct {
 // NewHandler 创建图片代理并校验所有限制参数。
 func NewHandler(options ...Option) (*Handler, error) {
 	settings := handlerOptions{
+		prefix:            "pic/",
 		requestsPerWindow: 600,
 		window:            10 * time.Minute,
 		maxObjectBytes:    20 << 20,
@@ -107,6 +115,7 @@ func NewHandler(options ...Option) (*Handler, error) {
 	}
 	return &Handler{
 		store:          settings.store,
+		prefix:         settings.prefix,
 		limiter:        newRateLimiter(settings.requestsPerWindow, settings.window),
 		maxObjectBytes: settings.maxObjectBytes,
 		semaphore:      make(chan struct{}, settings.maxConcurrent),
@@ -123,7 +132,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	}
 
 	// 2. 将 URL 限制到图片前缀，拒绝路径穿越和未知对象类型。
-	key, ok := objectKey(request.URL.Path)
+	key, ok := objectKeyWithPrefix(request.URL.Path, h.prefix)
 	if !ok {
 		writeError(w, http.StatusNotFound, "image not found")
 		return
@@ -230,11 +239,15 @@ func (h *Handler) serveUnknownLength(w http.ResponseWriter, body io.Reader, meta
 
 // objectKey 校验并返回允许代理的对象键。
 func objectKey(requestPath string) (string, bool) {
+	return objectKeyWithPrefix(requestPath, "pic/")
+}
+
+func objectKeyWithPrefix(requestPath, prefix string) (string, bool) {
 	key := strings.TrimPrefix(requestPath, "/")
 	if key == "" || strings.ContainsRune(key, '\x00') || strings.ContainsRune(key, '\\') {
 		return "", false
 	}
-	if !strings.HasPrefix(key, "pic/") {
+	if !strings.HasPrefix(key, prefix) {
 		return "", false
 	}
 	for _, part := range strings.Split(key, "/") {

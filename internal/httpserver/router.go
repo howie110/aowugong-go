@@ -48,6 +48,7 @@ type Dependencies struct {
 }
 
 type router struct {
+	blog        http.Handler
 	api         http.Handler
 	spa         spaHandler
 	picture     http.Handler
@@ -117,9 +118,14 @@ func NewRouter(deps Dependencies) http.Handler {
 		registerVPNRoutes(api, deps.Auth, deps.RBAC, deps.VPN)
 	}
 
+	var blogHandler http.Handler
+	if deps.BlogArticles != nil {
+		blogHandler = blogPages{articles: deps.BlogArticles, staticDir: deps.StaticDir}
+	}
 	// 3. 组装 API 与 SPA 静态文件处理器。
 	return router{
-		api: api, spa: newSPAHandler(deps.StaticDir), picture: deps.Picture,
+		blog: blogHandler,
+		api:  api, spa: newSPAHandler(deps.StaticDir), picture: deps.Picture,
 		pictureHost: normalizeHost(deps.PictureHost),
 	}
 }
@@ -141,6 +147,10 @@ func (r router) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 
+	if r.blog != nil && (request.URL.Path == "/blog" || strings.HasPrefix(request.URL.Path, "/blog/")) {
+		r.blog.ServeHTTP(w, request)
+		return
+	}
 	// 3. 将其他请求交给静态文件与 SPA 处理器。
 	r.spa.ServeHTTP(w, request)
 }

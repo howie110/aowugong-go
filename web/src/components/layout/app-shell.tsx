@@ -1,3 +1,4 @@
+import { requestWorkbenchNavigation } from "@/lib/navigation-guard";
 import { Activity, LogOut, ShieldCheck } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
@@ -62,6 +63,7 @@ export function AppShell({ user, activePage, onNavigate, children }: AppShellPro
   }
 
   function handleLogout() {
+    if (!requestWorkbenchNavigation()) return;
     clearToken();
     window.location.href = "/login";
   }

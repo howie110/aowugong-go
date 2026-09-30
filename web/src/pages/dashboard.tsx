@@ -1,3 +1,4 @@
+import { requestWorkbenchNavigation } from "@/lib/navigation-guard";
 import { Suspense, lazy, useEffect, useState } from "react";
 
 import { AppShell } from "@/components/layout/app-shell";
@@ -23,6 +24,7 @@ import {
 } from "./dashboard/finance-content";
 import { PageHeader } from "./dashboard/page-header";
 
+const BlogStatusPage = lazy(() => import("@/pages/blog-status").then((module) => ({ default: module.BlogStatusPage })));
 const PositionUploadPage = lazy(() => import("@/pages/finance/position-upload").then((module) => ({ default: module.PositionUploadPage })));
 const StockAnalysisPage = lazy(() => import("@/pages/finance/stock-analysis").then((module) => ({ default: module.StockAnalysisPage })));
 const ArticleFetchPage = lazy(() => import("@/pages/finance/article-fetch").then((module) => ({ default: module.ArticleFetchPage })));
@@ -38,6 +40,7 @@ const VPNDistributionPage = lazy(() => import("@/pages/vpn").then((module) => ({
 const VPNResourcesPage = lazy(() => import("@/pages/vpn").then((module) => ({ default: module.VPNResourcesPage })));
 
 const selfManagedPages = new Set<FinancePageKey>([
+ "blogStatus",
   "positions",
   "stockAnalysis",
   "articleFetch",
@@ -54,6 +57,7 @@ const selfManagedPages = new Set<FinancePageKey>([
 ]);
 const pageOrder: FinancePageKey[] = [
   "overview",
+ "blogStatus",
   "work",
   "articleAnalysis",
   "articleFetch",
@@ -159,18 +163,24 @@ export function DashboardPage({ initialPage }: DashboardPageProps) {
 
   useEffect(() => {
     function handlePopState() {
-      setActivePage(getFinancePageFromPath(window.location.pathname));
+      const nextPage = getFinancePageFromPath(window.location.pathname);
+      if (nextPage !== activePage && !requestWorkbenchNavigation()) {
+        window.history.pushState({}, "", getFinancePagePath(activePage));
+        return;
+      }
+      setActivePage(nextPage);
     }
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  }, [activePage]);
 
   useEffect(() => {
     setIsStockAnalysisMasked(true);
   }, [activePage]);
 
   function handleNavigate(pageKey: FinancePageKey) {
+    if (pageKey === activePage || !requestWorkbenchNavigation()) return;
     const path = getFinancePagePath(pageKey);
     window.history.pushState({}, "", path);
     setActivePage(pageKey);
@@ -216,6 +226,7 @@ function FinancePageBody({
   pageData: FinancePageData | null;
   isStockAnalysisMasked: boolean;
 }) {
+  if (pageKey === "blogStatus") { return <BlogStatusPage />; }
   if (pageKey === "overview") {
     return pageData ? <OverviewContent pageData={pageData} /> : <LoadingCard />;
   }

@@ -7,9 +7,17 @@ import (
 	"errors"
 )
 
-type Repository struct{ db *sql.DB }
+type sqlQueries interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+type Repository struct {
+	db      *sql.DB
+	queries sqlQueries
+}
 
-func NewRepository(db *sql.DB) *Repository { return &Repository{db: db} }
+func NewRepository(db *sql.DB) *Repository { return &Repository{db: db, queries: db} }
 
 const statusColumns = "id, author_id, body, images, published, published_at, created_at, updated_at"
 
@@ -33,7 +41,7 @@ func scanStatus(row interface{ Scan(...any) error }) (Status, error) {
 	return result, nil
 }
 func (r *Repository) Get(ctx context.Context, id string) (Status, error) {
-	return scanStatus(r.db.QueryRowContext(ctx, "SELECT "+statusColumns+" FROM blog_statuses WHERE id = ?", id))
+	return scanStatus(r.queries.QueryRowContext(ctx, "SELECT "+statusColumns+" FROM blog_statuses WHERE id = ?", id))
 }
 func (r *Repository) List(ctx context.Context, publishedOnly bool, limit, offset int) ([]Status, error) {
 	query := "SELECT " + statusColumns + " FROM blog_statuses"
@@ -41,7 +49,7 @@ func (r *Repository) List(ctx context.Context, publishedOnly bool, limit, offset
 		query += " WHERE published = TRUE"
 	}
 	query += " ORDER BY COALESCE(published_at, created_at) DESC, id DESC LIMIT ? OFFSET ?"
-	rows, err := r.db.QueryContext(ctx, query, limit, offset)
+	rows, err := r.queries.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +69,7 @@ func (r *Repository) Insert(ctx context.Context, record Status) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	res, err := r.db.ExecContext(ctx, `INSERT INTO blog_statuses (`+statusColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`, record.ID, record.AuthorID, record.Body, string(images), record.Published, record.PublishedAt, record.CreatedAt, record.UpdatedAt)
+	res, err := r.queries.ExecContext(ctx, `INSERT INTO blog_statuses (`+statusColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`, record.ID, record.AuthorID, record.Body, string(images), record.Published, record.PublishedAt, record.CreatedAt, record.UpdatedAt)
 	if err != nil {
 		return false, err
 	}
@@ -73,11 +81,11 @@ func (r *Repository) Update(ctx context.Context, record Status) error {
 	if err != nil {
 		return err
 	}
-	res, err := r.db.ExecContext(ctx, `UPDATE blog_statuses SET body = ?, images = ?, published = ?, published_at = ?, updated_at = ? WHERE id = ?`, record.Body, string(images), record.Published, record.PublishedAt, record.UpdatedAt, record.ID)
+	res, err := r.queries.ExecContext(ctx, `UPDATE blog_statuses SET body = ?, images = ?, published = ?, published_at = ?, updated_at = ? WHERE id = ?`, record.Body, string(images), record.Published, record.PublishedAt, record.UpdatedAt, record.ID)
 	return requireAffected(res, err)
 }
 func (r *Repository) Delete(ctx context.Context, id string) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM blog_statuses WHERE id = ?`, id)
+	res, err := r.queries.ExecContext(ctx, `DELETE FROM blog_statuses WHERE id = ?`, id)
 	return requireAffected(res, err)
 }
 func requireAffected(res sql.Result, err error) error {

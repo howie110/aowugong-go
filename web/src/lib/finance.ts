@@ -3,6 +3,7 @@ import type { WeReadDashboardData } from "@/lib/weread";
 
 export type FinancePageKey =
   | "overview"
+  | "blogStatus"
   | "weread"
   | "positions"
   | "stockAnalysis"
@@ -61,6 +62,7 @@ export type FinancePageData = {
 
 export const pagePermissionMap: Record<FinancePageKey, string> = {
   overview: "page:finance:overview",
+  blogStatus: "blog.status.manage",
   weread: "page:weread",
   positions: "page:finance:positions",
   stockAnalysis: "page:finance:stock_analysis",
@@ -82,6 +84,7 @@ export const pagePermissionMap: Record<FinancePageKey, string> = {
 };
 
 export const pageMetaMap: Record<FinancePageKey, { title: string; description: string }> = {
+  blogStatus: { title: "状态", description: "发布文字与图片，记录生活片刻。" },
   overview: {
     title: "控制台",
     description: "集中查看投资研究、内容服务、定时任务和系统运维状态。",
@@ -165,6 +168,7 @@ export function getFinancePageMeta(pageKey: FinancePageKey) {
 }
 
 const pageEndpointMap: Record<FinancePageKey, string> = {
+ blogStatus: "/api/v1/blog/admin/statuses",
   overview: "/api/v1/finance/overview/",
   weread: "/api/v1/weread/dashboard",
   positions: "/api/v1/finance/positions/summary",
@@ -187,6 +191,7 @@ const pageEndpointMap: Record<FinancePageKey, string> = {
 };
 
 export function getFinancePagePath(pageKey: FinancePageKey) {
+ if (pageKey === "blogStatus") return "/work/content/status";
   if (pageKey === "overview") {
     return "/work";
   }
@@ -231,6 +236,7 @@ export function getFinancePagePath(pageKey: FinancePageKey) {
 
 export function getFinancePageFromPath(pathname: string): FinancePageKey {
   const path = pathname.replace(/^\/+|\/+$/g, "");
+ if (path === "work/content/status") return "blogStatus";
   if (path === "work") {
     return "overview";
   }

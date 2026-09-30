@@ -4,6 +4,7 @@ package blog
 import (
 	"errors"
 	"fmt"
+	"golang.org/x/sys/unix"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -34,11 +35,29 @@ type ArticleStore struct{ directory string }
 func NewArticleStore(directory string) *ArticleStore { return &ArticleStore{directory: directory} }
 
 // root 固定本次读取的快照；current 可以是发布器维护的符号链接。
-func (s *ArticleStore) root() (string, error) {
+func (s *ArticleStore) root() (string, func(), error) {
+	release := func() {}
 	if s.directory == "" {
-		return "", fmt.Errorf("未配置博客文章目录")
+		return "", release, fmt.Errorf("未配置博客文章目录")
 	}
-	return filepath.EvalSymlinks(s.directory)
+	info, err := os.Lstat(s.directory)
+	if err != nil {
+		return "", release, err
+	}
+	// 发布入口是符号链接；共享锁保护固定快照直到读取完成。
+	if info.Mode()&os.ModeSymlink != 0 {
+		lock, err := os.Open(filepath.Join(filepath.Dir(s.directory), ".publish.lock"))
+		if err != nil {
+			return "", release, err
+		}
+		if err := unix.Flock(int(lock.Fd()), unix.LOCK_SH); err != nil {
+			lock.Close()
+			return "", release, err
+		}
+		release = func() { _ = unix.Flock(int(lock.Fd()), unix.LOCK_UN); _ = lock.Close() }
+	}
+	root, err := filepath.EvalSymlinks(s.directory)
+	return root, release, err
 }
 func safeFile(root, relative string) (string, error) {
 	if relative == "" || strings.Contains(relative, `\`) || filepath.IsAbs(relative) {
@@ -68,7 +87,8 @@ func (s *ArticleStore) Get(slug string) (Article, error) {
 	if slug == strings.TrimSuffix(LegacyStatusFile, ".md") {
 		return Article{}, ErrNotFound
 	}
-	root, err := s.root()
+	root, release, err := s.root()
+	defer release()
 	if err != nil {
 		return Article{}, err
 	}
@@ -98,7 +118,8 @@ func readArticle(root, relative string) (Article, error) {
 	return article, nil
 }
 func (s *ArticleStore) List() ([]Article, error) {
-	root, err := s.root()
+	root, release, err := s.root()
+	defer release()
 	if err != nil {
 		return nil, err
 	}
@@ -153,16 +174,21 @@ func (s *ArticleStore) Validate() error {
 }
 
 // Asset 只允许文章目录内的图片附件，阻止下载原始 Markdown 和隐藏配置。
-func (s *ArticleStore) Asset(relative string) (string, error) {
+func (s *ArticleStore) Asset(relative string) (*os.File, error) {
 	ext := strings.ToLower(filepath.Ext(relative))
 	switch ext {
 	case ".jpg", ".jpeg", ".png", ".webp", ".gif":
 	default:
-		return "", ErrNotFound
+		return nil, ErrNotFound
 	}
-	root, err := s.root()
+	root, release, err := s.root()
+	defer release()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return safeFile(root, relative)
+	filename, err := safeFile(root, relative)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(filename)
 }

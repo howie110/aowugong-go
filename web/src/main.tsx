@@ -9,6 +9,7 @@ import { isAuthenticated } from "@/lib/auth";
 import { getFinancePageFromPath } from "@/lib/finance";
 import { DashboardPage } from "@/pages/dashboard";
 import { LoginPage } from "@/pages/login";
+import { BlogPage } from "@/pages/blog";
 import { PublicHomePage } from "@/pages/public-home";
 
 function App() {
@@ -27,6 +28,8 @@ function App() {
   if (path === "/") {
     return <PublicHomePage />;
   }
+
+  if (path === "/blog" || path.startsWith("/blog/")) { return <BlogPage />; }
 
   if (!isAuthenticated()) {
     return <LoginPage onLoggedIn={enterWorkbench} />;

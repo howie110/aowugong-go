@@ -450,6 +450,16 @@ func Load(lookup LookupEnv) (Config, error) {
 		cfg.Clients.Email.Sender == "" || cfg.Clients.Email.Password == "") {
 		return Config{}, fmt.Errorf("启用 Vaultwarden 邮件备份时必须配置 age 公钥、收件人与 SMTP 账号")
 	}
+	mediaFields := []string{cfg.BlogMedia.Endpoint, cfg.BlogMedia.Bucket, cfg.BlogMedia.AccessKeyID, cfg.BlogMedia.AccessKeySecret}
+	mediaSet := 0
+	for _, value := range mediaFields {
+		if strings.TrimSpace(value) != "" {
+			mediaSet++
+		}
+	}
+	if mediaSet != 0 && mediaSet != len(mediaFields) {
+		return Config{}, fmt.Errorf("博客图片 OSS 配置必须完整填写")
+	}
 	if cfg.PictureProxy.Enabled {
 		if cfg.PictureProxy.Host == "" || strings.ContainsAny(cfg.PictureProxy.Host, "/?#:") {
 			return Config{}, fmt.Errorf("启用图片代理时 PICTURE_PROXY_HOST 必须是域名")

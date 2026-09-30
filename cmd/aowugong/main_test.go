@@ -45,3 +45,18 @@ func TestBlogValidationCLIUsesOnlyFiles(t *testing.T) {
 		t.Fatalf("unexpected output %q", output.String())
 	}
 }
+
+func TestBlogImportDryRunDoesNotLoadDatabase(t *testing.T) {
+	t.Setenv("AOWUGONG_ENV", "invalid-environment")
+	source := filepath.Join(t.TempDir(), "legacy.md")
+	if err := os.WriteFile(source, []byte("---\ntitle: 动态\n---\n---\n旧状态\n2026-06-09 09:10:00\n---\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := executeCommand([]string{"app", "blog", "import-status", "--file", source}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "1") {
+		t.Fatalf("output %s", output.String())
+	}
+}
