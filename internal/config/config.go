@@ -49,10 +49,14 @@ type Config struct {
 	VaultwardenBackup VaultwardenBackup
 	VPN               VPN
 	PictureProxy      PictureProxy
+	BlogMedia         BlogMedia
 	Clients           Clients
 	Finance           Finance
 	Scheduler         Scheduler
 }
+
+// BlogMedia 保存博客图片专用写入身份；空配置时禁用上传。
+type BlogMedia struct{ Endpoint, Bucket, AccessKeyID, AccessKeySecret string }
 
 // HTTP 描述 HTTP 服务配置。
 type HTTP struct {
@@ -303,6 +307,10 @@ func Load(lookup LookupEnv) (Config, error) {
 	loadString(lookup, "VPN_SOURCE_DIR", &cfg.VPN.SourceDir)
 	loadString(lookup, "VPN_PUBLIC_URL", &cfg.VPN.PublicURL)
 	loadString(lookup, "AOWUGONG_BLOG_CONTENT_DIR", &cfg.Storage.BlogContentDir)
+	loadString(lookup, "BLOG_OSS_ENDPOINT", &cfg.BlogMedia.Endpoint)
+	loadString(lookup, "BLOG_OSS_BUCKET", &cfg.BlogMedia.Bucket)
+	loadString(lookup, "BLOG_OSS_ACCESS_KEY_ID", &cfg.BlogMedia.AccessKeyID)
+	loadString(lookup, "BLOG_OSS_ACCESS_KEY_SECRET", &cfg.BlogMedia.AccessKeySecret)
 	loadString(lookup, "PICTURE_PROXY_HOST", &cfg.PictureProxy.Host)
 	loadString(lookup, "PICTURE_OSS_ENDPOINT", &cfg.PictureProxy.Endpoint)
 	loadString(lookup, "PICTURE_OSS_BUCKET", &cfg.PictureProxy.Bucket)

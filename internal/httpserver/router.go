@@ -25,6 +25,7 @@ import (
 
 // Dependencies 描述路由器启动所需的依赖。
 type Dependencies struct {
+	BlogMedia       *blog.MediaStore
 	BlogArticles    *blog.ArticleStore
 	BlogStatuses    *blog.StatusService
 	StaticDir       string

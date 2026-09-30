@@ -65,6 +65,32 @@ func registerBlogRoutes(router chi.Router, deps Dependencies) {
 	router.Route("/api/v1/blog/admin", func(admin chi.Router) {
 		admin.Use(authenticate(deps.Auth), requirePermission(deps.RBAC, rbac.PermissionBlogStatus))
 		admin.Get("/statuses", list(false))
+		admin.Post("/images", func(w http.ResponseWriter, r *http.Request) {
+			if deps.BlogMedia == nil {
+				writeError(w, 503, "media_unavailable", "尚未配置图片上传")
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, blog.MaxImageBytes+(1<<20))
+			if err := r.ParseMultipartForm(blog.MaxImageBytes); err != nil {
+				writeError(w, 400, "invalid_input", "图片过大或上传格式无效")
+				return
+			}
+			if r.MultipartForm != nil {
+				defer r.MultipartForm.RemoveAll()
+			}
+			file, header, err := r.FormFile("image")
+			if err != nil {
+				writeError(w, 400, "invalid_input", "缺少图片")
+				return
+			}
+			defer file.Close()
+			result, err := deps.BlogMedia.Upload(r.Context(), file, header.Header.Get("Content-Type"))
+			if err != nil {
+				blogError(w, err)
+				return
+			}
+			writeJSON(w, 201, result)
+		})
 		save := func(create bool) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
 				var input blog.StatusInput

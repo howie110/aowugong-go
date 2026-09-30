@@ -273,12 +273,19 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 	cronScheduler := scheduler.NewCronScheduler(jobRegistry, location)
 
 	// 9. 把同一业务服务和任务注册表交给 HTTP 路由。
+	var blogMedia *blog.MediaStore
+	if cfg.BlogMedia.AccessKeyID != "" {
+		blogMedia, err = blog.NewMediaStore(cfg.BlogMedia.Endpoint, cfg.BlogMedia.Bucket, cfg.BlogMedia.AccessKeyID, cfg.BlogMedia.AccessKeySecret)
+		if err != nil {
+			return nil, err
+		}
+	}
 	var blogArticles *blog.ArticleStore
 	if cfg.Storage.BlogContentDir != "" {
 		blogArticles = blog.NewArticleStore(cfg.Storage.BlogContentDir)
 	}
 	handler := httpserver.NewRouter(httpserver.Dependencies{
-		BlogArticles: blogArticles, BlogStatuses: blog.NewStatusService(blog.NewRepository(db)),
+		BlogMedia: blogMedia, BlogArticles: blogArticles, BlogStatuses: blog.NewStatusService(blog.NewRepository(db)),
 		StaticDir: cfg.HTTP.StaticDir, Auth: authService, RBAC: rbacService,
 		Subscription: tasks.subscriptions, Mahjong: mahjongService, Work: workService,
 		WeRead: wereadService, Monitoring: tasks.monitoring, Finance: financeService,
