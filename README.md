@@ -33,6 +33,7 @@
 | aowugong-blog | /opt/aowugong-blog/current，静态文件 | Astro 博客 | 独立项目；本仓库只记录域名契约 |
 | aowugong-movie | /opt/aowugong-movie/current，静态文件 | Movie-Images 页面 | 独立项目；本仓库只记录域名契约 |
 | nextflux | /opt/nextflux/current/dist，nextflux.service | Nextflux 静态前端 | 独立项目；本仓库只记录域名契约 |
+| aowugong-moments | /opt/aowugong-moments/current，Docker 容器 | 个人朋友圈、OSS 图片与视频 | 独立 fork；本仓库维护跨项目部署事实 |
 | Vaultwarden | /opt/vaultwarden，Docker 容器 | 密码库 | 服务器基础服务，不由本仓库业务代码提供 |
 | Caddy | /opt/vaultwarden/caddy，Docker 容器 | 统一 TLS、域名入口和反向代理 | 服务器基础服务 |
 | Miniflux | miniflux.service | RSS 阅读和公众号内容消费 | 独立服务；本仓库提供同机 WeRead RSS |
@@ -53,7 +54,8 @@
 | https://vault.aowugong.top | 127.0.0.1:8222 | Vaultwarden |
 | https://miniflux.aowugong.top | 127.0.0.1:5000 | Miniflux |
 | https://nextflux.aowugong.top | 127.0.0.1:5001 | Nextflux 静态前端 |
-| https://pic.aowugong.top | aowugong-go：127.0.0.1:12345 | 图片上传后的自定义访问域名和 Go 图片代理 |
+| https://pic.aowugong.top | `/moments/*` → 127.0.0.1:5002，其余 → 127.0.0.1:12345 | Moments 媒体与原有 Go 图片代理 |
+| https://moments.aowugong.top | aowugong-moments：127.0.0.1:5002 | 个人朋友圈 |
 | https://movie.aowugong.top | /srv/aowugong-movie/current | Movie-Images 静态站点 |
 
 根域名的特殊路径：
@@ -74,6 +76,7 @@
 | 8222 | 127.0.0.1 | Vaultwarden | 只由 Caddy 访问 |
 | 5000 | 127.0.0.1 | Miniflux | 只由 Caddy 和同机服务访问 |
 | 5001 | 127.0.0.1 | Nextflux | 只由 Caddy 访问 |
+| 5002 | 127.0.0.1 | Moments Docker 端口映射 | Caddy 转发站点和媒体请求 |
 | 5432 | 127.0.0.1 | PostgreSQL | 不对公网开放 |
 | 6152、6153 | 本机回环 | Xray HTTP/SOCKS | 服务器本机代理端口，不作为 Web 服务入口 |
 
@@ -201,6 +204,169 @@ aowugong-go 是 Go 模块化单体，统一提供：
 - VPN 局部标识统一使用 subscriptionID；历史路由参数 deviceID、Token 派生中的 device: 字节前缀及旧数据契约为兼容性保留，不能机械替换。
 - 结构调整优先验证行为。API 测试检查请求、参数、响应与失败分支，VPN 页面测试检查渲染和复制回调；尚存的其他源码匹配测试不代表完整交互验证。
 
+### 3.6 博客合并设计（2026-09-30，用户已确认开工，尚未实施）
+
+#### 已确认目标与当前差异
+
+- 博客统一进入 `https://aowugong.top/blog`，复用现有 Go、React、PostgreSQL、登录和权限；退出 Astro 构建链和独立 Moments 服务，保持单一应用。
+- 文章继续由笔记项目的博客 Markdown 提供，推送后自动更新网站；状态改由数据库保存，在个人工作台「内容服务 → 状态」通过手机发布。
+- 设计要求是单向、直接、可理解：每类内容只有一个权威来源，不做双写、双向同步、多框架并存或切换到另一套内容源的兜底。
+- 本地已核实：博客源码实际位于 `/Users/howie/project/aowugong-astro`；笔记位于 `/Users/howie/project/aowugong-note/【7】博客`。现有笔记工作流将该目录同步提交到 Astro 仓库，再由 Astro 工作流构建部署。
+- 当前动态是 `blog-2000-01-05.md`，正文由分隔线和时间标记组织。第 1、5、10 节仍记录迁移前部署基线，不能据此节宣称新博客已上线或 Moments 已清除。
+
+#### 页面与模块
+
+| 入口 | 用途 | 数据来源与权限 |
+|---|---|---|
+| `/blog` | 博客文章列表 | 博客目录内的 Markdown，公开读取 |
+| `/blog/posts/:slug` | 文章及关于、咖啡等原有文字页面 | 同一 Markdown 目录，公开读取 |
+| `/blog/status` | 按发布时间倒序展示状态 | PostgreSQL，公开读取已发布状态 |
+| `/work/content/status` | 手机发布、编辑、删除状态及管理草稿 | 复用工作台登录，仅获授权的管理者可操作 |
+| `/blog/rss.xml` | 博客文章订阅 | 与文章页面共用解析结果 |
+
+- 前端使用现有 `web` React 工程，博客有独立公开布局；公开博客路由在登录检查前分流，工作台继续保持鉴权。保留文章、标签、目录、图片查看、代码复制和明暗主题这些现有阅读能力。
+- 后端新增 `internal/blog`，Markdown 读取与解析、状态业务与数据库访问按职责分文件；HTTP handler 进入现有 `internal/httpserver`，前端 API 统一放在 `web/src/lib`。沿用 handler → service → repository/client，不引入通用 CMS 或插件系统。
+- Markdown 由 Go 端一套解析器处理，读取既有 `title/date/tags/image` 元信息，正文输出经过安全处理的 HTML，目录从同一次解析提取。React 只展示，不再维护第二套 Markdown 解析。
+- 迁移核对既有换行、链接、图片、表格和代码块表现；不执行 Markdown 中的脚本。保留文章 slug、RSS、Sitemap 以及每篇文章的标题、描述和 canonical 元信息，不能让所有文章都返回工作台的默认标题。
+
+#### 文章自动更新
+
+固定链路：笔记仓库 `main` 的博客变更 → 该仓库 GitHub Actions → SSH 上传博客文件 → 服务器 Go CLI 校验 → 原子切换文章目录 → 网站读取新内容。
+
+- 本轮必须直接修改笔记项目 `/Users/howie/project/aowugong-note/.github/workflows/sync-blog.yml`，与 Go 接收和校验能力配套交付，不能只改 Go 仓库或仅记录后续事项。触发范围仍限 `【7】博客/**` 和工作流自身。这里的自动更新指推送到 `main` 后更新，本地仅保存未推送不会触发。
+- 停止向 Astro 仓库提交文章，停止其独立部署工作流；不经过 Go 仓库再提交文章，不重新构建 React 或 Go，不重启业务服务，不增加轮询任务或公网同步接口。
+- 工作流只打包博客目录中的公开 Markdown 及其实际需要的目录内附件；不传输私人笔记库、Git 元数据、凭据或博客目录外文件。已有 OSS 图片 URL 保持不变。拒绝符号链接、路径越界和博客目录外的附件引用，并报告具体文件。
+- 服务器内容位于 `/opt/aowugong-go/shared/storage/blog`，应用通过明确的 `AOWUGONG_BLOG_CONTENT_DIR` 配置读取其中的 `current`。上传先进入独立暂存目录，再用同一 Go 二进制的博客校验命令解析全部文章；校验成功才原子替换 `current` 指向。
+- 应用每次请求解析实际需要的文件，不增加独立缓存服务、文件监听或刷新接口。一个请求固定使用同一个内容目录版本；文章数量增长后才按实测需要优化。
+- 同一笔记发布工作流串行执行；激活时拒绝旧版本覆盖已经上线的新版本。只保留当前和上一份有效内容目录，用于明确的手动回退，不无限累积快照。
+- 文件删除在成功发布后反映为文章下线，不复制到其他来源继续展示。同步包为空、解析失败或上传失败时工作流报错且不切换目录；网站仍是上一次成功发布的版本，这属于未发布，不伪装成成功。
+- SSH 凭据和固定服务器主机指纹在笔记仓库的 Actions Secrets 配置，只授予博客内容上传和校验所需权限。现有 Secrets 的名称、可用性和服务器权限需在实施时核实，不读取其他项目或全局通知配置；流程不发送外部通知。
+
+#### 状态存储与发布
+
+- 状态存 PostgreSQL 的 `blog_statuses`，保存主键、作者、纯文本正文、有序图片引用、草稿/已发布标记、发布时间、创建和修改时间。图片引用使用 JSONB 数组，不为固定的少量附图引入通用附件系统。
+- 状态不是一篇 Markdown 文章。新状态只在手机友好的工作台页面编辑；正文按纯文本保留换行并安全展示，链接可点击，图片支持九宫格及大图查看。
+- 第一版支持纯文字或文字配图、最多九张图片、上传进度和失败提示、草稿保存、发布、编辑、删除；视频、评论、点赞不纳入本轮。只有正文或图片至少一项非空才能发布。
+- 图片通过现有 Go 应用的鉴权上传接口写入现有 OSS 的独立 `blog/status/` 前缀，复用既有图片访问域名和代理，不复用 Moments 服务。仅增加该前缀所需的写入权限，保留原有 `pic/` 读取边界。
+- 图片上传全部成功后才提交状态；失败时保留编辑内容，明确失败项，由用户重试。数据库失败不得显示发布成功；防止连续点击导致重复发布。公开 API 不返回草稿，写接口复用现有 RBAC。
+- 旧博客动态 Markdown 一次性导入状态表，保留正文、图片、原时间和顺序。导入前生成核对结果，对不能明确拆分或识别时间的条目报错，不猜时间或静默丢弃；迁移标识防止重复导入。导入验收后该文件不再进入文章同步，源笔记作为历史记录保留。
+- 独立 Moments 按用户要求退役清理，不建立双向同步或常驻兼容适配层。Moments 数据不作为新状态来源；清理前核实其媒体是否被其他内容引用，被引用对象先迁移并更新引用。
+
+#### 切换与清理边界
+
+- 先在隔离环境完成新博客、笔记自动更新、历史动态导入及手机发布验收，再切换公网入口。旧 `blog.aowugong.top` 的文章路径永久跳转到对应 `/blog/posts/:slug`；旧动态路径明确跳转到 `/blog/status`，RSS 保持兼容，未知文章返回 404，不统一跳到首页。
+- 应用升级及数据库迁移沿用现有发布和备份方式；文章内容目录独立于应用 release，后续笔记发布不影响应用版本。应用回滚不自动撤销已发布状态、数据库迁移或笔记内容。
+- Moments 清理范围：专用运行及停止容器、镜像、服务器发布和数据目录、SQLite 备份及 systemd 备份任务、专用域名 DNS 和 Caddy 路由、媒体 `/moments/*` 路由、OSS `moments/` 对象、专用 CORS 来源、专用 RAM 用户/策略/密钥、项目内私有运行配置，以及本地与 GitHub 上该 Moments 项目的专用代码和部署资源。
+- 用户明确要求删除 Moments 二级域名：清除 `moments.aowugong.top` 实际存在的 DNS 解析记录和 Caddy 站点配置，不保留该域名跳转；删除后旧朋友圈域名停止服务。`pic.aowugong.top` 继续供博客及其他图片使用，只移除其 Moments 专用路径转发。
+- 删除前逐项只读核实真实目标与引用关系，并向用户说明实际影响；不按名称模糊匹配批量删除。用户已要求清除 Moments，但未知共享资源须先查清归属，不能扩大删除范围。
+- 共用 OSS Bucket、`pic/` 图片、其他 RAM 身份、Caddy 主服务及其他域名必须保留。仅移除 Moments 对应的配置条目；如入口更新需要重启 Caddy，先说明对其他站点的短暂影响。
+- 新博客上线后移除旧 Astro 发布链和服务器静态发布目录，迁移所需静态资产时保留必要许可声明。旧博客源码仓库的删除不由 Moments 清理请求自动授权。
+- 用户提供的阿里云凭据文件只在云资源核查和操作时读取，不复制内容到代码、日志、聊天、Git 或部署包；核实有效身份与实际权限，不推断管理 Key 已启用，也不擅自启用失效密钥。
+
+#### 验收与尚未核实事项
+
+- 文章解析用现有内容样本覆盖元信息、换行、图片、代码、链接、目录和危险 HTML；缺失文章、损坏文件和越界路径必须明确报错。
+- 自动更新验证新增、修改、删除、发布失败不切换及连续推送顺序；确认没有触发 Astro/Go 重建、服务重启、私人目录上传或外部通知。
+- 状态验证未登录/无权限拒绝、草稿不可公开、手机选图发布和编辑删除、上传或数据库失败、重复点击，以及历史动态导入完整性。
+- 切换验证博客文章、状态、旧链接跳转、RSS、Sitemap、图片及根站/工作台/VPN；清理后核对 Moments 专用资源消失、`moments.aowugong.top` 的 DNS 与入口配置已删除、共享资源继续正常。笔记项目须以一次真实推送验证新工作流自动更新网站。
+- 当前尚未核实线上 Moments 数据和引用、Actions Secrets 可用性、SSH 最小权限及云凭据身份；以上属于实施前现场核查项。本节记录已确认设计，不是实现或部署完成记录。
+
+### 3.7 博客合并实施计划（2026-09-30，待执行方式确认）
+
+> 执行技能：本会话逐项执行使用 `superpowers:executing-plans`；若用户选择子代理方式则使用 `superpowers:subagent-driven-development`。以下复选框只在验证结果支持时勾选。
+
+**目标：** 在 Go 主站交付可自动更新的 Markdown 博客和手机状态发布，并退役 Moments。
+
+**架构：** 文章只读文件，状态只读写 PostgreSQL，媒体使用现有 OSS；现有 React 工程提供公开页和管理页。笔记 Actions 直接发布文件到服务器，不增加中转仓库或常驻服务。
+
+**技术栈：** 现有 Go/net/http/chi、database/sql/pgx、React/TypeScript/Vite、PostgreSQL、阿里云 OSS SDK；补充 Go Markdown 解析和 HTML 安全处理库，不增加另一套 Web 框架。
+
+**设计依据：** 本 README 第 3.6 节。默认在本会话顺序实现；实际执行方式在计划审阅时确认。
+
+#### 全局约束与重点检查
+
+- 只维护本 README；保留现有未提交修改和 `LOG/`，不把它们夹带进实现提交。笔记、Astro 当前工作区干净；Moments 存在未提交源码，清理前单独核实和说明。
+- 状态最多九张图；公开 API 不返回草稿；凭据不进入前端或 Git；禁止发送第三方通知。所有网络和生产操作使用本项目声明的配置及本任务提供的凭据。
+- 关注五类失败：路径/符号链接越界；并发发布或旧版本覆盖；草稿与权限泄露；上传中断及重复提交；历史动态拆分或时区失真。分别由下列任务 1、5、2、3/4、6 验证。
+- 实施开始时依据 `using-git-worktrees` 检查隔离工作区；跨仓库修改分别核对差异，不在生产代理开发模式下试写状态。
+
+#### 任务 1：Markdown 内容模块与纯文件 CLI
+
+文件：新增 `internal/blog/articles.go`、`markdown.go`、`articles_test.go`、`markdown_test.go`、`internal/app/blog.go`；修改 `cmd/aowugong/main.go`、`internal/config/config.go`、`internal/app/run.go`、`go.mod`、`go.sum`。
+
+接口：`NewArticleStore(directory string) *ArticleStore`；`(*ArticleStore).List() ([]Article, error)`、`Get(slug string) (Article, error)`、`Validate() error`。`Article` 提供 slug/title/date/tags/html/description/toc；CLI `aowugong blog validate --dir <directory>` 不连接数据库、不启动调度器。
+
+- [ ] 先写 `TestArticleStoreReadsFrontmatterAndBody`（标题、日期、tags、HTML 和目录一致）、`TestArticleStoreRejectsTraversalAndSymlinks`、`TestMarkdownRejectsExecutableHTML`、`TestArticleStoreReportsMalformedFile`；运行 `go test ./internal/blog` 确认新接口缺失导致失败。
+- [ ] 实现同一次解析生成正文和目录，明确不把旧动态文件作为文章；新增内容目录配置，并给 CLI 添加独立参数入口，避免走通知任务注册表。补充图片与链接的目录边界校验。
+- [ ] 运行 `go test ./internal/blog ./internal/app ./internal/config`，要求全部通过；用笔记博客的临时副本验证全部既有文章，输出仅包含文件名及校验结果。
+- [ ] 检查 diff，仅提交任务 1 对应实现与测试。
+
+#### 任务 2：状态表、业务服务和鉴权 API
+
+文件：新增 `migrations/postgres/00010_blog_statuses.sql`、`internal/blog/status.go`、`repository.go`、`status_test.go`、`repository_test.go`、`internal/httpserver/blog_handlers.go`、`blog_handlers_test.go`；修改 `internal/rbac/model.go`、`internal/httpserver/router.go`、`internal/app/run.go`。
+
+接口：`NewStatusService(repository *Repository) *StatusService`；`List(ctx context.Context, publishedOnly bool, limit, offset int) ([]Status, error)`、`Save(ctx context.Context, actorID int64, input StatusInput) (Status, error)`、`Delete(ctx context.Context, id int64) error`。`StatusInput` 包含 id/body/images/published/published_at；创建时客户端生成 UUID 作为 id，数据库主键保证重试不会创建第二条。
+
+- [ ] 先写 `TestPublicStatusesExcludeDrafts`、`TestStatusRequiresContentAndAtMostNineImages`、`TestStatusCreateIsIdempotent`、`TestStatusWriteRequiresPermission`；运行对应 Go 测试确认失败。
+- [ ] 实现表结构、参数化 SQL、时间排序及权限 `blog.status.manage`；公开读取 `/api/v1/blog/statuses`，工作台读写 `/api/v1/blog/admin/statuses`，编辑使用 PUT、删除使用 DELETE 并明确区分不存在和无权限。只给管理员角色默认授予管理权限。
+- [ ] 在临时 PostgreSQL 验证 JSONB、迁移、重复 id、时间排序和草稿过滤；运行 `go test ./internal/blog ./internal/httpserver ./internal/rbac`，确认鉴权和错误响应通过。
+- [ ] 检查 diff，仅提交任务 2 对应实现与测试。
+
+#### 任务 3：状态图片上传
+
+文件：新增 `internal/blog/media.go`、`media_test.go`；扩展任务 2 的 handler 和测试、`internal/config/config.go` 与 `internal/app/run.go`；必要时调整 `internal/pictureproxy` 对新前缀的读取测试。
+
+接口：`(*MediaStore).Upload(ctx context.Context, content io.Reader, contentType string) (Image, error)`；鉴权 `POST /api/v1/blog/admin/images` 返回对象 key、URL。Go 复用现有 OSS SDK，所有写入限定 `blog/status/`，使用专用最小权限配置。
+
+- [ ] 先写 `TestImageUploadRejectsUnauthenticatedAndInvalidContent`、`TestImageUploadUsesBlogPrefix`、`TestImageUploadSurfacesStoreFailure`；覆盖伪造 MIME、超限图片、图片代理对原 `pic/` 的读取不变，运行测试确认失败。
+- [ ] 实现每图最多 10 MiB、JPEG/PNG/WebP/GIF 的真实内容识别和上传限制；请求取消传入 OSS 调用，失败返回明确错误。正文接口只接受受控图片对象引用，拒绝任意媒体地址。
+- [ ] 运行 `go test ./internal/blog ./internal/httpserver ./internal/pictureproxy ./internal/config`；使用隔离存储或模拟传输验证失败路径，不在此阶段创建生产对象。
+- [ ] 检查 diff，仅提交任务 3 对应实现与测试。
+
+#### 任务 4：公开博客与手机工作台
+
+文件：新增 `web/src/lib/blog.ts`、`web/src/pages/blog.tsx`、`web/src/pages/blog-status.tsx`、`web/src/pages/blog/` 下按页面职责拆分的组件和样式；修改 `web/src/main.tsx`、`web/src/lib/finance.ts`、`web/src/components/layout/app-navigation.ts`、`web/src/pages/dashboard.tsx`；新增 `internal/httpserver/blog_pages.go` 及测试。
+
+接口：文章 API `/api/v1/blog/posts` 和 `/api/v1/blog/posts/:slug` 返回任务 1 的内容；`blog.ts` 封装 `listArticles`、`getArticle`、`listStatuses`、`saveStatus`、`deleteStatus`、`uploadStatusImage`，组件不直接拼 API。页面路径沿用第 3.6 节。
+
+- [ ] 先为公开路由、404、文章元信息、RSS/Sitemap 和草稿隔离编写 `blog_pages_test.go`；扩展现有前端 API 客户端测试以覆盖写入参数、错误状态和上传。运行对应测试确认失败。
+- [ ] 实现公开布局、文章列表/详情/标签、状态时间线；Go 为文章响应提供对应标题/描述/canonical 并生成 RSS/Sitemap，不引入 Node 服务端运行。迁移必要样式和静态资产时保留许可。
+- [ ] 在内容服务加入「状态」，实现草稿保存、最多九图、上传进度/失败重试及编辑删除；发布过程中禁用提交，保留失败表单，沿用同一创建 UUID。手机布局不出现横向溢出。
+- [ ] 运行 `go test ./internal/httpserver` 以及 `cd web && npm test && npm run build`；在隔离本地环境实际检查桌面与手机尺寸，完成一次选图、草稿、发布、编辑、删除及上传中断流程。
+- [ ] 检查 diff，仅提交任务 4 对应实现与测试。
+
+#### 任务 5：笔记直接自动发布
+
+文件：修改笔记项目 `.github/workflows/sync-blog.yml`；新增 Go 项目 `internal/blog/publish.go`、`publish_test.go` 和 `scripts/publish-blog-content.sh`；扩展 `internal/app/blog.go`、`cmd/aowugong/main.go`。正式切换时删除 Astro `.github/workflows/deploy-blog.yml`。
+
+接口：`aowugong blog publish --dir <staged> --root <content-root> --sequence <run-number>` 校验并激活目录；与任务 1 共用解析，发布锁和序号存在内容根目录，序号来自同一笔记 workflow 的 `github.run_number`。先上传成功再调用该命令，不调用应用部署脚本。
+
+- [ ] 先写 `TestPublishKeepsCurrentOnInvalidContent`、`TestPublishRejectsOlderSequence`、`TestPublishSerializesActivation`、`TestPublishRemovesDeletedArticle`；在临时目录运行，确认未实现时失败。
+- [ ] 实现同文件系统原子切换、当前与上一份保留、明确失败退出码；笔记 Actions 直接打包允许的博客文件，经 SSH 上传和激活，固定主机指纹、串行 concurrency，移除 checkout/提交 Astro 和 `BLOG_SYNC_TOKEN` 依赖。
+- [ ] 本地验证 `bash -n scripts/publish-blog-content.sh`、工作流 YAML 解析和 `go test ./internal/blog`；使用虚拟 SSH 命令检查上传目标及不包含私人文件、通知、重建、重启。生产 Secrets 只在任务 7 配置并现场验证。
+- [ ] 分别核对 Go 与笔记仓库 diff，各自提交任务 5 变更，不提前推送会触发正式工作流的分支。
+
+#### 任务 6：历史动态一次性导入
+
+文件：新增 `internal/blog/import.go`、`import_test.go`；扩展任务 1 的博客 CLI。接口：`ParseLegacyStatuses(source []byte) ([]StatusInput, error)`，按原文时间使用 Asia/Shanghai；`aowugong blog import-status --file <file>` 默认只输出核对摘要，显式 `--apply --author-id <id>` 才连接数据库写入。
+
+- [ ] 先写 `TestLegacyImportPreservesTimeOrderAndImages`、`TestLegacyImportRejectsAmbiguousBlock`、`TestLegacyImportIsIdempotent`，覆盖正文内分隔线、重复时间、旧图片 URL 和不可识别时间，运行确认失败。
+- [ ] 实现明确的旧格式解析、原文位置错误报告和稳定迁移 id；旧格式转换仅留在一次性导入工具，日常状态服务不解析 Markdown。旧 `pic/` 图片迁移允许保留可信引用，不能被公开写接口用来绕过新上传限制。
+- [ ] 用原动态文件在临时 PostgreSQL 导入并逐条核对数量、正文、时间和媒体；第二次导入不新增。确认新正文展示与旧内容一致后，将该 MD 排除出笔记发布包。
+- [ ] 检查 diff，仅提交任务 6 对应工具与测试。
+
+#### 任务 7：总体验证、上线与 Moments 清理
+
+文件：按核查结果最小修改现有发布配置、服务器 Caddy、笔记 Actions Secrets；更新本 README 第 1、3、5、10、13 节为实际核实状态，不另存含凭据的运维清单。
+
+- [ ] 完成 `go test ./...`、`go test -race ./...`、`go vet ./...`、前端测试/构建、Shell 语法和 `git diff --check`；按 requesting-code-review 技能做全量变更审阅并修复发现的问题。
+- [ ] 只读核实生产版本、备份、权限、Moments 专用资源及共享引用，先向用户说明实际重启、数据库写入和删除影响；确认部署授权后按最小范围完成新应用、文章目录、历史状态导入和媒体配置。
+- [ ] 先验证新 `/blog`、工作台手机发布及共享站点，再切换旧博客跳转与 RSS；配置笔记仓库 Secrets，推送新工作流，并用一次真实笔记推送验证文章自动更新且 Go 进程未重启，随后移除旧 Astro 部署链。
+- [ ] 按第 3.6 节清单逐项清理 Moments，并核对 `moments.aowugong.top` DNS/Caddy 均已删除；处理本地未提交 Moments 文件及远端仓库时先明确告知删除对象。共用 OSS、图片代理和其他域名必须健康。
+- [ ] 更新本 README 的实现与部署事实，报告版本、访问入口、自动发布验证和清理结果。任何未完成项如实列出，不发送外部通知。
+
+计划自检：七项覆盖设计中的内容、发布、权限、媒体、历史迁移、域名和退役要求；每项有明确接口与验收。现有源码入口已核对，云资源及 Actions Secret 的可用性须在执行阶段现场确认。
+
 ## 4. VPN 资源与订阅设计
 
 ### 4.1 资源分配
@@ -284,11 +450,25 @@ v2rayN/v2rayNG 的标准节点订阅无法像 Clash、Surge 那样携带完整�
 
 ### 5.2 凭证原则
 
-- 只使用阿里云 RAM 子账号 AccessKey；主账号 AccessKey 已禁用。
+- 正式服务只使用阿里云 RAM 子账号 AccessKey。2026-09-29 用户为 Moments 配置提供了临时云管理 Key，配置后由用户禁用；其当前禁用状态不能沿用历史记录推断。
 - RAM 权限按最小范围配置，只允许当前图片上传、读取或代理所需的 Bucket 和路径。
 - 本机项目根目录 .env 可以保存私有工具和服务配置，文件权限应为 600 并始终被 Git 忽略。
 - PicGo 的密钥输入框、项目 .env、系统钥匙串和服务器 .env 都不能复制到 README、日志、截图或发布包。
 - 如果 RAM 权限发生变化，先确认需要的动作，再使用有权限的阿里云账号调整，不重新启用主账号 AccessKey。
+
+### 5.3 Moments 媒体存储接入
+
+- 2026-09-29 已上线 `https://moments.aowugong.top`，域名 A 记录为服务器地址，Caddy 自动签发和续期 HTTPS。站点标题为“嗷呜公的朋友圈”，页面底部 GitHub 图标已移除；初始关闭注册、评论、邮件通知，默认管理员密码在公网开放前已替换。
+- fork 为 `howie110/aowugong-moments`，本机源码在 `/Users/howie/project/aowugong-moments`、分支 `codex/moments-oss-deploy`，本次修改尚未提交或推送。正式镜像 `aowugong-moments:20260929-footer1` 从该源码构建，容器同名，仅映射 `127.0.0.1:5002:3000`，限制 256 MB 内存、1 CPU、128 个进程，以 UID 10001 运行。
+- 服务器发布目录为 `/opt/aowugong-moments/releases/20260929-footer1`，`current` 指向该版本；持久化数据在 `shared/data/db.sqlite`，运行配置在 `shared/.env`。此前构建的镜像和已停止容器保留用于回退；回退应用版本前仍需考虑数据库兼容性。
+- 用户已确认图片和视频使用现有私有 OSS Bucket `aowugong-pic-gz-f2bf98d3`，独立存入 `moments/YYYY/MM/DD/随机标识`，PicGo 继续使用原有 `pic/`。RAM 用户 `aowugong-moments` 的策略 `AowugongMomentsObjects` 仅允许 `moments/*` 的 `oss:PutObject`、`oss:GetObject`，没有删除或 Bucket 管理权限。
+- 图片和视频经浏览器直传 OSS：S3 Endpoint 为 `https://s3.oss-cn-guangzhou.aliyuncs.com`，Region 为 `cn-guangzhou`，Bucket CORS 仅允许 `https://moments.aowugong.top` 的 PUT/GET/HEAD，后台媒体 Domain 为 `https://pic.aowugong.top`，缩略图后缀留空。
+- Caddy 仅将 `pic.aowugong.top/moments/*` 转发至 Moments；该服务使用专用 S3 凭证经同地域内网端点签名读取，支持 GET、HEAD、Range、ETag，最多同时处理 8 个媒体请求，不转发访客 Cookie/Token 和任意查询参数。原有 `pic/` 代理和 RAM 权限未改动，主站 Go 服务未重启。
+- 本机运行凭证在 `storage/private/moments/oss.json` 和 `runtime.json`，管理员登录信息在同目录 `login.txt`；均为 600 权限且被 Git 忽略。运行不依赖本次临时管理 Key；配置结束后由用户禁用该管理 Key，不能误禁用 Moments 专用 RAM 凭证。
+- SQLite 每日由 `aowugong-moments-backup.timer` 在服务器本地时间 04:10 调度一致性备份，校验完整性并保留最近 14 份，位置为 `shared/backups/`。备份含 S3 配置，必须保持私密；不包含 OSS 媒体，尚未配置异机备份。
+- 已验证：真实 PNG/MP4 上传、媒体字节一致性、HEAD、Range 206/416、ETag 304、浏览器图片显示及视频直接/内嵌播放、专用凭证访问 `pic/` 被拒绝、首页和登录 API。原有网站 HTTP 检查与变更前一致；`receipt-split.aowugong.top/` 在变更前后均为 404，不属于本次修改。
+- Caddy 配置修改前的副本为 `/opt/vaultwarden/caddy/Caddyfile.before-moments-20260929`。现有 Caddy 管理接口关闭，配置校验后执行了一次入口容器重启；后续 Moments 更新只替换其独立容器。
+- 本次生成的 OSS 测试媒体和发布暂存包、服务器临时解密配置与私钥已清理；正式凭证仅保留在私有运行配置和数据库中。没有发送第三方通知。
 
 ## 6. 数据、私有文件和备份
 
@@ -543,7 +723,7 @@ PostgreSQL 启动时自动执行 migrations/postgres。连接默认使用 127.0.
 - v2rayN/v2rayNG 只使用标准节点订阅，不维护独立的 v2rayN 规则资源。
 - DMIT、魔戒等资源使用同一套分配和转换流程；管理员也可以被分配资源。
 - 公共规则由 storage/private/vpn/common-routing.json 单文件维护，AI 修改后更新到生产私有目录，支持合并规则的客户端刷新订阅生效。
-- PicGo 使用阿里云 OSS 的 RAM 子账号；主账号 AccessKey 已禁用。
+- PicGo 使用阿里云 OSS 的 RAM 子账号；2026-09-29 临时管理 Key 的使用和待禁用状态见第 5 节。
 - 生产应用只通过 Caddy 对外提供域名入口，内部服务和数据库不公开。
 - 服务器项目、域名和端口变化时，先更新第 1 节总览，再更新受影响的项目章节和部署边界。
 - 任何未来 AI 开发都必须先读本文件，并把新的明确设计沉淀到这里。

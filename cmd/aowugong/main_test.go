@@ -1,6 +1,12 @@
 package main
 
-import "testing"
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 // TestParseCommandSupportsServerAndUnifiedJobCLI 验证默认服务模式和单任务 CLI 参数。
 // 输入：无参数、job 加任务名以及缺少任务名三种参数。
@@ -22,5 +28,20 @@ func TestParseCommandSupportsServerAndUnifiedJobCLI(t *testing.T) {
 	// 3. 缺少任务名必须返回错误而不是启动服务。
 	if _, err := parseCommand([]string{"aowugong", "job"}); err == nil {
 		t.Fatal("parseCommand(job) error = nil, want usage error")
+	}
+}
+
+func TestBlogValidationCLIUsesOnlyFiles(t *testing.T) {
+	t.Setenv("AOWUGONG_ENV", "invalid-environment")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "post.md"), []byte("---\ntitle: CLI\ndate: 2026-09-30\n---\nText"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := executeCommand([]string{"aowugong", "blog", "validate", "--dir", dir}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "1") {
+		t.Fatalf("unexpected output %q", output.String())
 	}
 }

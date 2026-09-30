@@ -44,6 +44,9 @@ func main() {
 // 输出：执行成功返回 nil，参数、配置或运行失败时返回错误。
 // 副作用：读取环境变量，监听终止信号，启动服务或执行任务。
 func executeCommand(args []string, output io.Writer) error {
+	if len(args) > 1 && args[1] == "blog" {
+		return app.RunBlog(args[2:], output)
+	}
 	// 1. 解析命令并从环境变量加载最终运行配置。
 	command, err := parseCommand(args)
 	if err != nil {
