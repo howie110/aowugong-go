@@ -7,6 +7,7 @@ const (
 	VPNUserRoleCode  = "vpn_user"
 
 	PermissionFinanceOverview        = "page:finance:overview"
+	PermissionBlogStatus             = "blog.status.manage"
 	PermissionWeread                 = "page:weread"
 	PermissionFinancePositions       = "page:finance:positions"
 	PermissionFinanceStockAnalysis   = "page:finance:stock_analysis"
@@ -57,6 +58,7 @@ type UserRoles struct {
 
 // DefaultPermissions 是由代码维护的全部页面权限基线。
 var DefaultPermissions = []Permission{
+	{Code: PermissionBlogStatus, Name: "状态", Group: "content", Description: "发布、编辑和删除博客状态。"},
 	{Code: PermissionFinanceOverview, Name: "控制台", Group: "finance", Description: "查看 finance 控制台总览。"},
 	{Code: PermissionWeread, Name: "微信读书", Group: "weread", Description: "查看微信读书看板。"},
 	{Code: PermissionFinancePositions, Name: "股票仓位导入", Group: "finance", Description: "查看和上传股票仓位导入记录。"},

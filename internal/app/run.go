@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/auth"
+	"github.com/howiedata/aowugong-go/internal/blog"
 	"github.com/howiedata/aowugong-go/internal/client"
 	"github.com/howiedata/aowugong-go/internal/config"
 	"github.com/howiedata/aowugong-go/internal/database"
@@ -272,7 +273,12 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 	cronScheduler := scheduler.NewCronScheduler(jobRegistry, location)
 
 	// 9. 把同一业务服务和任务注册表交给 HTTP 路由。
+	var blogArticles *blog.ArticleStore
+	if cfg.Storage.BlogContentDir != "" {
+		blogArticles = blog.NewArticleStore(cfg.Storage.BlogContentDir)
+	}
 	handler := httpserver.NewRouter(httpserver.Dependencies{
+		BlogArticles: blogArticles, BlogStatuses: blog.NewStatusService(blog.NewRepository(db)),
 		StaticDir: cfg.HTTP.StaticDir, Auth: authService, RBAC: rbacService,
 		Subscription: tasks.subscriptions, Mahjong: mahjongService, Work: workService,
 		WeRead: wereadService, Monitoring: tasks.monitoring, Finance: financeService,

@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/howiedata/aowugong-go/internal/auth"
+	"github.com/howiedata/aowugong-go/internal/blog"
 	"github.com/howiedata/aowugong-go/internal/finance/articleanalysis"
 	"github.com/howiedata/aowugong-go/internal/finance/position"
 	financeservice "github.com/howiedata/aowugong-go/internal/finance/service"
@@ -24,6 +25,8 @@ import (
 
 // Dependencies 描述路由器启动所需的依赖。
 type Dependencies struct {
+	BlogArticles    *blog.ArticleStore
+	BlogStatuses    *blog.StatusService
 	StaticDir       string
 	Auth            *auth.Service
 	RBAC            *rbac.Service
@@ -64,6 +67,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 	})
 	api.Get("/api/v1/health", healthHandler)
+	registerBlogRoutes(api, deps)
 	if deps.ArticleAnalysis != nil {
 		registerArticleFeedRoutes(api, deps.ArticleAnalysis)
 	}
