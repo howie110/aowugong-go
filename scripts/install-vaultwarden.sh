@@ -5,7 +5,6 @@ VAULTWARDEN_VERSION="${VAULTWARDEN_VERSION:-1.37.2}"
 CADDY_VERSION="${CADDY_VERSION:-2.11.4-alpine}"
 VAULTWARDEN_HOST="${VAULTWARDEN_HOST:-vault.aowugong.top}"
 AOWUGONG_HOST="${AOWUGONG_HOST:-aowugong.top}"
-BLOG_HOST="${BLOG_HOST:-blog.aowugong.top}"
 MINIFLUX_HOST="${MINIFLUX_HOST:-miniflux.aowugong.top}"
 NEXTFLUX_HOST="${NEXTFLUX_HOST:-nextflux.aowugong.top}"
 PICTURE_HOST="${PICTURE_HOST:-pic.aowugong.top}"
@@ -155,17 +154,7 @@ www.${AOWUGONG_HOST} {
     }
 }
 
-${BLOG_HOST} {
-    @status path /posts/blog-2000-01-05 /posts/blog-2000-01-05/
-    redir @status https://${AOWUGONG_HOST}/blog/status 308
-    @feed path /blog/rss.xml /rss.xml
-    redir @feed https://${AOWUGONG_HOST}/blog/rss.xml 308
-    @sitemap path /sitemap-index.xml /sitemap-0.xml /sitemap.xml
-    redir @sitemap https://${AOWUGONG_HOST}/blog/sitemap.xml 308
-    @content path /posts/* /tags /tags/*
-    redir @content https://${AOWUGONG_HOST}/blog{uri} 308
-    redir https://${AOWUGONG_HOST}/blog 308
-}
+
 
 ${PICTURE_HOST} {
     encode zstd gzip
@@ -266,7 +255,7 @@ main() {
 
     # 1. 校验运行条件和公网入口端口。
     require_root
-    for host in "${AOWUGONG_HOST}" "${BLOG_HOST}" "${VAULTWARDEN_HOST}" "${MINIFLUX_HOST}" "${NEXTFLUX_HOST}" "${PICTURE_HOST}"; do
+    for host in "${AOWUGONG_HOST}" "${VAULTWARDEN_HOST}" "${MINIFLUX_HOST}" "${NEXTFLUX_HOST}" "${PICTURE_HOST}"; do
         if [[ ! "${host}" =~ ^[A-Za-z0-9.-]+$ ]]; then
             printf 'ERROR: 域名格式无效: %s\n' "${host}" >&2
             exit 1

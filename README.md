@@ -48,7 +48,6 @@
 |---|---|---|
 | https://aowugong.top | aowugong-go：127.0.0.1:12345 | 公开主页、`/blog` 博客、登录工作台、API、VPN 订阅 |
 | https://www.aowugong.top | Caddy 重定向到根域名 | 保留原路径跳转到根域名 |
-| https://blog.aowugong.top | Caddy 永久重定向 | 旧文章、标签、动态和订阅跳转到主站 `/blog` |
 | https://vault.aowugong.top | 127.0.0.1:8222 | Vaultwarden |
 | https://miniflux.aowugong.top | 127.0.0.1:5000 | Miniflux |
 | https://nextflux.aowugong.top | 127.0.0.1:5001 | Nextflux 静态前端 |
@@ -254,7 +253,7 @@ aowugong-go 是 Go 模块化单体，统一提供：
 
 #### 切换与清理边界
 
-- 先在隔离环境完成新博客、笔记自动更新、历史动态导入及手机发布验收，再切换公网入口。旧 `blog.aowugong.top` 的文章路径永久跳转到对应 `/blog/posts/:slug`；旧动态路径明确跳转到 `/blog/status`，RSS 保持兼容，未知文章返回 404，不统一跳到首页。
+- 先在隔离环境完成新博客、笔记自动更新、历史动态导入及手机发布验收，再切换公网入口。博客仅使用主站 `/blog` 路径；未知文章返回 404，不统一跳到首页。
 - 应用升级及数据库迁移沿用现有发布和备份方式；文章数据独立于应用 release，后续笔记发布不影响应用版本。应用回滚不自动撤销已发布状态、数据库迁移或笔记内容。
 - Moments 清理范围：专用运行及停止容器、镜像、服务器发布和数据目录、SQLite 备份及 systemd 备份任务、专用域名 DNS 和 Caddy 路由、媒体 `/moments/*` 路由、OSS `moments/` 对象、专用 CORS 来源、专用 RAM 用户/策略/密钥、项目内私有运行配置，以及本地与 GitHub 上该 Moments 项目的专用代码和部署资源。
 - 用户明确要求删除 Moments 二级域名：清除 `moments.aowugong.top` 实际存在的 DNS 解析记录和 Caddy 站点配置，不保留该域名跳转；删除后旧朋友圈域名停止服务。`pic.aowugong.top` 继续供博客及其他图片使用，只移除其 Moments 专用路径转发。
