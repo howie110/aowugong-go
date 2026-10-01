@@ -1,6 +1,8 @@
 package httpserver
 
 import (
+	"context"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -19,7 +21,14 @@ func TestBlogPagesMetadataFeedsAnd404(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(static, "index.html"), []byte(`<html><head><title>Workbench</title></head><body><div id="root"></div></body></html>`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	h := NewRouter(Dependencies{StaticDir: static, BlogArticles: blog.NewArticleStore(dir)})
+	repo := blog.NewArticleRepository(testdatabase.Open(t))
+	if err := repo.PublishDirectory(context.Background(), dir, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	h := NewRouter(Dependencies{StaticDir: static, BlogArticles: repo})
 	for _, tc := range []struct {
 		path     string
 		want     int

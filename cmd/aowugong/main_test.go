@@ -60,3 +60,14 @@ func TestBlogImportDryRunDoesNotLoadDatabase(t *testing.T) {
 		t.Fatalf("output %s", output.String())
 	}
 }
+
+func TestBlogPublishRequiresDedicatedDatabaseConfiguration(t *testing.T) {
+	t.Setenv("BLOG_DATABASE_URL", "")
+	t.Setenv("AOWUGONG_ENV", "invalid-environment")
+	t.Setenv("AOWUGONG_DATABASE_URL", "postgres://must-not-be-used")
+	var output bytes.Buffer
+	err := executeCommand([]string{"app", "blog", "publish", "--dir", t.TempDir(), "--sequence", "1"}, &output)
+	if err == nil || !strings.Contains(err.Error(), "BLOG_DATABASE_URL") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

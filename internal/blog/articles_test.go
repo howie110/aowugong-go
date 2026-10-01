@@ -18,7 +18,7 @@ func writeArticle(t *testing.T, dir, name, content string) {
 func TestArticleStoreReadsFrontmatterAndBody(t *testing.T) {
 	dir := t.TempDir()
 	writeArticle(t, dir, "hello.md", articleFixture)
-	s := NewArticleStore(dir)
+	s := NewArticleSource(dir)
 	a, err := s.Get("hello")
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestArticleStoreRejectsTraversalAndSymlinks(t *testing.T) {
 	dir := t.TempDir()
 	outside := t.TempDir()
 	writeArticle(t, outside, "private.md", articleFixture)
-	s := NewArticleStore(dir)
+	s := NewArticleSource(dir)
 	for _, slug := range []string{"../private", "/private", "a/../../private", `a\b`} {
 		if _, err := s.Get(slug); err == nil {
 			t.Fatalf("accepted %q", slug)
@@ -60,14 +60,14 @@ func TestArticleStoreRejectsTraversalAndSymlinks(t *testing.T) {
 func TestArticleStoreReportsMalformedFile(t *testing.T) {
 	dir := t.TempDir()
 	writeArticle(t, dir, "bad.md", "---\ntitle: Bad\ndate: nope\n---\ntext")
-	if err := NewArticleStore(dir).Validate(); err == nil || !strings.Contains(err.Error(), "bad.md") {
+	if err := NewArticleSource(dir).Validate(); err == nil || !strings.Contains(err.Error(), "bad.md") {
 		t.Fatalf("error=%v", err)
 	}
 }
 func TestMarkdownRejectsExecutableHTML(t *testing.T) {
 	dir := t.TempDir()
 	writeArticle(t, dir, "safe.md", articleFixture+"\n<script>alert(1)</script>\n<img src=x onerror=alert(1)>\n[x](javascript:alert(1))")
-	a, err := NewArticleStore(dir).Get("safe")
+	a, err := NewArticleSource(dir).Get("safe")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestMarkdownRejectsExecutableHTML(t *testing.T) {
 func TestArticleStoreRejectsEscapingAttachments(t *testing.T) {
 	dir := t.TempDir()
 	writeArticle(t, dir, "bad.md", articleFixture+"\n![private](../secret.png)")
-	if err := NewArticleStore(dir).Validate(); err == nil {
+	if err := NewArticleSource(dir).Validate(); err == nil {
 		t.Fatal("accepted outside image")
 	}
 }
@@ -88,7 +88,7 @@ func TestArticleStoreSkipsLegacyStatus(t *testing.T) {
 	dir := t.TempDir()
 	writeArticle(t, dir, "hello.md", articleFixture)
 	writeArticle(t, dir, "blog-2000-01-05.md", "legacy")
-	articles, err := NewArticleStore(dir).List()
+	articles, err := NewArticleSource(dir).List()
 	if err != nil || len(articles) != 1 {
 		t.Fatalf("%v %v", articles, err)
 	}
@@ -97,7 +97,7 @@ func TestArticleStoreSkipsLegacyStatus(t *testing.T) {
 func TestArticleYAMLTimestampPreservesCalendarDate(t *testing.T) {
 	dir := t.TempDir()
 	writeArticle(t, dir, "timestamp.md", strings.Replace(articleFixture, "2026-09-30", "2024-03-20 00:00:00", 1))
-	a, err := NewArticleStore(dir).Get("timestamp")
+	a, err := NewArticleSource(dir).Get("timestamp")
 	if err != nil {
 		t.Fatal(err)
 	}

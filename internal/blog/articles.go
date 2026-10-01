@@ -1,10 +1,9 @@
-// Package blog 提供文件文章与数据库状态，两类内容各有唯一来源。
+// Package blog 导入 Markdown 并从数据库提供文章和状态。
 package blog
 
 import (
 	"errors"
 	"fmt"
-	"golang.org/x/sys/unix"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -22,6 +21,7 @@ type Heading struct {
 	Level int    `json:"level"`
 }
 type Article struct {
+	Markdown    string    `json:"-"`
 	Slug        string    `json:"slug"`
 	Title       string    `json:"title"`
 	Date        string    `json:"date"`
@@ -30,34 +30,23 @@ type Article struct {
 	Description string    `json:"description"`
 	TOC         []Heading `json:"toc"`
 }
-type ArticleStore struct{ directory string }
+type ArticleSource struct{ directory string }
 
-func NewArticleStore(directory string) *ArticleStore { return &ArticleStore{directory: directory} }
+func NewArticleSource(directory string) *ArticleSource { return &ArticleSource{directory: directory} }
 
-// root 固定本次读取的快照；current 可以是发布器维护的符号链接。
-func (s *ArticleStore) root() (string, func(), error) {
-	release := func() {}
+// root 只接受导入暂存目录；网站读取由 ArticleRepository 提供。
+func (s *ArticleSource) root() (string, error) {
 	if s.directory == "" {
-		return "", release, fmt.Errorf("未配置博客文章目录")
+		return "", fmt.Errorf("未指定文章目录")
 	}
 	info, err := os.Lstat(s.directory)
 	if err != nil {
-		return "", release, err
+		return "", err
 	}
-	// 发布入口是符号链接；共享锁保护固定快照直到读取完成。
-	if info.Mode()&os.ModeSymlink != 0 {
-		lock, err := os.Open(filepath.Join(filepath.Dir(s.directory), ".publish.lock"))
-		if err != nil {
-			return "", release, err
-		}
-		if err := unix.Flock(int(lock.Fd()), unix.LOCK_SH); err != nil {
-			lock.Close()
-			return "", release, err
-		}
-		release = func() { _ = unix.Flock(int(lock.Fd()), unix.LOCK_UN); _ = lock.Close() }
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("文章来源必须是普通目录")
 	}
-	root, err := filepath.EvalSymlinks(s.directory)
-	return root, release, err
+	return s.directory, nil
 }
 func safeFile(root, relative string) (string, error) {
 	if relative == "" || strings.Contains(relative, `\`) || filepath.IsAbs(relative) {
@@ -83,12 +72,11 @@ func safeFile(root, relative string) (string, error) {
 	}
 	return current, nil
 }
-func (s *ArticleStore) Get(slug string) (Article, error) {
+func (s *ArticleSource) Get(slug string) (Article, error) {
 	if slug == strings.TrimSuffix(LegacyStatusFile, ".md") {
 		return Article{}, ErrNotFound
 	}
-	root, release, err := s.root()
-	defer release()
+	root, err := s.root()
 	if err != nil {
 		return Article{}, err
 	}
@@ -114,12 +102,12 @@ func readArticle(root, relative string) (Article, error) {
 	if err != nil {
 		return Article{}, fmt.Errorf("%s: %w", relative, err)
 	}
+	article.Markdown = string(data)
 	article.Slug = filepath.ToSlash(strings.TrimSuffix(relative, ".md"))
 	return article, nil
 }
-func (s *ArticleStore) List() ([]Article, error) {
-	root, release, err := s.root()
-	defer release()
+func (s *ArticleSource) List() ([]Article, error) {
+	root, err := s.root()
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +150,7 @@ func (s *ArticleStore) List() ([]Article, error) {
 	})
 	return articles, nil
 }
-func (s *ArticleStore) Validate() error {
+func (s *ArticleSource) Validate() error {
 	articles, err := s.List()
 	if err != nil {
 		return err
@@ -171,24 +159,4 @@ func (s *ArticleStore) Validate() error {
 		return fmt.Errorf("博客内容包没有文章")
 	}
 	return nil
-}
-
-// Asset 只允许文章目录内的图片附件，阻止下载原始 Markdown 和隐藏配置。
-func (s *ArticleStore) Asset(relative string) (*os.File, error) {
-	ext := strings.ToLower(filepath.Ext(relative))
-	switch ext {
-	case ".jpg", ".jpeg", ".png", ".webp", ".gif":
-	default:
-		return nil, ErrNotFound
-	}
-	root, release, err := s.root()
-	defer release()
-	if err != nil {
-		return nil, err
-	}
-	filename, err := safeFile(root, relative)
-	if err != nil {
-		return nil, err
-	}
-	return os.Open(filename)
 }

@@ -280,10 +280,7 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 			return nil, err
 		}
 	}
-	var blogArticles *blog.ArticleStore
-	if cfg.Storage.BlogContentDir != "" {
-		blogArticles = blog.NewArticleStore(cfg.Storage.BlogContentDir)
-	}
+	blogArticles := blog.NewArticleRepository(db)
 	handler := httpserver.NewRouter(httpserver.Dependencies{
 		BlogMedia: blogMedia, BlogArticles: blogArticles, BlogStatuses: blog.NewStatusService(blog.NewRepository(db)),
 		StaticDir: cfg.HTTP.StaticDir, Auth: authService, RBAC: rbacService,

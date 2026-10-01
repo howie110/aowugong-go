@@ -88,7 +88,6 @@ type Auth struct {
 
 // Storage 描述运行时文件位置和 PostgreSQL 备份保留策略。
 type Storage struct {
-	BlogContentDir     string
 	WorkNavigationPath string
 	BackupDir          string
 	BackupRetention    int
@@ -306,7 +305,6 @@ func Load(lookup LookupEnv) (Config, error) {
 	loadString(lookup, "VAULTWARDEN_BACKUP_EMAIL_TO", &cfg.VaultwardenBackup.EmailTo)
 	loadString(lookup, "VPN_SOURCE_DIR", &cfg.VPN.SourceDir)
 	loadString(lookup, "VPN_PUBLIC_URL", &cfg.VPN.PublicURL)
-	loadString(lookup, "AOWUGONG_BLOG_CONTENT_DIR", &cfg.Storage.BlogContentDir)
 	loadString(lookup, "BLOG_OSS_ENDPOINT", &cfg.BlogMedia.Endpoint)
 	loadString(lookup, "BLOG_OSS_BUCKET", &cfg.BlogMedia.Bucket)
 	loadString(lookup, "BLOG_OSS_ACCESS_KEY_ID", &cfg.BlogMedia.AccessKeyID)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/howiedata/aowugong-go/internal/blog"
 	"github.com/howiedata/aowugong-go/internal/config"
@@ -21,7 +22,6 @@ func RunBlog(args []string, output io.Writer) error {
 	flags.SetOutput(io.Discard)
 	directory := flags.String("dir", "", "文章目录")
 	archive := flags.String("archive", "", "内容压缩包")
-	root := flags.String("root", "", "内容根目录")
 	sequence := flags.Int64("sequence", 0, "发布序号")
 	sourceFile := flags.String("file", "", "历史动态文件")
 	apply := flags.Bool("apply", false, "执行数据库导入")
@@ -36,14 +36,25 @@ func RunBlog(args []string, output io.Writer) error {
 		return importBlogStatuses(*sourceFile, *apply, *authorID, output)
 	}
 	if args[0] == "publish" {
-		if *root == "" || *sequence < 1 || ((*directory == "") == (*archive == "")) {
-			return fmt.Errorf("publish 需要 --root、--sequence，以及 --dir 或 --archive 之一")
+		if *sequence < 1 || ((*directory == "") == (*archive == "")) {
+			return fmt.Errorf("publish 需要 --sequence，以及 --dir 或 --archive 之一")
 		}
-		var err error
+		dsn := os.Getenv("BLOG_DATABASE_URL")
+		if dsn == "" {
+			return fmt.Errorf("publish 需要 BLOG_DATABASE_URL")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		db, err := database.OpenPostgres(ctx, config.Database{URL: dsn, MaxOpenConns: 1, MaxIdleConns: 1, ConnMaxLifetime: time.Minute})
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		repository := blog.NewArticleRepository(db)
 		if *archive != "" {
-			err = blog.PublishArchive(*archive, *root, *sequence)
+			err = repository.PublishArchive(ctx, *archive, *sequence)
 		} else {
-			err = blog.Publish(*directory, *root, *sequence)
+			err = repository.PublishDirectory(ctx, *directory, *sequence)
 		}
 		if err != nil {
 			return err
@@ -57,7 +68,7 @@ func RunBlog(args []string, output io.Writer) error {
 	if args[0] != "validate" {
 		return fmt.Errorf("未知博客命令: %s", args[0])
 	}
-	store := blog.NewArticleStore(*directory)
+	store := blog.NewArticleSource(*directory)
 	if err := store.Validate(); err != nil {
 		return err
 	}

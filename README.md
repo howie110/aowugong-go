@@ -208,15 +208,15 @@ aowugong-go 是 Go 模块化单体，统一提供：
 - 博客统一进入 `https://aowugong.top/blog`，复用现有 Go、React、PostgreSQL、登录和权限；退出 Astro 构建链和独立 Moments 服务，保持单一应用。
 - 文章继续由笔记项目的博客 Markdown 提供，推送后自动更新网站；状态改由数据库保存，在个人工作台「内容服务 → 状态」通过手机发布。
 - 设计要求是单向、直接、可理解：每类内容只有一个权威来源，不做双写、双向同步、多框架并存或切换到另一套内容源的兜底。
-- 文章唯一来源是笔记项目 `/Users/howie/project/aowugong-note/【7】博客`。Go 使用 Goldmark 解析 YAML 元信息和 Markdown，再用 bluemonday 清理 HTML；React 负责阅读界面。旧 Astro 仅保留历史源码，不再同步内容、构建或部署。
+- 文章唯一来源是笔记项目 `/Users/howie/project/aowugong-note/【7】博客`。Go 在导入时使用 Goldmark 解析 YAML 元信息和 Markdown，再用 bluemonday 清理 HTML 并存入 PostgreSQL；Go Web 查询数据库，React 负责阅读界面。旧 Astro 仅保留历史源码，不再同步内容、构建或部署。
 - `blog-2000-01-05.md` 的 8 条动态已一次性导入 PostgreSQL，保留原时间和正文；该文件作为历史笔记保留，自动发布明确排除它。新状态仅由工作台写入数据库。
 
 #### 页面与模块
 
 | 入口 | 用途 | 数据来源与权限 |
 |---|---|---|
-| `/blog` | 博客文章列表 | 博客目录内的 Markdown，公开读取 |
-| `/blog/posts/:slug` | 文章及关于、咖啡等原有文字页面 | 同一 Markdown 目录，公开读取 |
+| `/blog` | 博客文章列表 | PostgreSQL 文章表，公开读取 |
+| `/blog/posts/:slug` | 文章及关于、咖啡等原有文字页面 | 同一 PostgreSQL 文章表，公开读取 |
 | `/blog/status` | 按发布时间倒序展示状态 | PostgreSQL，公开读取已发布状态 |
 | `/work/content/status` | 手机发布、编辑、删除状态及管理草稿 | 复用工作台登录，仅获授权的管理者可操作 |
 | `/blog/rss.xml` | 博客文章订阅 | 与文章页面共用解析结果 |
@@ -228,17 +228,16 @@ aowugong-go 是 Go 模块化单体，统一提供：
 
 #### 文章自动更新
 
-固定链路：笔记仓库 `main` 的博客变更 → 该仓库 GitHub Actions → SSH 上传博客文件 → 服务器 Go CLI 校验 → 原子切换文章目录 → 网站读取新内容。
+固定链路：笔记仓库 `main` 的博客变更 → 该仓库 GitHub Actions → SSH 上传博客文件 → 服务器 Go CLI 解析校验 → 事务写入 PostgreSQL → Go Web 查询数据库展示。
 
 - 笔记项目 `/Users/howie/project/aowugong-note/.github/workflows/sync-blog.yml` 已直接发布到 Go 服务。触发范围仍限 `【7】博客/**` 和工作流自身。这里的自动更新指推送到 `main` 后更新，本地仅保存未推送不会触发。
 - 停止向 Astro 仓库提交文章，停止其独立部署工作流；不经过 Go 仓库再提交文章，不重新构建 React 或 Go，不重启业务服务，不增加轮询任务或公网同步接口。
 - 工作流只打包博客目录中的公开 Markdown 及其实际需要的目录内附件；不传输私人笔记库、Git 元数据、凭据或博客目录外文件。已有 OSS 图片 URL 保持不变。拒绝符号链接、路径越界和博客目录外的附件引用，并报告具体文件。
-- 服务器内容位于 `/opt/aowugong-go/shared/storage/blog`，应用通过明确的 `AOWUGONG_BLOG_CONTENT_DIR` 配置读取其中的 `current`。上传先进入独立暂存目录，再用同一 Go 二进制的博客校验命令解析全部文章；校验成功才原子替换 `current` 指向。
-- 应用每次请求解析实际需要的文件，不增加独立缓存服务、文件监听或刷新接口。一个请求固定使用同一个内容目录版本；文章数量增长后才按实测需要优化。
-- 同一笔记发布工作流串行执行；激活时拒绝旧版本覆盖已经上线的新版本。只保留当前和上一份有效内容目录，用于明确的手动回退，不无限累积快照。
-- 文件删除在成功发布后反映为文章下线，不复制到其他来源继续展示。同步包为空、解析失败或上传失败时工作流报错且不切换目录；网站仍是上一次成功发布的版本，这属于未发布，不伪装成成功。
-- 笔记 Actions Secrets 为 `BLOG_DEPLOY_HOST`、`BLOG_DEPLOY_USER`、`BLOG_DEPLOY_SSH_KEY`、`BLOG_DEPLOY_KNOWN_HOSTS`。`blog-publisher` 的 SSH key 使用 `restrict` 和 forced command，只接受 `upload <序号>`、`publish <序号>`；不能运行任意 shell。旧 `BLOG_SYNC_TOKEN` 已删除，流程不发送外部通知。
-- 发布目录由 `blog-publisher:aowugong` 所有、setgid 2750，文件 0640；应用只读内容。祖先目录只给发布账号穿越 ACL，不给它读取 `.env` 的权限。发布持独占 flock，读取持共享 flock；锁文件 0640，防止读取中的快照被清理。应用部署脚本保留此目录的所有权。
+- Go CLI 在导入时使用 Goldmark 解析 Markdown、bluemonday 清理 HTML，将原文、标题、日期、标签、HTML、摘要和目录存入 `blog_articles`；博客目录内的图片附件存入 `blog_article_assets`，既有 OSS URL 保持不变。网站、API、RSS 和 Sitemap 只查数据库，不在请求时解析文件，也不回退到文件目录。
+- 上传包暂存于 `/var/lib/blog-publisher/incoming`。全部内容验证后，在一个事务内替换文章和附件；`blog_article_publication` 保存发布序号并串行化并发导入，拒绝旧序号覆盖新数据。空包、解析或数据库写入失败均保留上次成功的数据；源文件删除在下次成功同步后体现为文章下线。
+- `aowugong blog publish --archive <包> --sequence <序号>` 只读取发布专用 `BLOG_DATABASE_URL`，不装配应用、调度器或通知服务。成功后删除上传包，临时解压目录自动清理，不保留文件快照、目录软链接或文件锁。
+- 笔记 Actions Secrets 保持 `BLOG_DEPLOY_HOST`、`BLOG_DEPLOY_USER`、`BLOG_DEPLOY_SSH_KEY`、`BLOG_DEPLOY_KNOWN_HOSTS`。`blog-publisher` 的 SSH key 使用 `restrict` 和 forced command，仅接受 `upload <序号>`、`publish <序号>`，不能运行任意 shell。
+- 发布账号使用 PostgreSQL 本地 peer 认证，权限限上述三张文章表；连接地址存于 `/var/lib/blog-publisher/database.env`，不读取应用 `.env`，不具备状态或其他业务表权限。流程不发送外部通知。
 
 #### 状态存储与发布
 
@@ -253,7 +252,7 @@ aowugong-go 是 Go 模块化单体，统一提供：
 #### 切换与清理边界
 
 - 先在隔离环境完成新博客、笔记自动更新、历史动态导入及手机发布验收，再切换公网入口。旧 `blog.aowugong.top` 的文章路径永久跳转到对应 `/blog/posts/:slug`；旧动态路径明确跳转到 `/blog/status`，RSS 保持兼容，未知文章返回 404，不统一跳到首页。
-- 应用升级及数据库迁移沿用现有发布和备份方式；文章内容目录独立于应用 release，后续笔记发布不影响应用版本。应用回滚不自动撤销已发布状态、数据库迁移或笔记内容。
+- 应用升级及数据库迁移沿用现有发布和备份方式；文章数据独立于应用 release，后续笔记发布不影响应用版本。应用回滚不自动撤销已发布状态、数据库迁移或笔记内容。
 - Moments 清理范围：专用运行及停止容器、镜像、服务器发布和数据目录、SQLite 备份及 systemd 备份任务、专用域名 DNS 和 Caddy 路由、媒体 `/moments/*` 路由、OSS `moments/` 对象、专用 CORS 来源、专用 RAM 用户/策略/密钥、项目内私有运行配置，以及本地与 GitHub 上该 Moments 项目的专用代码和部署资源。
 - 用户明确要求删除 Moments 二级域名：清除 `moments.aowugong.top` 实际存在的 DNS 解析记录和 Caddy 站点配置，不保留该域名跳转；删除后旧朋友圈域名停止服务。`pic.aowugong.top` 继续供博客及其他图片使用，只移除其 Moments 专用路径转发。
 - 删除前逐项只读核实真实目标与引用关系，并向用户说明实际影响；不按名称模糊匹配批量删除。用户已要求清除 Moments，但未知共享资源须先查清归属，不能扩大删除范围。
@@ -287,7 +286,7 @@ aowugong blog import-status --file <旧动态.md>                         # 只�
 aowugong blog import-status --file <旧动态.md> --author-id <id> --apply # 一次性导入
 ```
 
-导入工具只在显式 apply 时连接数据库，使用原文上海时间和确定性 UUID，重复执行不新增。文件校验和发布不装配数据库、调度器或通知。内容发布失败保留当前版本并明确报错，不切到其他内容来源。
+导入工具只在显式 apply 时连接数据库，使用原文上海时间和确定性 UUID，重复执行不新增。文件校验不连接数据库；文章发布仅连接专用数据库账号，不装配调度器或通知。发布失败回滚事务并明确报错。
 
 ## 4. VPN 资源与订阅设计
 
@@ -397,7 +396,7 @@ v2rayN/v2rayNG 的标准节点订阅无法像 Clash、Surge 那样携带完整�
 | 工作导航 | shared/storage/private/work/navigation.json | 否 | 私有导航配置 |
 | 服务器环境变量 | shared/.env、shared/.env.canary | 否 | 生产和 canary 配置、凭证 |
 | 本地环境变量 | 项目根目录 .env | 否 | 本地运行和本机工具配置 |
-| 博客 Markdown 快照 | shared/storage/blog/current | 否 | 唯一上游为笔记仓库，只保留当前和上一版 |
+| 博客文章、状态 | PostgreSQL | 是 | 文章从笔记 Markdown 导入，状态在工作台维护 |
 | 发布产物 | /opt/*/releases | 否 | 可重建的版本包和静态文件 |
 | 设计事实来源 | 根目录 README.md | 是 | 唯一当前设计文档 |
 

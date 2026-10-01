@@ -3,6 +3,7 @@ package blog
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,8 +12,8 @@ import (
 	"strings"
 )
 
-// PublishArchive 在受控暂存目录解包，拒绝链接及路径逃逸，再走同一发布器。
-func PublishArchive(archive, root string, sequence int64) error {
+// PublishArchive 校验并解压上传包，事务入库后删除临时文件。
+func (r *ArticleRepository) PublishArchive(ctx context.Context, archive string, sequence int64) error {
 	file, err := os.Open(archive)
 	if err != nil {
 		return err
@@ -30,10 +31,7 @@ func PublishArchive(archive, root string, sequence int64) error {
 		return err
 	}
 	defer gz.Close()
-	if err := os.MkdirAll(root, 0750); err != nil {
-		return err
-	}
-	staged, err := os.MkdirTemp(root, ".incoming-")
+	staged, err := os.MkdirTemp("", "blog-import-")
 	if err != nil {
 		return err
 	}
@@ -94,5 +92,5 @@ func PublishArchive(archive, root string, sequence int64) error {
 			return fmt.Errorf("压缩包只允许普通文件和目录: %s", name)
 		}
 	}
-	return Publish(staged, root, sequence)
+	return r.PublishDirectory(ctx, staged, sequence)
 }

@@ -14,7 +14,7 @@ import (
 func registerBlogRoutes(router chi.Router, deps Dependencies) {
 	if deps.BlogArticles != nil {
 		router.Get("/api/v1/blog/posts", func(w http.ResponseWriter, r *http.Request) {
-			articles, err := deps.BlogArticles.List()
+			articles, err := deps.BlogArticles.List(r.Context())
 			if err != nil {
 				blogError(w, err)
 				return
@@ -26,7 +26,7 @@ func registerBlogRoutes(router chi.Router, deps Dependencies) {
 			writeJSON(w, 200, articles)
 		})
 		router.Get("/api/v1/blog/posts/*", func(w http.ResponseWriter, r *http.Request) {
-			a, err := deps.BlogArticles.Get(chi.URLParam(r, "*"))
+			a, err := deps.BlogArticles.Get(r.Context(), chi.URLParam(r, "*"))
 			if err != nil {
 				blogError(w, err)
 				return

@@ -1,6 +1,8 @@
 package httpserver
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/xml"
 	"fmt"
 	"html"
@@ -20,7 +22,7 @@ const blogPublicURL = "https://aowugong.top"
 var titleElement = regexp.MustCompile(`(?s)<title>.*?</title>`)
 
 type blogPages struct {
-	articles  *blog.ArticleStore
+	articles  *blog.ArticleRepository
 	staticDir string
 }
 
@@ -36,19 +38,16 @@ func (p blogPages) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(requestPath, "/blog/assets/") {
-		file, err := p.articles.Asset(strings.TrimPrefix(requestPath, "/blog/assets/"))
+		file, err := p.articles.Asset(r.Context(), strings.TrimPrefix(requestPath, "/blog/assets/"))
 		if err != nil {
 			blogError(w, err)
 			return
 		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		defer file.Close()
-		info, err := file.Stat()
-		if err != nil || !info.Mode().IsRegular() {
-			blogError(w, blog.ErrNotFound)
-			return
-		}
-		http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+		w.Header().Set("Content-Type", file.ContentType)
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("ETag", fmt.Sprintf(`"%x"`, sha256.Sum256(file.Content)))
+		http.ServeContent(w, r, filepath.Base(file.Path), time.Time{}, bytes.NewReader(file.Content))
 		return
 	}
 	if requestPath == "/blog/rss.xml" || requestPath == "/blog/sitemap.xml" {
@@ -63,7 +62,7 @@ func (p blogPages) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case requestPath == "/blog/tags" || strings.HasPrefix(requestPath, "/blog/tags/"):
 		title = "标签 · 嗷呜公"
 	case strings.HasPrefix(requestPath, "/blog/posts/"):
-		article, err := p.articles.Get(strings.TrimPrefix(requestPath, "/blog/posts/"))
+		article, err := p.articles.Get(r.Context(), strings.TrimPrefix(requestPath, "/blog/posts/"))
 		if err != nil {
 			blogError(w, err)
 			return
@@ -119,7 +118,7 @@ type sitemapDocument struct {
 }
 
 func (p blogPages) feed(w http.ResponseWriter, r *http.Request, requestPath string) {
-	articles, err := p.articles.List()
+	articles, err := p.articles.List(r.Context())
 	if err != nil {
 		blogError(w, err)
 		return

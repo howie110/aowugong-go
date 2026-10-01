@@ -3,6 +3,8 @@ package blog
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
+	"github.com/howiedata/aowugong-go/internal/testdatabase"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,7 +36,7 @@ func TestArchiveRejectsTraversalAndLinks(t *testing.T) {
 	for _, h := range []*tar.Header{{Name: "../escape.md", Typeflag: tar.TypeReg, Size: int64(len(articleFixture))}, {Name: "/absolute.md", Typeflag: tar.TypeReg, Size: int64(len(articleFixture))}, {Name: "linked.md", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"}} {
 		archive := filepath.Join(t.TempDir(), "content.tar.gz")
 		makeArchive(t, archive, []*tar.Header{h})
-		if err := PublishArchive(archive, t.TempDir(), 1); err == nil {
+		if err := NewArticleRepository(testdatabase.Open(t)).PublishArchive(context.Background(), archive, 1); err == nil {
 			t.Fatalf("accepted %+v", h)
 		}
 	}
@@ -42,11 +44,11 @@ func TestArchiveRejectsTraversalAndLinks(t *testing.T) {
 func TestArchivePublishesOnlyValidatedContent(t *testing.T) {
 	archive := filepath.Join(t.TempDir(), "content.tar.gz")
 	makeArchive(t, archive, []*tar.Header{{Name: "hello.md", Typeflag: tar.TypeReg, Size: int64(len(articleFixture))}})
-	root := t.TempDir()
-	if err := PublishArchive(archive, root, 1); err != nil {
+	repo := NewArticleRepository(testdatabase.Open(t))
+	if err := repo.PublishArchive(context.Background(), archive, 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewArticleStore(filepath.Join(root, "current")).Get("hello"); err != nil {
+	if _, err := repo.Get(context.Background(), "hello"); err != nil {
 		t.Fatal(err)
 	}
 }
