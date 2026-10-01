@@ -76,7 +76,7 @@ export const navGroups: NavGroup[] = [
     label: "内容服务",
     icon: BookOpen,
     items: [
-      { key: "blogStatus", label: "状态", icon: Newspaper, permission: pagePermissionMap.blogStatus },
+      { key: "blogStatus", label: "记录此刻", icon: Newspaper, permission: pagePermissionMap.blogStatus },
       { key: "weread", label: "微信读书", icon: BookOpen, permission: pagePermissionMap.weread },
       { key: "mahjong", label: "麻将战绩", icon: Trophy, permission: pagePermissionMap.mahjong },
       { key: "subscriptions", label: "订阅管理", icon: CreditCard, permission: pagePermissionMap.subscriptions },

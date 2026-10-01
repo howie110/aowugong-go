@@ -3,7 +3,7 @@ import { getArticle, listArticles, listStatuses, type Article, type BlogStatus }
 import { Lightbox, StatusCard } from "./blog/status-card";
 import "./blog/styles.css";
 
-const links = [["/blog", "文章"], ["/blog/status", "状态"], ["/blog/tags", "标签"], ["/blog/posts/blog-2000-01-04", "项目"], ["/blog/posts/blog-2000-01-03", "咖啡"], ["/blog/posts/blog-2000-01-02", "关于"]];
+const links = [["/blog", "文章"], ["/blog/status", "动态"], ["/blog/tags", "标签"], ["/blog/posts/blog-2000-01-04", "项目"], ["/blog/posts/blog-2000-01-03", "咖啡"], ["/blog/posts/blog-2000-01-02", "关于"]];
 export function BlogPage() {
   const path = decodeURIComponent(window.location.pathname.replace(/\/+$/, ""));
   const isStatus = path === "/blog/status";
@@ -45,10 +45,10 @@ export function BlogPage() {
         <div className="blog-sidebar-links"><a href="/blog/rss.xml">RSS ↗</a><a href="https://github.com/howie110" target="_blank" rel="noopener noreferrer">GitHub ↗</a></div>
       </aside>
       <main className="blog-main">
-        {!slug && <header className="blog-page-header"><p className="blog-eyebrow">{isStatus ? "生活的片刻" : "文字与记录"}</p><h1>{isStatus ? "状态" : path.startsWith("/blog/tags") ? tag || "标签" : "文章"}</h1><p>{isStatus ? "随手记下，这一刻的想法。" : "对世界的观察、理解、思考与实验。"}</p></header>}
+        {!slug && <header className="blog-page-header"><p className="blog-eyebrow">{isStatus ? "生活的片刻" : "文字与记录"}</p><h1>{isStatus ? "动态" : path.startsWith("/blog/tags") ? tag || "标签" : "文章"}</h1><p>{isStatus ? "随手记下，这一刻的想法。" : "对世界的观察、理解、思考与实验。"}</p></header>}
         {error && <p className="blog-error" role="alert">{error}</p>}
         {loading && !statuses.length && <p className="blog-muted" role="status">正在读取…</p>}
-        {isStatus && <><div>{statuses.map((status) => <StatusCard key={status.id} status={status} />)}</div>{!loading && !error && !statuses.length && <p className="blog-muted">还没有发布状态。</p>}{more && <button className="blog-more" disabled={loading} onClick={loadMore}>{loading ? "读取中…" : "更早的状态"}</button>}</>}
+        {isStatus && <><div>{statuses.map((status) => <StatusCard key={status.id} status={status} />)}</div>{!loading && !error && !statuses.length && <p className="blog-muted">还没有发布动态。</p>}{more && <button className="blog-more" disabled={loading} onClick={loadMore}>{loading ? "读取中…" : "更早的动态"}</button>}</>}
         {article && <article><header className="blog-article-header"><a href="/blog" className="blog-back">← 所有文章</a><h1>{article.title}</h1><time>{article.date}</time><div className="blog-tags">{article.tags.map((tag) => <a href={`/blog/tags/${encodeURIComponent(tag)}`} key={tag}>{tag}</a>)}</div></header>
           {!!article.toc?.length && <details className="blog-toc"><summary>文章目录</summary>{article.toc.map((heading) => <a key={heading.id} href={`#${heading.id}`} style={{ paddingLeft: `${Math.max(0, heading.level - 2) * 12}px` }}>{heading.text}</a>)}</details>}
           <div className="blog-prose" onClick={(event) => { if (event.target instanceof HTMLImageElement) setZoom(event.target.src); }} dangerouslySetInnerHTML={{ __html: article.html || "" }} />

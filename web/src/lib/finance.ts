@@ -84,7 +84,7 @@ export const pagePermissionMap: Record<FinancePageKey, string> = {
 };
 
 export const pageMetaMap: Record<FinancePageKey, { title: string; description: string }> = {
-  blogStatus: { title: "状态", description: "发布文字与图片，记录生活片刻。" },
+  blogStatus: { title: "记录此刻", description: "发布文字与图片，记录生活片刻。" },
   overview: {
     title: "控制台",
     description: "集中查看投资研究、内容服务、定时任务和系统运维状态。",
