@@ -9,7 +9,6 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
-	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -59,7 +58,7 @@ func (w ossMediaWriter) Put(ctx context.Context, key string, reader io.Reader, k
 }
 
 // Upload 限流读取并验证图片，仅写入 blog/status/；调用方无需信任原文件名。
-func (s *MediaStore) Upload(ctx context.Context, reader io.Reader, contentType string) (Image, error) {
+func (s *MediaStore) Upload(ctx context.Context, reader io.Reader, _ string) (Image, error) {
 	if err := ctx.Err(); err != nil {
 		return Image{}, err
 	}
@@ -76,11 +75,8 @@ func (s *MediaStore) Upload(ctx context.Context, reader io.Reader, contentType s
 	if int64(len(data)) > MaxImageBytes {
 		return Image{}, fmt.Errorf("%w: 单张图片最大 10 MiB", ErrInvalidInput)
 	}
+	// 微信等客户端的文件名或 MIME 可能不准确，以图片实际内容决定格式。
 	detected := http.DetectContentType(data)
-	kind, _, err := mime.ParseMediaType(contentType)
-	if err != nil || kind != detected {
-		return Image{}, fmt.Errorf("%w: 文件类型与图片内容不符", ErrInvalidInput)
-	}
 	extension := ""
 	switch detected {
 	case "image/jpeg":

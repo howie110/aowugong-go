@@ -43,7 +43,7 @@ export function BlogStatusPage() {
   async function selectFiles(files: FileList | null) {
     if (!files) return;
     if (uploads.length + files.length > 9) { setError("每条动态最多九张图片。"); return; }
-    const invalid = Array.from(files).find((file) => file.size > 10 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type));
+    const invalid = Array.from(files).find((file) => file.size > 10 * 1024 * 1024);
     if (invalid) { setError(`${invalid.name}：请使用不超过 10 MiB 的 JPEG、PNG、WebP 或 GIF 图片。`); return; }
     const pending = Array.from(files).map((file) => { const preview = URL.createObjectURL(file); uploadURLs.current.add(preview); return { id: crypto.randomUUID(), file, preview, progress: 0, working: true }; });
     setError(""); setDirty(true); setUploads((current) => [...current, ...pending]);

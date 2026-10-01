@@ -49,7 +49,7 @@ func TestImageUploadRejectsInvalidContent(t *testing.T) {
 	for _, tc := range []struct {
 		data []byte
 		kind string
-	}{{[]byte("not a PNG"), "image/png"}, {pngFixture(t), "image/jpeg"}, {make([]byte, 10<<20+1), "image/png"}} {
+	}{{[]byte("not a PNG"), "image/png"}, {make([]byte, 10<<20+1), "image/png"}} {
 		if _, err := s.Upload(context.Background(), bytes.NewReader(tc.data), tc.kind); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("invalid accepted %v", err)
 		}
@@ -68,5 +68,21 @@ func TestImageUploadSurfacesStoreFailure(t *testing.T) {
 	cancel()
 	if _, err := s.Upload(ctx, bytes.NewReader(pngFixture(t)), "image/png"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel %v", err)
+	}
+}
+
+func TestImageUploadUsesActualFormatDespiteClientType(t *testing.T) {
+	for _, kind := range []string{"image/jpeg", "application/octet-stream", "", "image/png; invalid"} {
+		t.Run(kind, func(t *testing.T) {
+			writer := &recordingMediaWriter{}
+			data := pngFixture(t)
+			result, err := newMediaStore(writer).Upload(context.Background(), bytes.NewReader(data), kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if writer.kind != "image/png" || !strings.HasSuffix(result.Key, ".png") || !bytes.Equal(writer.data, data) {
+				t.Fatalf("actual image format not preserved: %+v", result)
+			}
+		})
 	}
 }
