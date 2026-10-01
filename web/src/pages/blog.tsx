@@ -20,9 +20,12 @@ export function BlogPage() {
   const [zoom, setZoom] = useState("");
   const [dark, setDark] = useState(() => localStorage.getItem("blog-theme") === "dark");
   useEffect(() => {
+    document.title = `嗷呜公-${isStatus ? "动态" : tag || (path === "/blog/tags" ? "标签" : "文章")}`;
+  }, [isStatus, tag, path]);
+  useEffect(() => {
     let active = true;
     const request = isStatus ? listStatuses().then((rows) => { if (active) { setStatuses(rows); setMore(rows.length === 20); } })
-      : slug ? getArticle(slug).then((item) => { if (active) { setArticle(item); document.title = `${item.title} · 嗷呜公`; } })
+      : slug ? getArticle(slug).then((item) => { if (active) { setArticle(item); document.title = `嗷呜公-${item.title}`; } })
         : listArticles().then((rows) => { if (active) setArticles(rows); });
     request.catch((e) => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };

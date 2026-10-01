@@ -21,7 +21,7 @@ test("根页面使用工具分享名称和应用图标", () => {
   const indexSource = readSource("index.html");
   const faviconPath = path.resolve(__dirname, "../public/favicon.png");
 
-  assert.match(indexSource, /<title>嗷呜公 · 工具分享<\/title>/);
+  assert.match(indexSource, /<title>嗷呜公-工具分享<\/title>/);
   assert.match(indexSource, /<link rel="icon" type="image\/png" href="\/favicon\.png\?v=d998807b" \/>/);
   assert.equal(fs.existsSync(faviconPath), true);
 });

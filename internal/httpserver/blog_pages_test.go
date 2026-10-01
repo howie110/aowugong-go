@@ -33,7 +33,7 @@ func TestBlogPagesMetadataFeedsAnd404(t *testing.T) {
 		path     string
 		want     int
 		contains string
-	}{{"/api/v1/blog/posts", 200, `"thumbnail":"https://example.com/first.jpg"`}, {"/blog", 200, "嗷呜公"}, {"/blog/posts/hello", 200, "Hello &lt;world&gt;"}, {"/blog/posts/missing", 404, "不存在"}, {"/blog/unknown", 404, "不存在"}, {"/blog/rss.xml", 200, "https://aowugong.top/blog/posts/hello"}, {"/blog/sitemap.xml", 200, "https://aowugong.top/blog/posts/hello"}, {"/blog/posts/blog-2000-01-05", 301, "/blog/status"}} {
+	}{{"/api/v1/blog/posts", 200, `"thumbnail":"https://example.com/first.jpg"`}, {"/blog", 200, "<title>嗷呜公-文章</title>"}, {"/blog/status", 200, "<title>嗷呜公-动态</title>"}, {"/blog/tags/life", 200, "<title>嗷呜公-life</title>"}, {"/blog/posts/hello", 200, "<title>嗷呜公-Hello &lt;world&gt;</title>"}, {"/blog/posts/missing", 404, "不存在"}, {"/blog/unknown", 404, "不存在"}, {"/blog/rss.xml", 200, "https://aowugong.top/blog/posts/hello"}, {"/blog/sitemap.xml", 200, "https://aowugong.top/blog/posts/hello"}, {"/blog/posts/blog-2000-01-05", 301, "/blog/status"}} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("GET", tc.path, nil))
 		if rec.Code != tc.want || !strings.Contains(rec.Body.String(), tc.contains) {

@@ -77,7 +77,7 @@ function getHost(url: string) {
 /** 渲染根域名公开主页，供工具分享站点备案展示使用。 */
 export function PublicHomePage() {
   useEffect(() => {
-    document.title = "嗷呜公 · 工具分享";
+    document.title = "嗷呜公-工具分享";
   }, []);
 
   return (
@@ -98,7 +98,7 @@ export function PublicHomePage() {
 
       <section className="mx-auto max-w-5xl px-5 pb-14 pt-14 sm:px-6 sm:pb-16 sm:pt-16">
         <div className="text-center">
-          <Badge variant="secondary">嗷呜公 · 工具分享</Badge>
+          <Badge variant="secondary">嗷呜公-工具分享</Badge>
           <h1 className="mt-4 text-3xl font-semibold tracking-normal sm:text-4xl">网站导航</h1>
           <p className="mx-auto mt-4 max-w-xl text-sm leading-7 text-muted-foreground sm:text-base">
             整理日常会用到的公开网站，按用途分类，点击即可访问。

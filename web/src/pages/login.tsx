@@ -22,6 +22,7 @@ type LoginPageProps = {
 
 /** 渲染后台登录页面并管理浏览器记住密码状态。 */
 export function LoginPage({ onLoggedIn }: LoginPageProps) {
+  useEffect(() => { document.title = "嗷呜公-登录"; }, []);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [rememberPassword, setRememberPassword] = useState(false);

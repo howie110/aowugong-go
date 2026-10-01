@@ -54,20 +54,23 @@ func (p blogPages) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.feed(w, r, requestPath)
 		return
 	}
-	title, description := "嗷呜公 · 博客", "熬一些鸡汤，记录生活与思考。"
+	title, description := "嗷呜公-文章", "熬一些鸡汤，记录生活与思考。"
 	switch {
 	case requestPath == "/blog":
 	case requestPath == "/blog/status":
-		title = "状态 · 嗷呜公"
+		title = "嗷呜公-动态"
 	case requestPath == "/blog/tags" || strings.HasPrefix(requestPath, "/blog/tags/"):
-		title = "标签 · 嗷呜公"
+		title = "嗷呜公-标签"
+		if strings.HasPrefix(requestPath, "/blog/tags/") {
+			title = "嗷呜公-" + strings.TrimPrefix(requestPath, "/blog/tags/")
+		}
 	case strings.HasPrefix(requestPath, "/blog/posts/"):
 		article, err := p.articles.Get(r.Context(), strings.TrimPrefix(requestPath, "/blog/posts/"))
 		if err != nil {
 			blogError(w, err)
 			return
 		}
-		title = article.Title + " · 嗷呜公"
+		title = "嗷呜公-" + article.Title
 		description = article.Description
 	default:
 		blogError(w, blog.ErrNotFound)

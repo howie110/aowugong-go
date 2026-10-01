@@ -1,6 +1,7 @@
 import { requestWorkbenchNavigation } from "@/lib/navigation-guard";
 import { Suspense, lazy, useEffect, useState } from "react";
 
+import { pageLabelMap } from "@/components/layout/app-navigation";
 import { AppShell } from "@/components/layout/app-shell";
 import { UserProfile, getProfile } from "@/lib/auth";
 import {
@@ -92,8 +93,8 @@ export function DashboardPage({ initialPage }: DashboardPageProps) {
   const [isStockAnalysisMasked, setIsStockAnalysisMasked] = useState(true);
 
   useEffect(() => {
-    document.title = "Aowugong 工作台";
-  }, []);
+    document.title = `嗷呜公-${pageLabelMap[activePage]}`;
+  }, [activePage]);
 
   useEffect(() => {
     getProfile()
