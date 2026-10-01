@@ -30,6 +30,7 @@ func scanArticle(row interface{ Scan(...any) error }) (Article, error) {
 	if err := json.Unmarshal([]byte(toc), &a.TOC); err != nil {
 		return a, err
 	}
+	a.Thumbnail = firstBodyImage(a.HTML)
 	return a, nil
 }
 func (r *ArticleRepository) Get(ctx context.Context, slug string) (Article, error) {

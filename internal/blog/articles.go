@@ -21,6 +21,7 @@ type Heading struct {
 	Level int    `json:"level"`
 }
 type Article struct {
+	Thumbnail   string    `json:"thumbnail,omitempty"`
 	Markdown    string    `json:"-"`
 	Slug        string    `json:"slug"`
 	Title       string    `json:"title"`

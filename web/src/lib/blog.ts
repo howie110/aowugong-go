@@ -2,7 +2,7 @@ import { authorizedFetch, clearToken, getToken } from "@/lib/auth";
 import { requestJSON, responseError } from "@/lib/request";
 
 export type BlogImage = { key: string; url: string };
-export type Article = { slug: string; title: string; date: string; tags: string[]; description: string; html?: string; toc: { id: string; text: string; level: number }[] | null };
+export type Article = { thumbnail?: string; slug: string; title: string; date: string; tags: string[]; description: string; html?: string; toc: { id: string; text: string; level: number }[] | null };
 export type BlogStatus = { id: string; body: string; images: BlogImage[]; published: boolean; published_at: string | null; created_at: string; updated_at: string };
 export type StatusInput = Pick<BlogStatus, "id" | "body" | "images" | "published">;
 const publicAPI = "/api/v1/blog";
