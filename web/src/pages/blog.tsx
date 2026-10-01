@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { getArticle, listArticles, listStatuses, type Article, type BlogStatus } from "@/lib/blog";
 import { Lightbox, StatusCard } from "./blog/status-card";
 import "./blog/styles.css";
+import "./blog/prose.css";
+import { StickerWall } from "./blog/sticker-wall";
 
 const links = [["/blog", "文章"], ["/blog/status", "动态"], ["/blog/tags", "标签"], ["/blog/posts/blog-2000-01-04", "项目"], ["/blog/posts/blog-2000-01-03", "咖啡"], ["/blog/posts/blog-2000-01-02", "关于"]];
 export function BlogPage() {
@@ -27,6 +29,11 @@ export function BlogPage() {
   }, [isStatus, slug]);
   useEffect(() => {
     if (!article) return;
+    document.querySelectorAll<HTMLAnchorElement>(".blog-prose a[href]").forEach((link) => {
+      if (link.getAttribute("href")?.startsWith("#")) return;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    });
     const buttons: HTMLButtonElement[] = [];
     document.querySelectorAll<HTMLElement>(".blog-prose pre").forEach((pre) => {
       const button = document.createElement("button"); button.className = "blog-copy"; button.textContent = "复制";
@@ -43,6 +50,7 @@ export function BlogPage() {
         <nav aria-label="博客导航">{links.map(([href, label]) => <a key={href} href={href} className={path === href || (href === "/blog" && slug && !slug.startsWith("blog-2000")) ? "active" : ""}>{label}</a>)}</nav>
         <button className="blog-theme" onClick={() => { setDark(!dark); localStorage.setItem("blog-theme", dark ? "light" : "dark"); }}>{dark ? "☀ 浅色" : "☾ 深色"}</button>
         <div className="blog-sidebar-links"><a href="/blog/rss.xml">RSS ↗</a><a href="https://github.com/howie110" target="_blank" rel="noopener noreferrer">GitHub ↗</a></div>
+        {!slug && !isStatus && !tag && path === "/blog" && <StickerWall />}
       </aside>
       <main className="blog-main">
         {!slug && <header className="blog-page-header"><p className="blog-eyebrow">{isStatus ? "生活的片刻" : "文字与记录"}</p><h1>{isStatus ? "动态" : path.startsWith("/blog/tags") ? tag || "标签" : "文章"}</h1><p>{isStatus ? "随手记下，这一刻的想法。" : "对世界的观察、理解、思考与实验。"}</p></header>}
@@ -54,7 +62,7 @@ export function BlogPage() {
           <div className="blog-prose" onClick={(event) => { if (event.target instanceof HTMLImageElement) setZoom(event.target.src); }} dangerouslySetInnerHTML={{ __html: article.html || "" }} />
         </article>}
         {!slug && !isStatus && <>{path === "/blog/tags" && <div className="blog-tag-cloud">{tags.map((tag) => <a href={`/blog/tags/${encodeURIComponent(tag)}`} key={tag}>{tag}<span>{articles.filter((a) => a.tags.includes(tag)).length}</span></a>)}</div>}
-          {articles.filter((item) => !item.slug.startsWith("blog-2000") && (!tag || item.tags.includes(tag))).map((item) => <a className={`blog-article-row${item.thumbnail ? " blog-article-row-with-image" : ""}`} href={`/blog/posts/${item.slug.split("/").map(encodeURIComponent).join("/")}`} key={item.slug}><time>{item.date}</time><div><h2>{item.title}</h2><p>{item.description}</p><div className="blog-tags">{item.tags.map((tag) => <span key={tag}>{tag}</span>)}</div></div>{item.thumbnail ? <img className="blog-article-thumbnail" src={item.thumbnail} alt="" loading="lazy" decoding="async" /> : <span className="blog-arrow">↗</span>}</a>)}</>}
+          {articles.filter((item) => !item.slug.startsWith("blog-2000") && (!tag || item.tags.includes(tag))).map((item) => <a className="blog-article-row" href={`/blog/posts/${item.slug.split("/").map(encodeURIComponent).join("/")}`} key={item.slug}><time>{item.date}</time><div><h2>{item.title}</h2><p>{item.description}</p><div className="blog-tags">{item.tags.map((tag) => <span key={tag}>{tag}</span>)}</div></div><span className="blog-arrow">↗</span></a>)}</>}
         <footer className="blog-footer">嗷呜公 · 记录自己的生活 <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">备案信息见主站</a></footer>
       </main>
     </div>{zoom && <Lightbox url={zoom} onClose={() => setZoom("")} />}

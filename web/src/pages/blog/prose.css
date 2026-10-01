@@ -1,0 +1,84 @@
+/* Book-like reading rhythm, inspired by Retypeset. */
+.blog-prose {
+  font-family: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", STSong, Georgia, serif;
+  font-size: 17px;
+  line-height: 1.95;
+  letter-spacing: .025em;
+  overflow-wrap: anywhere;
+}
+.blog-prose p { margin: 1.35em 0; }
+.blog-prose :is(h1,h2,h3,h4,h5,h6) {
+  line-height: 1.5;
+  margin: 2.2em 0 .9em;
+  font-weight: 600;
+  scroll-margin-top: 24px;
+  text-wrap: balance;
+}
+.blog-prose h1 { font-size: 1.75em; }
+.blog-prose h2 { font-size: 1.45em; }
+.blog-prose h3 { font-size: 1.2em; }
+.blog-prose :is(h1,h2,h3)::after {
+  margin-left: .25rem;
+  vertical-align: baseline;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-weight: 400;
+  letter-spacing: normal;
+  color: color-mix(in srgb, var(--blog-muted) 50%, transparent);
+}
+.blog-prose h1::after { content: "H1" / ""; font-size: .5em; }
+.blog-prose h2::after { content: "H2" / ""; font-size: .55em; }
+.blog-prose h3::after { content: "H3" / ""; font-size: .6em; }
+.blog-prose :is(h4,h5,h6) { font-size: 1em; }
+.blog-prose a {
+  color: var(--blog-accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--blog-accent) 40%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: .25em;
+}
+.blog-prose a:hover { text-decoration-color: currentColor; }
+.blog-prose :is(ul,ol) { padding-left: 1.6em; margin: 1.25em 0; }
+.blog-prose ul { list-style: disc; }
+.blog-prose ol { list-style: decimal; }
+.blog-prose ul ul { list-style: circle; }
+.blog-prose li { padding-left: .3em; margin: .45em 0; }
+.blog-prose li::marker { color: var(--blog-muted); }
+.blog-prose li :is(ul,ol,p) { margin: .5em 0; }
+.blog-prose blockquote {
+  border-left: 2px solid var(--blog-line);
+  padding: .1em 0 .1em 1.25em;
+  margin: 1.8em 0;
+  color: var(--blog-muted);
+  font-size: .96em;
+}
+.blog-prose blockquote > :first-child { margin-top: .3em; }
+.blog-prose blockquote > :last-child { margin-bottom: .3em; }
+.blog-prose img { max-width: 100%; height: auto; border-radius: 4px; margin: 1.8em auto; cursor: zoom-in; }
+.blog-prose pre {
+  position: relative;
+  padding: 38px 20px 20px;
+  background: color-mix(in srgb,var(--blog-muted) 7%,transparent);
+  border: 1px solid var(--blog-line);
+  overflow-x: auto;
+  font-size: 13px;
+  border-radius: 5px;
+  line-height: 1.75;
+  letter-spacing: 0;
+  margin: 1.8em 0;
+}
+.blog-prose code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .85em; }
+.blog-prose :not(pre) > code { background: color-mix(in srgb,var(--blog-muted) 9%,transparent); padding: .15em .35em; border-radius: 3px; }
+.blog-prose pre code { font-size: inherit; }
+.blog-copy { position:absolute; top:8px; right:12px; font:11px ui-sans-serif,system-ui; color:var(--blog-muted); }
+.blog-prose table { display:block; overflow-x:auto; border-collapse:collapse; margin:1.8em 0; font-size:.9em; }
+.blog-prose :is(th,td) { border-bottom:1px solid var(--blog-line); padding:10px 16px; text-align:left; }
+.blog-prose th { font-weight:600; background:color-mix(in srgb,var(--blog-muted) 5%,transparent); }
+.blog-prose hr { border:0; border-top:1px solid var(--blog-line); width:25%; margin:3em auto; }
+.blog-prose details { margin:1.6em 0; padding:1em 1.2em; border:1px solid var(--blog-line); border-radius:4px; }
+.blog-prose summary { cursor:pointer; font-weight:600; }
+.blog-article-header h1 { font-family:"Songti SC", STSong, Georgia, serif; letter-spacing:.035em; }
+.blog-toc { background:transparent; border-block:1px solid var(--blog-line); border-radius:0; padding:16px 0; }
+@media(max-width:760px) {
+  .blog-prose { font-size:16px; line-height:1.9; letter-spacing:.015em; }
+  .blog-prose blockquote { padding-left:1em; }
+}

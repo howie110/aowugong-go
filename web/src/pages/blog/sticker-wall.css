@@ -1,0 +1,296 @@
+
+  .sticker-region {
+    display: none;
+    position: relative;
+    isolation: isolate;
+  }
+
+  .sticker-stage {
+    position: absolute;
+    z-index: 40;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .sticker-anchor {
+    position: absolute;
+    z-index: 40;
+    left: var(--desktop-left);
+    top: var(--desktop-top);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+  }
+
+  .sticker-shell {
+    position: relative;
+    z-index: 40;
+    display: block;
+    width: var(--sticker-width);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: grab;
+    pointer-events: auto;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    will-change: transform;
+  }
+
+  .sticker-shell[data-dragging='true'] {
+    cursor: grabbing;
+  }
+
+  .sticker-shell:focus-visible {
+    border-radius: 0.75rem;
+    outline: 2px solid color-mix(in oklab, var(--blog-accent) 78%, transparent);
+    outline-offset: 0.5rem;
+  }
+
+  .sticker-enter,
+  .sticker-lift,
+  .sticker-bob,
+  .sticker-bend {
+    display: block;
+  }
+
+  [data-ready='false'] .sticker-enter {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0) scale(0.95);
+  }
+
+  [data-ready='true'] .sticker-enter {
+    animation: sticker-enter 520ms cubic-bezier(0.23, 1, 0.32, 1) var(--enter-delay) backwards;
+  }
+
+  .sticker-lift {
+    perspective: 520px;
+    transform: scale(1) rotate(var(--drag-tilt, 0deg));
+    transform-origin: 50% 58%;
+    transition: transform 150ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .sticker-bob {
+    transform: rotate(var(--sticker-rotation));
+    transform-origin: 50% 58%;
+  }
+
+  .sticker-bend {
+    position: relative;
+    transform: rotateX(0deg) scaleY(1) translateY(0);
+    transform-origin: var(--grab-x, 50%) var(--grab-y, 58%);
+    transition: transform 150ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .sticker-shell[data-dragging='true'] .sticker-lift {
+    transform: scale(1.045) rotate(var(--drag-tilt, 0deg));
+  }
+
+  .sticker-shell[data-dragging='true'] .sticker-bend {
+    transform: rotateX(7deg) scaleY(0.966) translateY(-1px);
+  }
+
+  .sticker-shell[data-settling='true']:not([data-dragging='true']) .sticker-lift {
+    animation: sticker-lift-settle 360ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+
+  .sticker-shell[data-settling='true']:not([data-dragging='true']) .sticker-bend {
+    animation: sticker-bend-settle 280ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+
+  .sticker-image {
+    position: relative;
+    z-index: 1;
+    display: block;
+    width: 100%;
+    height: auto;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+
+  .sticker-shadow {
+    position: absolute;
+    z-index: 0;
+    top: calc(-1 * var(--shadow-pad));
+    left: calc(-1 * var(--shadow-pad));
+    width: calc(100% + var(--shadow-pad) * 2);
+    max-width: none;
+    height: auto;
+    opacity: 0.3;
+    pointer-events: none;
+    transform: translateX(2px);
+    transition: opacity 240ms cubic-bezier(0.23, 1, 0.32, 1), transform 240ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  :global(html.dark) .sticker-shadow {
+    opacity: 0.72;
+  }
+
+  .sticker-shell[data-dragging='true'] .sticker-shadow {
+    opacity: 0.26;
+    transform: translateX(6px) translateY(4%) scale(1.03);
+  }
+
+  :global(html.dark) .sticker-shell[data-dragging='true'] .sticker-shadow {
+    opacity: 0.6;
+  }
+
+  .sticker-crease {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    background: radial-gradient(
+        ellipse at var(--grab-x, 50%) var(--grab-y, 52%),
+        rgba(255, 255, 255, 0.58) 0%,
+        rgba(255, 255, 255, 0.2) 25%,
+        transparent 52%
+      ),
+      linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.26),
+        transparent 42%,
+        rgba(0, 0, 0, 0.11)
+      );
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-3px) scaleY(0.92);
+    transform-origin: var(--grab-x, 50%) var(--grab-y, 52%);
+    -webkit-mask-image: var(--sticker-mask);
+    mask-image: var(--sticker-mask);
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-size: 100% 100%;
+    mask-size: 100% 100%;
+  }
+
+  .sticker-shell[data-dragging='true'] .sticker-crease {
+    opacity: 0.52;
+    transform: translateY(-1px) scaleY(1);
+    transition: opacity 130ms cubic-bezier(0.23, 1, 0.32, 1), transform 130ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .sticker-shell[data-settling='true']:not([data-dragging='true']) .sticker-crease {
+    animation: sticker-crease-settle 280ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+
+  .sticker-controls {
+    position: absolute;
+    right: 0;
+    bottom: 0.25rem;
+    z-index: 30;
+    display: flex;
+    gap: 0.2rem;
+    pointer-events: auto;
+  }
+
+  .sticker-control {
+    display: grid;
+    width: 1.85rem;
+    height: 1.85rem;
+    place-items: center;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0.45rem;
+    background: transparent;
+    color: color-mix(in oklab, var(--blog-muted) 68%, transparent);
+    cursor: pointer;
+    transition: color 160ms ease, background-color 160ms ease, transform 160ms ease;
+  }
+
+  .sticker-control:hover,
+  .sticker-control:focus-visible {
+    background: color-mix(in oklab, var(--blog-muted) 8%, transparent);
+    color: var(--blog-text);
+  }
+
+  .sticker-control:active {
+    transform: translateY(1px);
+  }
+
+  .sticker-control:disabled {
+    cursor: wait;
+    opacity: 0.45;
+  }
+
+  .sticker-control svg {
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .sticker-sound[data-enabled='true'] .sound-off,
+  .sticker-sound[data-enabled='false'] .sound-on {
+    display: none;
+  }
+
+  @keyframes sticker-enter {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 18px, 0) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+  }
+
+  @keyframes sticker-lift-settle {
+    0% { transform: translateY(-1px) scale(1.045); }
+    46% { transform: translateY(1px) scale(0.988); }
+    74% { transform: translateY(0) scale(1.006); }
+    100% { transform: translateY(0) scale(1); }
+  }
+
+  @keyframes sticker-bend-settle {
+    0% { transform: rotateX(7deg) scaleY(0.966) translateY(-1px); }
+    58% { transform: rotateX(-2deg) scaleY(1.012) translateY(0); }
+    100% { transform: rotateX(0deg) scaleY(1) translateY(0); }
+  }
+
+  @keyframes sticker-crease-settle {
+    0% { opacity: 0.46; transform: translateY(-1px) scaleY(1); }
+    55% { opacity: 0.16; transform: translateY(1px) scaleY(1.05); }
+    100% { opacity: 0; transform: translateY(0) scaleY(1); }
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .sticker-shell:not([data-dragging='true']):hover .sticker-shadow {
+      opacity: 0.34;
+      transform: translateX(2px) translateY(1%) scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sticker-enter,
+    .sticker-lift,
+    .sticker-bend,
+    .sticker-shadow {
+      animation: none !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+.blog-sidebar .sticker-region{display:block;height:320px;margin-top:28px;--color-text:var(--blog-muted)}
+.blog-sidebar .sticker-controls{top:157px;bottom:auto;left:50%;right:auto;transform:translateX(-50%)}
+@media(max-width:760px){.blog-sidebar .sticker-region{display:none}}
+
+/* Keep the complete sticker group together in the wide-screen outer margin. */
+@media(min-width:1280px){
+  .blog-sidebar .sticker-region{
+    position:fixed;
+    width:160px;
+    height:320px;
+    left:max(0px, calc((100vw - 1110px) / 4 - 80px));
+    top:51px;
+    margin-top:0;
+  }
+}

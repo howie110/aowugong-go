@@ -14,8 +14,8 @@ export function StatusCard({ status, actions }: { status: BlogStatus; actions?: 
   const [zoom, setZoom] = useState("");
   return <article className="blog-status-card">
     <div className="blog-status-author"><img src="/blog-static/avatar.png" alt="" /><div><strong>嗷呜公</strong><time dateTime={status.published_at || status.created_at}>{new Date(status.published_at || status.created_at).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}</time></div>{!status.published && <span className="blog-draft">草稿</span>}</div>
-    <StatusText text={status.body} />
     {!!status.images.length && <div className={`blog-image-grid ${status.images.length === 1 ? "single" : ""}`}>{status.images.map((image) => <button key={image.key} onClick={() => setZoom(image.url)} aria-label="查看大图"><img src={image.url} alt="状态配图" loading="lazy" /></button>)}</div>}
+    {!!status.body && <StatusText text={status.body} />}
     {actions && <div className="blog-status-actions">{actions}</div>}
     {zoom && <Lightbox url={zoom} onClose={() => setZoom("")} />}
   </article>;

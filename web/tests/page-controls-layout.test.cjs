@@ -19,10 +19,10 @@ test("共享页头不再显示右上角日期", () => {
 
 test("根页面使用工具分享名称和应用图标", () => {
   const indexSource = readSource("index.html");
-  const faviconPath = path.resolve(__dirname, "../public/favicon.svg");
+  const faviconPath = path.resolve(__dirname, "../public/favicon.png");
 
   assert.match(indexSource, /<title>嗷呜公 · 工具分享<\/title>/);
-  assert.match(indexSource, /<link rel="icon" type="image\/svg\+xml" href="\/favicon\.svg" \/>/);
+  assert.match(indexSource, /<link rel="icon" type="image\/png" href="\/favicon\.png" \/>/);
   assert.equal(fs.existsSync(faviconPath), true);
 });
 
