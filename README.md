@@ -272,9 +272,11 @@ aowugong-go 是 Go 模块化单体，统一提供：
 
 ### 3.7 博客运行与验证记录
 
-- 本轮发布内容（2026-10-01，用户已授权部署）：笔记的 39 个博客文件已将 image 属性移到正文首行，博客模板移除 image；Go 网站 favicon 换为旧 Astro 的 `public/icons/aowugong.png`。笔记中的默认 spring_updates.jpg 图片引用已移除；发布时恢复此前暂停的 `sync-blog.yml` 工作流并同步文章。
+- 旧博客二级域名已撤除 DNS 和 Caddy 入口，不保留跳转；HTTPS 直连原服务器也不再提供该站点。主站 `/blog` 正常。
 
-- 正式应用版本为 `/opt/aowugong-go/releases/v20261001-blog-thumbnails-2`，保留已经上线的通知 API。迁移 `00010_blog_statuses.sql` 和 `00012_blog_articles.sql` 已应用，生产文章 38 篇、历史状态 8 条。状态需要 `blog.status.manage` 权限，默认管理员具备；普通用户不可发布。
+- 本轮发布内容（2026-10-01，用户已授权部署）：笔记的 39 个博客文件已将 image 属性移到正文首行，博客模板移除 image；Go 网站 favicon 换为旧 Astro 的 `public/icons/aowugong.png`。笔记中的默认 spring_updates.jpg 图片引用已移除；前端已部署并通过健康及静态资源校验。`sync-blog.yml` 已恢复，但本次文章入库因专用发布账号无法穿越应用父目录而失败；最小 ACL 修复被自动审批拒绝，等待用户明确授权。线上文章仍是此前成功导入版本。
+
+- 正式应用版本为 `/opt/aowugong-go/releases/v20261001-blog-reading`，保留已经上线的通知 API。迁移 `00010_blog_statuses.sql` 和 `00012_blog_articles.sql` 已应用，生产文章 38 篇、历史状态 8 条。状态需要 `blog.status.manage` 权限，默认管理员具备；普通用户不可发布。
 - 笔记工作流提交 `f72dd4b3` 已合入 main；[第 32 次自动导入](https://github.com/howie110/aowugong-note/actions/runs/36828365573) 成功，数据库发布序号为 32，Go PID 未变化。旧 Markdown 快照、文件锁、目录软链接和 `AOWUGONG_BLOG_CONTENT_DIR` 已移除。
 - 原 Astro 工作流已删除、部署 Secrets 已撤除，服务器静态目录和旧发布账号已删除，Caddy 不再挂载旧博客目录。旧源码仓库保留并标记退役。
 - Go 全量测试、go vet、博客/HTTP/图片代理 race 测试、临时 PostgreSQL 集成测试、88 项前端测试和构建通过。390px 手机布局验证了发布、编辑、撤回草稿和上传失败重试；内部导航有未保存内容提醒。
