@@ -1,5 +1,5 @@
 import { requestWorkbenchNavigation } from "@/lib/navigation-guard";
-import { Activity, LogOut, ShieldCheck } from "lucide-react";
+import { LogOut, ShieldCheck } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -79,9 +79,7 @@ export function AppShell({ user, activePage, onNavigate, children }: AppShellPro
                 className="h-11 group-data-[collapsible=icon]:!p-0"
                 onClick={() => onNavigate("overview")}
               >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-                  <Activity className="h-5 w-5" />
-                </span>
+                <img src="/favicon.png?v=d998807b" alt="嗷呜公头像" className="h-8 w-8 shrink-0 rounded-md object-cover" />
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-semibold">Aowugong</span>
                   <span className="block truncate text-xs font-normal text-muted-foreground">个人工作台</span>
