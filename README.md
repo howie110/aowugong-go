@@ -201,7 +201,7 @@ aowugong-go 是 Go 模块化单体，统一提供：
 - VPN 局部标识统一使用 subscriptionID；历史路由参数 deviceID、Token 派生中的 device: 字节前缀及旧数据契约为兼容性保留，不能机械替换。
 - 结构调整优先验证行为。API 测试检查请求、参数、响应与失败分支，VPN 页面测试检查渲染和复制回调；尚存的其他源码匹配测试不代表完整交互验证。
 
-### 3.6 博客与状态（2026-09-30 已上线）
+### 3.6 博客与状态（2026-10-01 文章入库已上线）
 
 #### 来源与架构
 
@@ -270,18 +270,20 @@ aowugong-go 是 Go 模块化单体，统一提供：
 
 ### 3.7 博客运行与验证记录
 
-- 正式应用版本为 `/opt/aowugong-go/releases/v20260930-blog`。迁移 `00010_blog_statuses.sql` 已应用，生产文章 38 篇、历史状态 8 条。状态需要 `blog.status.manage` 权限，默认管理员具备；普通用户不可发布。
-- 笔记工作流提交 `45773d13` 已合入 main；[第 31 次自动发布](https://github.com/howie110/aowugong-note/actions/runs/36735111072) 成功，内容入口为 `shared/storage/blog/current -> versions/31`。发布只替换内容，不构建前端、不重启 Go。
+- 正式应用版本为 `/opt/aowugong-go/releases/v20261001-blog-db`，保留已经上线的通知 API。迁移 `00010_blog_statuses.sql` 和 `00012_blog_articles.sql` 已应用，生产文章 38 篇、历史状态 8 条。状态需要 `blog.status.manage` 权限，默认管理员具备；普通用户不可发布。
+- 笔记工作流提交 `f72dd4b3` 已合入 main；[第 32 次自动导入](https://github.com/howie110/aowugong-note/actions/runs/36828365573) 成功，数据库发布序号为 32，Go PID 未变化。旧 Markdown 快照、文件锁、目录软链接和 `AOWUGONG_BLOG_CONTENT_DIR` 已移除。
 - 原 Astro 工作流已删除、部署 Secrets 已撤除，服务器静态目录和旧发布账号已删除，Caddy 不再挂载旧博客目录。旧源码仓库保留并标记退役。
 - Go 全量测试、go vet、博客/HTTP/图片代理 race 测试、临时 PostgreSQL 集成测试、88 项前端测试和构建通过。390px 手机布局验证了发布、编辑、撤回草稿和上传失败重试；内部导航有未保存内容提醒。
 - 生产验证了图片上传与公网读取、原 `pic/` 图片读取、草稿隔离、重复创建幂等、编辑与删除；测试草稿和对象已清除。公开文章、状态、RSS、Sitemap、旧文章跳转与主站、工作台、VPN 页面健康检查通过。
+- 2026-10-01 文章入库验证：全量 Go 测试、go vet、博客与 HTTP race 通过；真实 PostgreSQL 导入 38 篇文章，并验证并发旧序号拒绝与失败批次回滚。删除服务器全部 Markdown 快照后，文章 API 仍返回 38 篇；44 个公开地址检查通过。此次生产备份为 `shared/backups/blog-database/before-articles.dump`，已校验。
 - 迁移前 PostgreSQL 完整备份在 `/opt/aowugong-go/shared/backups/blog-migration/before-blog.dump`，已通过 pg_restore 目录校验；它包含私有业务数据，不可进入 Git。应用回滚仅恢复二进制，不能撤销状态数据或内容发布。
 
-文件 CLI（与网站使用相同解析器）：
+文章导入 CLI（网站直接查询数据库，不解析文件）：
 
 ```bash
 aowugong blog validate --dir <文章目录>
-aowugong blog publish --archive <tar.gz> --root <内容根目录> --sequence <工作流序号>
+# 使用专用 BLOG_DATABASE_URL
+aowugong blog publish --archive <tar.gz> --sequence <工作流序号>
 aowugong blog import-status --file <旧动态.md>                         # 只核对
 aowugong blog import-status --file <旧动态.md> --author-id <id> --apply # 一次性导入
 ```
