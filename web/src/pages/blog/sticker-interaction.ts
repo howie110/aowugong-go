@@ -4,7 +4,7 @@ type Point = {
 }
 
 type SavedLayout = Record<string, Point>
-type StickerSoundName = 'pickup' | 'drop' | 'move' | 'reset' | 'cat'
+type StickerSoundName = 'pickup' | 'move' | 'reset' | 'cat'
 
 type DragSession = {
   pointerId: number
@@ -36,15 +36,13 @@ type StickerState = {
   pending: Point | null
   animation: Animation | null
   settleTimer: number | null
-  dropSoundTimer: number | null
   suppressClick: boolean
 }
 
-const LAYOUT_STORAGE_KEY = 'aowugong:sticker-layout:go-sidebar:v3'
+const LAYOUT_STORAGE_KEY = 'aowugong:sticker-layout:go-sidebar:v4'
 const SOUND_STORAGE_KEY = 'aowugong:sticker-sound:v2'
 const SOUND_ASSETS: Record<StickerSoundName, { src: string; volume: number }> = {
   pickup: { src: '/blog-static/sounds/snowman-pickup.wav', volume: 0.68 },
-  drop: { src: '/blog-static/sounds/snowman-drop.wav', volume: 0.78 },
   move: { src: '/blog-static/sounds/snowman-move.wav', volume: 0.42 },
   reset: { src: '/blog-static/sounds/snowman-reset.wav', volume: 0.62 },
   cat: { src: '/blog-static/sounds/cat.mp3', volume: 0.15 },
@@ -58,7 +56,6 @@ const RELEASE_VELOCITY_WINDOW_MS = 90
 const MIN_INERTIA_DURATION = 150
 const MAX_INERTIA_DURATION = 320
 const SETTLE_DURATION = 360
-const DROP_SOUND_DELAY = 166
 const SNAP_BACK_DURATION = 330
 const RUBBER_BAND_GIVE = 44
 const MAX_DRAG_TILT = 7.5
@@ -124,7 +121,6 @@ export const setupStickerWall = (wall: HTMLElement) => {
   let soundEnabled = window.localStorage.getItem(SOUND_STORAGE_KEY) !== 'off'
   const soundCursor: Record<StickerSoundName, number> = {
     pickup: 0,
-    drop: 0,
     move: 0,
     reset: 0,
     cat: 0,
@@ -160,7 +156,6 @@ export const setupStickerWall = (wall: HTMLElement) => {
       pending: null,
       animation: null,
       settleTimer: null,
-      dropSoundTimer: null,
       suppressClick: false,
     }
     element.style.transform = transformOf(saved)
@@ -191,7 +186,6 @@ export const setupStickerWall = (wall: HTMLElement) => {
     void context.resume()
     const durations: Record<Exclude<StickerSoundName, 'cat'>, number> = {
       pickup: 0.2,
-      drop: 0.34,
       move: 0.12,
       reset: 0.46,
     }
@@ -222,7 +216,7 @@ export const setupStickerWall = (wall: HTMLElement) => {
     filter.type = 'lowpass'
     filter.frequency.value = 1800
     const gain = context.createGain()
-    gain.gain.value = name === 'drop' ? 0.42 : 0.28
+    gain.gain.value = 0.28
     source.connect(filter)
     filter.connect(gain)
     gain.connect(context.destination)
@@ -242,20 +236,6 @@ export const setupStickerWall = (wall: HTMLElement) => {
     player.currentTime = 0
     player.volume = SOUND_ASSETS[name].volume
     void player.play().catch(() => playSnowFallback(name))
-  }
-
-  const cancelDropSound = (state: StickerState) => {
-    if (state.dropSoundTimer === null) return
-    window.clearTimeout(state.dropSoundTimer)
-    state.dropSoundTimer = null
-  }
-
-  const scheduleDropSound = (state: StickerState, immediate: boolean) => {
-    cancelDropSound(state)
-    state.dropSoundTimer = window.setTimeout(() => {
-      state.dropSoundTimer = null
-      playSound('drop')
-    }, immediate ? 0 : DROP_SOUND_DELAY)
   }
 
   const persistState = (state: StickerState) => {
@@ -413,7 +393,6 @@ export const setupStickerWall = (wall: HTMLElement) => {
 
       flushPosition(state)
       cancelAnimation(state)
-      cancelDropSound(state)
       const bounds = boundsFor(state)
       const rect = element.getBoundingClientRect()
       state.drag = {
@@ -444,7 +423,8 @@ export const setupStickerWall = (wall: HTMLElement) => {
       element.dataset.dragging = 'true'
       element.setPointerCapture(event.pointerId)
       bringToFront(state)
-      playSound(state.id === 'cat' ? 'cat' : 'pickup')
+      if (state.id === 'cat' || state.id === 'long-cat') playSound('cat')
+      else if (state.id === 'snowman') playSound('pickup')
     })
 
     function handlePointerMove(event: PointerEvent) {
@@ -570,9 +550,6 @@ export const setupStickerWall = (wall: HTMLElement) => {
           }
         }
       }
-      if (state.id !== 'cat') {
-        scheduleDropSound(state, drag.reduceMotion)
-      }
       if (element.hasPointerCapture(event.pointerId)) {
         element.releasePointerCapture(event.pointerId)
       }
@@ -580,7 +557,6 @@ export const setupStickerWall = (wall: HTMLElement) => {
 
     function abortDrag() {
       const drag = state.drag
-      cancelDropSound(state)
       if (!drag) return
 
       flushPosition(state)
@@ -678,7 +654,6 @@ export const setupStickerWall = (wall: HTMLElement) => {
     states.forEach((state) => {
       if (state.frame !== null) cancelAnimationFrame(state.frame)
       if (state.settleTimer !== null) clearTimeout(state.settleTimer)
-      if (state.dropSoundTimer !== null) clearTimeout(state.dropSoundTimer)
       state.animation?.cancel()
     })
     Object.values(soundPools).flat().forEach((audio) => { audio.pause(); audio.removeAttribute('src'); audio.load() })
