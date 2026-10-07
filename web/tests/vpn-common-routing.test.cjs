@@ -45,6 +45,7 @@ test("用户页展示公共规则和客户端入口，无独立规则资源或�
   assert.match(html, /公共分流规则/);
   assert.match(html, /example.com/);
   assert.match(html, /扫码配置/);
+  assert.ok(html.indexOf("扫码配置") < html.indexOf("公共分流规则"));
   assert.match(html, /复制链接/);
   assert.doesNotMatch(html, /<textarea|复制规则|保存规则|v2rayN 分流规则/);
   const copy = findElement(tree, (item) => item.props?.children?.some?.((child) => child === "复制链接"));
@@ -87,4 +88,28 @@ test("已有资源的用户仍能出现在开通用户选项中", () => {
   }));
   assert.match(html, /用户 ·/);
   assert.match(html, /DMIT/);
+});
+
+test("平铺规则保留顺序与匹配范围，未知规则不静默丢弃", () => {
+  const { describeRouting } = loadTypeScript("pages/vpn/routing-display.ts");
+  const body = JSON.stringify({ rules: [
+    { type: "field", domain: ["full:example.com", "domain:example.org", "keyword:example"], outboundTag: "proxy" },
+    { type: "field", ip: ["192.0.2.1/32"], outboundTag: "proxy" },
+    { type: "field", network: "tcp", outboundTag: "direct" },
+    { type: "field", network: "udp", outboundTag: "direct" },
+  ] });
+  const sections = JSON.parse(JSON.stringify(describeRouting(body)));
+  assert.deepEqual(sections.map(section => section.title), ["其他指定网站与地址 · 代理", "其余流量直连"]);
+  const rows = sections.flatMap(section => section.rows);
+  assert.deepEqual(rows.map(row => row.line), ["DOMAIN,example.com,PROXY", "DOMAIN-SUFFIX,example.org,PROXY", "DOMAIN-KEYWORD,example,PROXY", "IP-CIDR,192.0.2.1/32,PROXY", "NETWORK,TCP,DIRECT", "NETWORK,UDP,DIRECT"]);
+  assert.deepEqual(rows.map(row => row.order), [1, 2, 3, 4, 5, 6]);
+  assert.match(rows[0].note, /完整域名/);
+  assert.match(rows[1].note, /所有子域名/);
+  assert.match(rows[2].note, /包含关键字/);
+  assert.throws(() => describeRouting('{"rules":[{"type":"field","outboundTag":"proxy","process":["app"]}]}'));
+  const { CommonRoutingCard } = loadTypeScript("pages/vpn/common-routing-card.tsx");
+  const html = renderToStaticMarkup(React.createElement(CommonRoutingCard, { routing: { filename: "common-routing.json", body } }));
+  assert.match(html, /DOMAIN,example.com,PROXY/);
+  assert.match(html, /其余流量直连/);
+  assert.doesNotMatch(html, /max-h-|overflow-auto|<details/);
 });

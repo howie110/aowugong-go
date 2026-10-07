@@ -60,8 +60,6 @@ export function VPNResourcesPage() {
 
   return (
     <div className="space-y-4">
-      <CommonRoutingCard routing={summary?.common_routing} />
-
       {subscriptions.map((subscription) => {
         const profile = profileMap.get(subscription.profile_code);
         const formats = profile?.formats.filter((format) => subscription.subscriptions[format.code]) ?? [];
@@ -128,6 +126,8 @@ export function VPNResourcesPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <CommonRoutingCard routing={summary?.common_routing} />
 
       <QRCodeDialog target={qrTarget} onOpenChange={(open) => !open && setQRTarget(null)} />
     </div>

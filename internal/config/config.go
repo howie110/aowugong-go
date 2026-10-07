@@ -37,22 +37,23 @@ type LookupEnv func(string) (string, bool)
 
 // Config 汇总应用运行所需的配置。
 type Config struct {
-	Environment       string
-	MigrationsDir     string
-	SQLiteSourcePath  string
-	HTTP              HTTP
-	Database          Database
-	Development       Development
-	Auth              Auth
-	Storage           Storage
-	GitHubBackup      GitHubBackup
-	VaultwardenBackup VaultwardenBackup
-	VPN               VPN
-	PictureProxy      PictureProxy
-	BlogMedia         BlogMedia
-	Clients           Clients
-	Finance           Finance
-	Scheduler         Scheduler
+	NotificationTokens map[string]string
+	Environment        string
+	MigrationsDir      string
+	SQLiteSourcePath   string
+	HTTP               HTTP
+	Database           Database
+	Development        Development
+	Auth               Auth
+	Storage            Storage
+	GitHubBackup       GitHubBackup
+	VaultwardenBackup  VaultwardenBackup
+	VPN                VPN
+	PictureProxy       PictureProxy
+	BlogMedia          BlogMedia
+	Clients            Clients
+	Finance            Finance
+	Scheduler          Scheduler
 }
 
 // BlogMedia 保存博客图片专用写入身份；空配置时禁用上传。
@@ -277,6 +278,13 @@ func Load(lookup LookupEnv) (Config, error) {
 		cfg.HTTP.Address = strings.TrimSpace(value)
 	}
 	loadString(lookup, "AOWUGONG_PUBLIC_URL", &cfg.HTTP.PublicURL)
+	if value, ok := lookup("AOWUGONG_NOTIFICATION_TOKENS"); ok {
+		tokens, err := parseNotificationTokens(value)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.NotificationTokens = tokens
+	}
 	cfg.HTTP.PublicURL = strings.TrimRight(cfg.HTTP.PublicURL, "/")
 	if value, ok := lookup("AOWUGONG_STATIC_DIR"); ok && strings.TrimSpace(value) != "" {
 		cfg.HTTP.StaticDir = strings.TrimSpace(value)

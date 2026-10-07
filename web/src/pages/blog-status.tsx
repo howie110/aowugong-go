@@ -1,67 +1,68 @@
-import { useEffect, useRef, useState } from "react";
-import { guardUnsavedChanges } from "@/lib/navigation-guard";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { saveStatus, uploadStatusImage, type BlogImage } from "@/lib/blog";
+import { deleteStatus, listStatuses, type BlogStatus } from "@/lib/blog";
+import { StatusEditor } from "./blog/status-editor";
 import "./blog/styles.css";
 
-type Upload = { id: string; file: File; preview: string; progress: number; image?: BlogImage; error?: string; working: boolean };
 export function BlogStatusPage() {
-  const [id, setID] = useState<string>(() => crypto.randomUUID());
-  const [body, setBody] = useState("");
-  const [uploads, setUploads] = useState<Upload[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [message, setMessage] = useState("");
+  const [statuses, setStatuses] = useState<BlogStatus[]>([]);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const fileInput = useRef<HTMLInputElement>(null);
-  const uploadURLs = useRef(new Set<string>());
-  const uploading = uploads.some((item) => item.working);
-  const hasFailedUpload = uploads.some((item) => !item.image);
-  useEffect(() => () => uploadURLs.current.forEach((url) => URL.revokeObjectURL(url)), []);
-  useEffect(() => { if (dirty || uploading || busy) return guardUnsavedChanges(); }, [dirty, uploading, busy]);
-  function resetEditor() {
-    uploadURLs.current.forEach((url) => URL.revokeObjectURL(url)); uploadURLs.current.clear();
-    setID(crypto.randomUUID()); setBody(""); setUploads([]); setDirty(false);
+  const [message, setMessage] = useState("");
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      setLoading(true); setError("");
+      try {
+        const all: BlogStatus[] = [];
+        for (let offset = 0; ; offset += 20) {
+          const page = await listStatuses(true, offset);
+          if (!active) return;
+          all.push(...page);
+          if (page.length < 20) break;
+        }
+        setStatuses(all);
+
+      } catch (e) { if (active) setError((e as Error).message); }
+      finally { if (active) setLoading(false); }
+    }
+    void load();
+    return () => { active = false; };
+  }, [reload]);
+  function saved(status: BlogStatus, isEdit: boolean) {
+    setStatuses((current) => [status, ...current.filter((item) => item.id !== status.id)].sort((a, b) => (b.published_at ?? b.created_at).localeCompare(a.published_at ?? a.created_at)));
+    if (isEdit) setEditing(null);
+    setMessage(isEdit ? "修改已保存。" : "已发布，博客动态页现在可以看到。");
   }
-  async function submit() {
-    if (busy || uploading || hasFailedUpload) return;
-    setBusy(true); setMessage(""); setError("");
+  async function remove(status: BlogStatus) {
+    if (deleting || !window.confirm("确定删除这条动态？删除后无法恢复。")) return;
+    setDeleting(status.id); setError(""); setMessage("");
     try {
-      await saveStatus({ id, body, images: uploads.flatMap((item) => item.image ? [item.image] : []), published: true }, true);
-      resetEditor();
-      setMessage("已发布，博客动态页现在可以看到。");
+      await deleteStatus(status.id);
+      setStatuses((current) => current.filter((item) => item.id !== status.id)); setMessage("动态已删除。");
     } catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
-  }
-  async function upload(item: Upload) {
-    setUploads((current) => current.map((u) => u.id === item.id ? { ...u, working: true, error: undefined, progress: 0 } : u));
-    try {
-      const image = await uploadStatusImage(item.file, (progress) => setUploads((current) => current.map((u) => u.id === item.id ? { ...u, progress } : u)));
-      setUploads((current) => current.map((u) => u.id === item.id ? { ...u, image, working: false, progress: 100 } : u));
-    } catch (e) { setUploads((current) => current.map((u) => u.id === item.id ? { ...u, error: (e as Error).message, working: false } : u)); }
-  }
-  async function selectFiles(files: FileList | null) {
-    if (!files) return;
-    if (uploads.length + files.length > 9) { setError("每条动态最多九张图片。"); return; }
-    const invalid = Array.from(files).find((file) => file.size > 10 * 1024 * 1024);
-    if (invalid) { setError(`${invalid.name}：请使用不超过 10 MiB 的 JPEG、PNG、WebP 或 GIF 图片。`); return; }
-    const pending = Array.from(files).map((file) => { const preview = URL.createObjectURL(file); uploadURLs.current.add(preview); return { id: crypto.randomUUID(), file, preview, progress: 0, working: true }; });
-    setError(""); setDirty(true); setUploads((current) => [...current, ...pending]);
-    for (const item of pending) await upload(item);
+    finally { setDeleting(null); }
   }
   return <div className="blog-editor">
     <div className="mb-5 flex items-center justify-between gap-3"><p className="text-sm text-muted-foreground">写几句话，记录这一刻。</p><a className="text-sm underline underline-offset-4" href="/blog/status" target="_blank" rel="noopener noreferrer">查看动态 ↗</a></div>
-    <textarea aria-label="记录内容" placeholder="今天有什么想记录的？" maxLength={30000} value={body} disabled={busy} onChange={(event) => { setBody(event.target.value); setDirty(true); }} />
-    <div className="blog-upload-grid">
-      {uploads.map((item) => <div className="blog-upload-item" key={item.id}><img src={item.preview} alt={item.file.name} /><button disabled={busy || item.working} aria-label="移除图片" onClick={() => { URL.revokeObjectURL(item.preview); uploadURLs.current.delete(item.preview); setUploads((current) => current.filter((u) => u.id !== item.id)); }}>×</button>{item.working ? <><progress value={item.progress} max={100} /><p>上传中 {item.progress}%</p></> : item.error ? <p className="text-destructive">{item.error} <button className="underline" onClick={() => upload(item)}>重试</button></p> : <p>已上传</p>}</div>)}
-    </div>
-    <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple className="hidden" onChange={(event) => { void selectFiles(event.target.files); event.target.value = ""; }} />
-    <div className="blog-editor-toolbar">
-      <Button variant="outline" disabled={busy || uploading || uploads.length >= 9} onClick={() => fileInput.current?.click()}>＋ 图片</Button>
-      <span className="mr-auto text-xs text-muted-foreground">{uploads.length}/9</span>
-      <Button disabled={busy || uploading || hasFailedUpload || (!body.trim() && !uploads.length)} onClick={submit}>{busy ? "发布中…" : "发布"}</Button>
-    </div>
-    <p className="blog-editor-hint">发布后公开可见。每张图片最多 10 MiB。</p>
-    {error && <div role="alert" className="blog-error">{error}</div>}{message && <div role="status" className="blog-editor-message">{message}</div>}
+    <fieldset disabled={loading}><StatusEditor onSaved={(status) => saved(status, false)} /></fieldset>
+    {message && <div role="status" className="blog-editor-message">{message}</div>}
+    <section className="mt-10 border-t pt-6" aria-label="已发布动态管理">
+      <h2 className="mb-4 text-base font-semibold">我的动态</h2>
+      {loading && <p role="status" className="text-sm text-muted-foreground">正在读取动态…</p>}
+      {error && <div role="alert" className="blog-error">{error} <Button variant="outline" onClick={() => setReload((value) => value + 1)}>重新读取</Button></div>}
+      {!loading && !error && !statuses.length && <p className="text-sm text-muted-foreground">还没有发布动态。</p>}
+      {statuses.map((status) => <article key={status.id} className="blog-status-card">
+        <div className="mb-4 text-xs text-muted-foreground"><time dateTime={status.published_at ?? status.created_at}>{new Date(status.published_at ?? status.created_at).toLocaleString("zh-CN")}</time>{!status.published && <span className="ml-2">未发布</span>}</div>
+        {editing === status.id ? <StatusEditor initial={status} onSaved={(item) => saved(item, true)} onCancel={() => setEditing(null)} /> : <>
+          {status.images.length > 0 && <div className={`blog-image-grid${status.images.length === 1 ? " single" : ""}`}>{status.images.map((image, index) => <a href={image.url} key={`${image.key}-${index}`} target="_blank" rel="noopener noreferrer"><img src={image.url} alt={`动态图片 ${index + 1}`} loading="lazy" /></a>)}</div>}
+          <p className="blog-status-text">{status.body}</p>
+          <div className="blog-status-actions"><Button variant="outline" disabled={!!editing || !!deleting || loading} onClick={() => { setEditing(status.id); setMessage(""); }}>编辑</Button><Button variant="outline" disabled={!!editing || !!deleting || loading} onClick={() => void remove(status)}>{deleting === status.id ? "删除中…" : "删除"}</Button></div>
+        </>}
+      </article>)}
+    </section>
   </div>;
 }

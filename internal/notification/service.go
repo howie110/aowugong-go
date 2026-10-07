@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Sender 定义通知服务使用的纯文本发送能力。
@@ -13,8 +14,11 @@ type Sender interface {
 
 // Service 统一格式化并发送业务通知，同时记录发送结果。
 type Service struct {
-	repository *Repository
-	sender     Sender
+	repository   *Repository
+	sender       Sender
+	dispatchGate chan struct{}
+	windowStart  time.Time
+	windowCount  int
 }
 
 // NewService 创建统一通知服务。
@@ -23,7 +27,7 @@ type Service struct {
 // 副作用：无，不访问数据库和外部接口。
 func NewService(repository *Repository, sender Sender) *Service {
 	// 1. 保存显式依赖，业务和任务不直接持有企业微信客户端。
-	return &Service{repository: repository, sender: sender}
+	return &Service{repository: repository, sender: sender, dispatchGate: make(chan struct{}, 1)}
 }
 
 // Text 发送带统一标题的微信文本并记录结果。

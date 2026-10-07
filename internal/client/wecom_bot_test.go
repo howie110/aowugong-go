@@ -79,3 +79,16 @@ func TestTruncateUTF8BytesPreservesValidText(t *testing.T) {
 		t.Fatalf("truncated length = %d suffix = %q", len(result), result[len(result)-20:])
 	}
 }
+
+func TestWeComBotRequiresExplicitSuccessCode(t *testing.T) {
+	for _, body := range []string{`{}`, `null`, `{"errcode":null}`, `{"errmsg":"ok"}`} {
+		t.Run(body, func(t *testing.T) {
+			c := NewWeComBotClient(config.WeComBot{WebhookURL: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key"}, &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+			})})
+			if err := c.SendText(context.Background(), "test"); err == nil {
+				t.Fatal("missing success code accepted")
+			}
+		})
+	}
+}

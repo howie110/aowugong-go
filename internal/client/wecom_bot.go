@@ -78,7 +78,7 @@ func (c *WeComBotClient) SendText(ctx context.Context, content string) error {
 		return fmt.Errorf("读取企业微信响应: %w", err)
 	}
 	var result struct {
-		ErrorCode int    `json:"errcode"`
+		ErrorCode *int   `json:"errcode"`
 		Message   string `json:"errmsg"`
 	}
 	if err := json.Unmarshal(responseBody, &result); err != nil {
@@ -87,8 +87,11 @@ func (c *WeComBotClient) SendText(ctx context.Context, content string) error {
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("企业微信接口返回 HTTP %d: %s", response.StatusCode, result.Message)
 	}
-	if result.ErrorCode != 0 {
-		return fmt.Errorf("企业微信接口返回错误 %d: %s", result.ErrorCode, result.Message)
+	if result.ErrorCode == nil {
+		return fmt.Errorf("企业微信接口未返回明确的 errcode")
+	}
+	if *result.ErrorCode != 0 {
+		return fmt.Errorf("企业微信接口返回错误 %d: %s", *result.ErrorCode, result.Message)
 	}
 	return nil
 }

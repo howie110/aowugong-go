@@ -15,6 +15,7 @@ import (
 	"github.com/howiedata/aowugong-go/internal/finance/stockanalysis"
 	"github.com/howiedata/aowugong-go/internal/mahjong"
 	"github.com/howiedata/aowugong-go/internal/monitoring"
+	"github.com/howiedata/aowugong-go/internal/notification"
 	"github.com/howiedata/aowugong-go/internal/rbac"
 	"github.com/howiedata/aowugong-go/internal/scheduler"
 	"github.com/howiedata/aowugong-go/internal/subscription"
@@ -25,26 +26,28 @@ import (
 
 // Dependencies 描述路由器启动所需的依赖。
 type Dependencies struct {
-	BlogMedia       *blog.MediaStore
-	BlogArticles    *blog.ArticleRepository
-	BlogStatuses    *blog.StatusService
-	StaticDir       string
-	Auth            *auth.Service
-	RBAC            *rbac.Service
-	Subscription    *subscription.Service
-	Mahjong         *mahjong.Service
-	Work            *work.Service
-	WeRead          *weread.Service
-	Monitoring      *monitoring.Service
-	Finance         *financeservice.DashboardService
-	Position        *position.Service
-	StockAnalysis   *stockanalysis.Service
-	ArticleAnalysis *articleanalysis.Service
-	Jobs            *scheduler.Registry
-	Database        databaseReadService
-	VPN             *vpn.Service
-	Picture         http.Handler
-	PictureHost     string
+	Notification       *notification.Service
+	NotificationTokens map[string]string
+	BlogMedia          *blog.MediaStore
+	BlogArticles       *blog.ArticleRepository
+	BlogStatuses       *blog.StatusService
+	StaticDir          string
+	Auth               *auth.Service
+	RBAC               *rbac.Service
+	Subscription       *subscription.Service
+	Mahjong            *mahjong.Service
+	Work               *work.Service
+	WeRead             *weread.Service
+	Monitoring         *monitoring.Service
+	Finance            *financeservice.DashboardService
+	Position           *position.Service
+	StockAnalysis      *stockanalysis.Service
+	ArticleAnalysis    *articleanalysis.Service
+	Jobs               *scheduler.Registry
+	Database           databaseReadService
+	VPN                *vpn.Service
+	Picture            http.Handler
+	PictureHost        string
 }
 
 type router struct {
@@ -69,6 +72,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 	})
 	api.Get("/api/v1/health", healthHandler)
+	if deps.Notification != nil && len(deps.NotificationTokens) > 0 {
+		api.Method(http.MethodPost, "/api/v1/notifications/wechat", newNotificationHandler(deps.Notification, deps.NotificationTokens))
+	}
 	registerBlogRoutes(api, deps)
 	if deps.ArticleAnalysis != nil {
 		registerArticleFeedRoutes(api, deps.ArticleAnalysis)

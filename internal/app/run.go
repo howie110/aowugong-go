@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -77,46 +76,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		defer runtime.db.Close()
 	}
 
-	// 2. 按配置启动上海时区内嵌调度器。
-	if cfg.Scheduler.Enabled && runtime.scheduler != nil {
-		if err := runtime.scheduler.Start(); err != nil {
-			return fmt.Errorf("启动内嵌调度器: %w", err)
-		}
-	}
-
-	// 3. 启动 HTTP 服务并等待监听错误或根上下文取消。
-	server := &http.Server{Addr: cfg.HTTP.Address, Handler: runtime.handler}
-	serverErrors := make(chan error, 1)
-	go func() {
-		serverErrors <- server.ListenAndServe()
-	}()
-	select {
-	case serverErr := <-serverErrors:
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if runtime.scheduler != nil {
-			if stopErr := runtime.scheduler.Stop(shutdownCtx); stopErr != nil {
-				return stopErr
-			}
-		}
-		if errors.Is(serverErr, http.ErrServerClosed) {
-			return nil
-		}
-		return fmt.Errorf("启动 HTTP 服务: %w", serverErr)
-	case <-ctx.Done():
-		// 4. 先停止新任务触发，再关闭 HTTP 并等待现有请求完成。
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if runtime.scheduler != nil {
-			if err := runtime.scheduler.Stop(shutdownCtx); err != nil {
-				return err
-			}
-		}
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("关闭 HTTP 服务: %w", err)
-		}
-		return nil
-	}
+	return serveRuntime(ctx, cfg, runtime)
 }
 
 // RunJob 通过与自动和页面执行相同的注册表运行单个 CLI 任务。
@@ -177,6 +137,9 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 	}
 
 	// 2. 图片域名使用私有 OSS 只读身份，不影响工作台主站启动路径。
+	if len(cfg.NotificationTokens) > 0 && !client.NewWeComBotClient(cfg.Clients.WeComBot, nil).Configured() {
+		return nil, fmt.Errorf("启用通知接口必须配置有效的 WECOM_BOT_WEBHOOK_URL")
+	}
 	pictureHandler, err := newPictureHandler(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("创建图片代理: %w", err)
@@ -282,6 +245,7 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 	}
 	blogArticles := blog.NewArticleRepository(db)
 	handler := httpserver.NewRouter(httpserver.Dependencies{
+		Notification: tasks.notification, NotificationTokens: cfg.NotificationTokens,
 		BlogMedia: blogMedia, BlogArticles: blogArticles, BlogStatuses: blog.NewStatusService(blog.NewRepository(db)),
 		StaticDir: cfg.HTTP.StaticDir, Auth: authService, RBAC: rbacService,
 		Subscription: tasks.subscriptions, Mahjong: mahjongService, Work: workService,
