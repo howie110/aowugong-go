@@ -757,7 +757,7 @@ Content-Type: application/json
 
 ## GPSLogger 我的轨迹（2026-10-22）
 
-已确认设计：Android GPSLogger 经 HTTPS POST 上传到现有 Go/chi 后端，保存现有 PostgreSQL；工作台「个人工具 → 我的轨迹」仅管理员使用，设备和轨迹按当前账号隔离。不新增 Java 服务，不做地图、地址解析或 AI 分析，不自动清理历史记录。用户已确认提交 main 并发布；上线结果另行记录。
+已确认设计：Android GPSLogger 经 HTTPS POST 上传到现有 Go/chi 后端，保存现有 PostgreSQL；工作台「个人工具 → 我的轨迹」仅管理员使用，设备和轨迹按当前账号隔离。不新增 Java 服务，不做地图、地址解析或 AI 分析，不自动清理历史记录。已提交 main 并部署生产，代码版本 `eb6ef23555898aa0d901ec62ef275d3bc24e9f54`。
 
 实施计划（brainstorming / writing-plans / executing-plans）：
 - [x] 数据层：迁移 15；设备 UUID、所属账号、密钥 SHA256、撤销时间；轨迹包含设备、定位/接收时间、WGS84 坐标、精度、速度(m/s)、方向、海拔、来源及白名单原始字段。验证坐标/时间/可选数值，设备+时间+坐标幂等；允许乱序和断网补传。
@@ -769,6 +769,8 @@ Content-Type: application/json
 
 验收关注：断网补传不当成今天定位；空可选值与 0 区分；旧密钥并发写入不能越过撤销；分页在新点写入时使用固定查询快照；查询错误不显示为零条。轨迹表不进入通用数据库浏览器，避免绕过账号隔离。手机实际后台保活、重启和耗电需要安装后实机验收。
 
-本地验收：独立 PostgreSQL schema 的 race 测试通过，覆盖并发重复上传、分页期间新点插入、跨账号隔离、密钥轮换和撤销。浏览器验证管理员导航、空状态、创建设备、一次性密钥隐藏及有数据列表；模拟 GPSLogger 经真实 HTTP 接口上传 5 个点，重复点未新增、昨日补传未计入今日。Go 全量测试和 vet、前端 117 项测试与构建通过。截图 `.cache/trajectory-preview.png` 为合成数据。未部署、未在真实手机运行；后台保活、耗电和手机网络恢复补传仍需实机验收。
+本地验收：独立 PostgreSQL schema 的 race 测试通过，覆盖并发重复上传、分页期间新点插入、跨账号隔离、密钥轮换和撤销。浏览器验证管理员导航、空状态、创建设备、一次性密钥隐藏及有数据列表；模拟 GPSLogger 经真实 HTTP 接口上传 5 个点，重复点未新增、昨日补传未计入今日。Go 全量测试和 vet、前端 117 项测试与构建通过。截图 `.cache/trajectory-preview.png` 为合成数据。尚未在真实手机运行；后台保活、耗电和手机网络恢复补传仍需实机验收。
 
 手机配置入口：登录 https://aowugong.top/work/personal/trajectory，添加自己的设备并保存一次性上传密钥。GPSLogger 自定义 URL 使用 https://aowugong.top/api/v1/trajectory/collect，方法 POST；HTTP Headers 为 Content-Type: application/x-www-form-urlencoded 和 Authorization: Bearer <设备密钥>，每行一项；HTTP Body 使用本节模板。Basic Authentication 用户名、密码留空。启用 CSV 本地备份，关闭 Discard offline locations，授权后台定位并取消电池优化，修改配置后停止再启动记录。
+
+生产发布：2026-10-22，版本 `v20261022-trajectory`；发布源码保留原线上聊天归档等功能，访问统计和小票分账工作台仍为待发布。发布快照 Go 全量测试、race、vet 和前端 113 项测试及构建通过。数据库已备份到 `/opt/aowugong-go/shared/backups/trajectory-20261022T034505Z`，迁移到 15；服务健康、轨迹接口未登录/错误密钥拒绝、公网前端文件一致性检查通过。未用真实手机或真实定位数据做生产写入验收。上一版本 `/opt/aowugong-go/releases/v20261017-chat-archive-reconcile` 保留供回滚，新增轨迹表兼容旧程序。
