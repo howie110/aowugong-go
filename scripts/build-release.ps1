@@ -34,6 +34,17 @@ try {
     Copy-Item "web/dist" (Join-Path $PackageDir "web/dist") -Recurse
     Copy-Item "migrations/postgres" (Join-Path $PackageDir "migrations/postgres") -Recurse
     Copy-Item "init", "scripts" $PackageDir -Recurse
+    # Include only committed skill sources, never local credentials or caches.
+    $SkillArchive = [IO.Path]::GetTempFileName()
+    try {
+        git archive --format=tar --output=$SkillArchive HEAD skills
+        if ($LASTEXITCODE -ne 0) { throw "Failed to archive skill sources" }
+        tar -xf $SkillArchive -C $PackageDir
+        if ($LASTEXITCODE -ne 0) { throw "Failed to extract skill sources" }
+    }
+    finally {
+        Remove-Item -LiteralPath $SkillArchive -Force
+    }
     Copy-Item "README.md" $PackageDir
     [IO.File]::WriteAllText((Join-Path $PackageDir "VERSION"), "$Version`n")
 
