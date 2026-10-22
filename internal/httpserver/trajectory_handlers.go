@@ -23,6 +23,7 @@ type trajectoryService interface {
 	Devices(context.Context, int64) ([]trajectory.Device, error)
 	Create(context.Context, int64, string) (trajectory.Credential, error)
 	Rotate(context.Context, int64, string) (trajectory.Credential, error)
+	ProfileCredential(context.Context, int64, string) (trajectory.Credential, error)
 	Revoke(context.Context, int64, string) error
 	Report(context.Context, int64, trajectory.Query) (trajectory.Report, error)
 }
@@ -147,6 +148,17 @@ func registerTrajectoryRoutes(router chi.Router, s trajectoryService, a *auth.Se
 					trajectory.Credential
 					ProfilePath string `json:"profile_path"`
 				}{result, profiles.issue(result, time.Now())})
+			})
+			admin.Post("/devices/{id}/profile", func(w http.ResponseWriter, r *http.Request) {
+				credentialChanges.Lock()
+				defer credentialChanges.Unlock()
+				u, _ := currentUser(r)
+				result, e := s.ProfileCredential(r.Context(), u.ID, chi.URLParam(r, "id"))
+				if e != nil {
+					trajectoryError(w, e)
+					return
+				}
+				writeJSON(w, 200, map[string]string{"profile_path": profiles.issue(result, time.Now())})
 			})
 			admin.Post("/devices/{id}/rotate", func(w http.ResponseWriter, r *http.Request) {
 				credentialChanges.Lock()

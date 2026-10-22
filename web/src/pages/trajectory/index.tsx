@@ -7,15 +7,12 @@ import {
   createTrajectoryDevice,
   getTrajectory,
   getTrajectoryDevices,
-  revokeTrajectoryDevice,
-  rotateTrajectoryDevice,
+  getTrajectoryProfile,
   trajectoryToday,
-  type TrajectoryCredential,
   type TrajectoryDevice,
   type TrajectoryFilter,
   type TrajectoryReport,
 } from "@/lib/trajectory";
-import { GPSLoggerSetup } from "./setup";
 const time = (value: string | null) =>
   value
     ? new Date(value).toLocaleString("zh-CN", {
@@ -45,13 +42,8 @@ export function TrajectoryPage() {
   const [actionError, setActionError] = useState("");
   const [pending, setPending] = useState(false);
   const [name, setName] = useState("");
-  const [credential, setCredential] = useState<TrajectoryCredential | null>(
-    null,
-  );
-  const [confirm, setConfirm] = useState<{
-    device: TrajectoryDevice;
-    kind: "rotate" | "revoke";
-  } | null>(null);
+  const [notice, setNotice] = useState("");
+  const [copyURL, setCopyURL] = useState("");
   const [revision, setRevision] = useState(0);
   const refresh = () => {
     setFilter((f) => ({ ...f, page: 1, snapshot: undefined }));
@@ -84,9 +76,10 @@ export function TrajectoryPage() {
   async function create() {
     setPending(true);
     setActionError("");
+    setNotice("");
+    setCopyURL("");
     try {
-      const c = await createTrajectoryDevice(name.trim());
-      setCredential(c);
+      await createTrajectoryDevice(name.trim());
       setName("");
       refresh();
     } catch (e) {
@@ -95,21 +88,30 @@ export function TrajectoryPage() {
       setPending(false);
     }
   }
-  async function act() {
-    if (!confirm) return;
+  async function copyProfile(d: TrajectoryDevice) {
     setPending(true);
     setActionError("");
+    setNotice("");
+    setCopyURL("");
     try {
-      if (confirm.kind === "rotate")
-        setCredential(await rotateTrajectoryDevice(confirm.device.id));
-      else {
-        await revokeTrajectoryDevice(confirm.device.id);
-        if (credential?.device.id === confirm.device.id) setCredential(null);
+      // Start the clipboard operation in the click gesture, including browsers
+      // that drop clipboard permission after an awaited network request.
+      const link = getTrajectoryProfile(d.id).then((p) => `${window.location.origin}${p.profile_path}`);
+      try {
+        if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+          await navigator.clipboard.write([new ClipboardItem({
+            "text/plain": link.then((url) => new Blob([url], { type: "text/plain" })),
+          })]);
+        } else {
+          await navigator.clipboard.writeText(await link);
+        }
+        setNotice("已复制，在 GPSLogger「从 URL」中粘贴即可。链接 15 分钟有效，原密钥继续可用。");
+      } catch {
+        setCopyURL(await link);
+        setNotice("请复制下方配置 URL，粘贴到 GPSLogger「从 URL」。");
       }
-      setConfirm(null);
-      refresh();
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : "操作失败");
+      setActionError(e instanceof Error ? e.message : "生成配置失败");
     } finally {
       setPending(false);
     }
@@ -362,7 +364,7 @@ export function TrajectoryPage() {
               className="max-w-sm"
             />
             <Button
-              disabled={pending || !name.trim() || !!credential}
+              disabled={pending || !name.trim()}
               type="submit"
             >
               添加设备
@@ -390,54 +392,16 @@ export function TrajectoryPage() {
                 </p>
               </div>
               {!d.revoked_at && (
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={pending || !!credential}
-                    onClick={() => setConfirm({ device: d, kind: "rotate" })}
-                  >
-                    更换密钥
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={pending}
-                    onClick={() => setConfirm({ device: d, kind: "revoke" })}
-                  >
-                    撤销上传
-                  </Button>
-                </div>
+                <Button size="sm" variant="outline" disabled={pending} onClick={() => void copyProfile(d)}>
+                  复制配置 URL
+                </Button>
               )}
             </div>
           ))}
-          {confirm && (
-            <div role="alert" className="space-y-3 rounded-md border p-4">
-              <p className="text-sm">
-                {confirm.kind === "rotate"
-                  ? `更换「${confirm.device.name}」密钥后，旧密钥立即失效。请更新手机配置；旧密钥排队的请求可能需要从本地 CSV 重新补传。`
-                  : `撤销「${confirm.device.name}」后将停止接受它的上传，历史记录继续保留。此设备不能重新启用。`}
-              </p>
-              <div className="flex gap-2">
-                <Button disabled={pending} onClick={() => void act()}>
-                  确认{confirm.kind === "rotate" ? "更换" : "撤销"}
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={pending}
-                  onClick={() => setConfirm(null)}
-                >
-                  取消
-                </Button>
-              </div>
-            </div>
-          )}
+          {notice && <p role="status" className="text-sm text-muted-foreground">{notice}</p>}
+          {copyURL && <Input aria-label="配置 URL" readOnly value={copyURL} onFocus={(e) => e.target.select()} />}
         </CardContent>
       </Card>
-      <GPSLoggerSetup
-        credential={credential}
-        onClose={() => setCredential(null)}
-      />
     </div>
   );
 }

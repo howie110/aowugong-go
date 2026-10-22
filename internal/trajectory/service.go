@@ -8,14 +8,24 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/google/uuid"
 	"strings"
 	"time"
 )
 
-type Service struct{ db *sql.DB }
+type Service struct {
+	db            *sql.DB
+	profileSecret string
+}
 
-func NewService(db *sql.DB) *Service { return &Service{db: db} }
+func NewService(db *sql.DB, secret ...string) *Service {
+	s := &Service{db: db}
+	if len(secret) > 0 {
+		s.profileSecret = secret[0]
+	}
+	return s
+}
 func tokenPair() (string, string, error) {
 	b := make([]byte, 32)
 	if _, e := rand.Read(b); e != nil {
@@ -124,14 +134,25 @@ func (s *Service) Collect(ctx context.Context, token string, p Point) (bool, err
 		return false, e
 	}
 	defer tx.Rollback()
-	var device string
+	var device, storedHash string
 	var owner int64
-	e = tx.QueryRowContext(ctx, `SELECT d.id,d.owner_id FROM trajectory_devices d JOIN aowugong_fastapi_users u ON u.id=d.owner_id WHERE d.token_hash=? AND d.revoked_at IS NULL AND u.is_active=1 AND (u.is_superuser=1 OR EXISTS(SELECT 1 FROM aowugong_user_roles ur JOIN aowugong_roles r ON r.id=ur.role_id WHERE ur.user_id=u.id AND r.code='admin' AND r.is_active=1)) FOR UPDATE OF d`, hashToken(token)).Scan(&device, &owner)
+	query := `SELECT d.id,d.owner_id,d.token_hash FROM trajectory_devices d JOIN aowugong_fastapi_users u ON u.id=d.owner_id WHERE %s AND d.revoked_at IS NULL AND u.is_active=1 AND (u.is_superuser=1 OR EXISTS(SELECT 1 FROM aowugong_user_roles ur JOIN aowugong_roles r ON r.id=ur.role_id WHERE ur.user_id=u.id AND r.code='admin' AND r.is_active=1)) FOR UPDATE OF d`
+	e = tx.QueryRowContext(ctx, fmt.Sprintf(query, "d.token_hash=?"), hashToken(token)).Scan(&device, &owner, &storedHash)
+	if errors.Is(e, sql.ErrNoRows) && s.profileSecret != "" {
+		id, err := uuid.Parse(token[:32])
+		if err == nil {
+			e = tx.QueryRowContext(ctx, fmt.Sprintf(query, "d.id=?"), id.String()).Scan(&device, &owner, &storedHash)
+		}
+	}
+
 	if errors.Is(e, sql.ErrNoRows) {
 		return false, ErrUnauthorized
 	}
 	if e != nil {
 		return false, e
+	}
+	if !s.validUploadToken(token, device, storedHash) {
+		return false, ErrUnauthorized
 	}
 	// 与同账号查询串行，确保分页快照不会混入尚未提交的补传。
 	if _, e = tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(8672,?)", owner); e != nil {

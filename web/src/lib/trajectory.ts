@@ -100,3 +100,10 @@ export function gpsLoggerConfig(origin: string, token: string) {
     body: "timestamp=%TIMESTAMP&lat=%LAT&lon=%LON&acc=%ACC&alt=%ALT&spd=%SPD&dir=%DIR&prov=%PROV",
   };
 }
+
+export const getTrajectoryProfile = (id: string) =>
+  requestJSON<{ profile_path: string }>(
+    `${base}/devices/${encodeURIComponent(id)}/profile`,
+    { method: "POST" },
+    "生成配置链接失败",
+  );

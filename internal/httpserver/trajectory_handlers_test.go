@@ -35,6 +35,9 @@ func (s *trajectoryStub) Create(context.Context, int64, string) (trajectory.Cred
 func (s *trajectoryStub) Rotate(context.Context, int64, string) (trajectory.Credential, error) {
 	return trajectory.Credential{Device: trajectory.Device{ID: "device-1", Name: "phone"}, Token: strings.Repeat("a", 64)}, nil
 }
+func (s *trajectoryStub) ProfileCredential(ctx context.Context, owner int64, id string) (trajectory.Credential, error) {
+	return s.Rotate(ctx, owner, id)
+}
 func (s *trajectoryStub) Revoke(context.Context, int64, string) error { return nil }
 func (s *trajectoryStub) Report(context.Context, int64, trajectory.Query) (trajectory.Report, error) {
 	return trajectory.Report{}, nil
@@ -135,6 +138,20 @@ func TestTrajectoryProfileRoutes(t *testing.T) {
 	old := payload.ProfilePath
 	if w := request("GET", old, "", ""); w.Code != 200 || !strings.Contains(w.Body.String(), "https://example.com/api/v1/trajectory/collect") {
 		t.Fatal(w.Code, w.Body.String())
+	}
+	if request("POST", "/api/v1/trajectory/devices/device-1/profile", "", "").Code != 401 {
+		t.Fatal("anonymous profile creation")
+	}
+	w = request("POST", "/api/v1/trajectory/devices/device-1/profile", "", token)
+	if w.Code != 200 || strings.Contains(w.Body.String(), `"token"`) {
+		t.Fatal("profile response", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	old = payload.ProfilePath
+	if request("GET", old, "", "").Code != 200 {
+		t.Fatal("existing device import unavailable")
 	}
 	w = request("POST", "/api/v1/trajectory/devices/device-1/rotate", "", token)
 	if w.Code != 200 {

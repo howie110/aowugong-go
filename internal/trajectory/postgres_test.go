@@ -43,13 +43,27 @@ func TestPostgresTrajectoryLifecycle(t *testing.T) {
 	if _, e = db.Exec(strings.Split(string(m), "-- +goose Down")[0]); e != nil {
 		t.Fatal(e)
 	}
-	s := NewService(db)
+	s := NewService(db, "profile-test-secret")
 	cred, e := s.Create(ctx, 1, "我的手机")
 	if e != nil {
 		t.Fatal(e)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	p := Point{RecordedAt: now.Add(-24 * time.Hour), Lat: 23, Lon: 113, Raw: map[string]string{"lat": "23"}}
+	companion, e := s.ProfileCredential(ctx, 1, cred.Device.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.ProfileCredential(ctx, 2, cred.Device.ID); e != ErrNotFound {
+		t.Fatal("cross-owner profile", e)
+	}
+	if _, e = s.Collect(ctx, companion.Token, p); e != nil {
+		t.Fatal("compatible upload", e)
+	}
+	again, e := s.ProfileCredential(ctx, 1, cred.Device.ID)
+	if e != nil || again.Token != companion.Token {
+		t.Fatal("copy changed credential", e)
+	}
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -98,6 +112,9 @@ func TestPostgresTrajectoryLifecycle(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	if _, e = s.Collect(ctx, companion.Token, p); e != ErrUnauthorized {
+		t.Fatal("companion survived rotation", e)
+	}
 	if _, e = s.Collect(ctx, cred.Token, p); e != ErrUnauthorized {
 		t.Fatalf("old token %v", e)
 	}
@@ -107,11 +124,21 @@ func TestPostgresTrajectoryLifecycle(t *testing.T) {
 	if e = s.Revoke(ctx, 2, cred.Device.ID); e != ErrNotFound {
 		t.Fatal(e)
 	}
+	companion, e = s.ProfileCredential(ctx, 1, cred.Device.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
 	if e = s.Revoke(ctx, 1, cred.Device.ID); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = s.Collect(ctx, newer.Token, p); e != ErrUnauthorized {
 		t.Fatal(e)
+	}
+	if _, e = s.Collect(ctx, companion.Token, p); e != ErrUnauthorized {
+		t.Fatal("companion survived revoke", e)
+	}
+	if _, e = s.ProfileCredential(ctx, 1, cred.Device.ID); e != ErrNotFound {
+		t.Fatal("revoked profile", e)
 	}
 	devices, e := s.Devices(ctx, 1)
 	if e != nil || len(devices) != 1 || devices[0].RevokedAt == nil {
