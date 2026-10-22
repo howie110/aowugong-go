@@ -28,6 +28,12 @@ func NewDevelopmentRouter(staticDir, upstreamURL string) (http.Handler, error) {
 
 	// 2. 使用标准反向代理保留请求路径、查询、令牌和响应状态。
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	director := proxy.Director
+	proxy.Director = func(request *http.Request) {
+		director(request)
+		// 上游按域名路由，不能携带本地 localhost 的 Host。
+		request.Host = target.Host
+	}
 	proxy.FlushInterval = 100 * time.Millisecond
 	proxy.ErrorHandler = func(w http.ResponseWriter, request *http.Request, proxyErr error) {
 		// 3. 上游不可达时返回与应用一致的 JSON 错误。

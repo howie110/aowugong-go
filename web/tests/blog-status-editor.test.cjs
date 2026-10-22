@@ -9,10 +9,27 @@ function load(file, dependencies = {}, globals = {}) {
   const source = fs.readFileSync(path.resolve(__dirname, '../src/pages/blog', file), 'utf8');
   const code = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.ReactJSX}}).outputText;
   const module = {exports:{}};
-  vm.runInNewContext(code,{module,exports:module.exports,Uint8Array,crypto:require('node:crypto').webcrypto,URL,window:{confirm:()=>true},require:(name)=>{if(name in dependencies)return dependencies[name];throw new Error(name);},...globals});
+  vm.runInNewContext(code,{module,exports:module.exports,Uint8Array,crypto:require('node:crypto').webcrypto,URL,window:{confirm:()=>true},require:(name)=>{if(name in dependencies)return dependencies[name];if(name==='@/lib/blog-image')return load('../../lib/blog-image.ts');if(name==='./blog/status-card'||name==='./status-card')return load('status-card.tsx',{'react':dependencies.react,'react/jsx-runtime':jsx,'@/lib/blog':{}});throw new Error(name);},...globals});
   return module.exports;
 }
 const images = load('status-images.ts');
+const imageURLs = load('../../lib/blog-image.ts');
+test('图片规格仅用于自有静态图片，外部地址、查询参数和动画保持原样',()=>{
+  for(const url of ['blob:local','https://other.example/a.jpg','https://pic.aowugong.top/pic/a.gif','https://pic.aowugong.top/pic/a.webp','https://pic.aowugong.top/pic/a.jpg?signature=x']) assert.equal(imageURLs.blogImageURL(url,'thumb-v1'),url);
+  assert.equal(imageURLs.blogImageURL('https://pic.aowugong.top/pic/old.png','large-v1'),'https://pic.aowugong.top/pic/old.png?variant=large-v1');
+});
+test('共用图库列表加载缩略图，点击才创建大图并保留原图入口',()=>{
+  let zoom='';const original='https://pic.aowugong.top/pic/photo.jpg';
+  const hooks={useState:()=>[zoom,value=>{zoom=value;}]};
+  const {StatusImageGallery,Lightbox}=load('status-card.tsx',{'react':hooks,'react/jsx-runtime':jsx,'@/lib/blog':{}});
+  const render=()=>StatusImageGallery({images:[{key:'pic/photo.jpg',url:original}]});
+  let tree=render();assert.equal(find(tree,x=>x.type==='img').props.src,original+'?variant=thumb-v1');
+  assert.equal(find(tree,x=>x.type===Lightbox),null);
+  find(tree,x=>x.type==='button').props.onClick();tree=render();
+  const box=Lightbox(find(tree,x=>x.type===Lightbox).props);
+  assert.equal(find(box,x=>x.type==='img').props.src,original+'?variant=large-v1');
+  assert.equal(find(box,x=>x.type==='a').props.href,original);
+});
 const png = new File([new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,0])], 'origin', {type:'application/octet-stream'});
 test('微信 origin 按文件内容验证，不依赖扩展名或 MIME；拒绝非图片和超限文件', async()=>{
   await images.validateStatusFile(png);
@@ -37,6 +54,19 @@ function editor(initial) {
 }
 function find(tree, predicate) {if(!tree||typeof tree!=='object')return null;if(predicate(tree))return tree;for(const child of [tree.props?.children].flat(Infinity)){const match=find(child,predicate);if(match)return match;}return null;}
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
+test('编辑已有图片只请求缩略图，保存仍保留原图引用',async()=>{
+  const original='https://pic.aowugong.top/blog/status/photo.jpg';
+  const e=editor({id:'existing',body:'text',images:[{key:'blog/status/photo.jpg',url:original}],published:true});
+  const tree=e.render();
+  assert.equal(find(tree,x=>x.type==='img').props.src,original+'?variant=thumb-v1');
+  const preview=find(tree,x=>x.props?.['aria-label']==='预览图片 1');
+  assert.ok(preview,'编辑器应能点击预览清晰图片');
+  preview.props.onClick();
+  const lightbox=find(e.render(),x=>typeof x.type==='function'&&x.type.name==='Lightbox');
+  assert.equal(lightbox.props.url,original);assert.equal(lightbox.props.optimized,true);
+  await find(tree,x=>x.type==='button'&&x.props.children==='保存').props.onClick();
+  assert.equal(e.calls[0].input.images[0].url,original);
+});
 test('选择和移除图片不会上传，点发布才上传并保存',async()=>{
   const e=editor();let tree=e.render();
   find(tree,x=>x.type==='input').props.onChange({target:{files:[png],value:'file'}});await tick();

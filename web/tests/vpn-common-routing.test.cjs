@@ -90,8 +90,21 @@ test("已有资源的用户仍能出现在开通用户选项中", () => {
   assert.match(html, /DMIT/);
 });
 
-test("平铺规则保留顺序与匹配范围，未知规则不静默丢弃", () => {
+test("国内规则集和默认代理保持只读可见", () => {
   const { describeRouting } = loadTypeScript("pages/vpn/routing-display.ts");
+  const body = JSON.stringify({ rules: [
+    { type: "field", domain: ["geosite:cn"], outboundTag: "direct" },
+    { type: "field", ip: ["geoip:cn"], outboundTag: "direct" },
+    { type: "field", network: "tcp,udp", outboundTag: "proxy" },
+  ] });
+  const sections = JSON.parse(JSON.stringify(describeRouting(body)));
+  assert.deepEqual(sections.flatMap(s => s.rows.map(r => r.line)), ["GEOSITE,CN,DIRECT", "GEOIP,CN,DIRECT", "NETWORK,TCP,UDP,PROXY"]);
+  assert.equal(sections.at(-1).title, "其余流量走代理");
+  assert.match(sections[0].rows[0].note, /国内域名/);
+});
+
+test("平铺规则保留顺序与匹配范围，未知规则不静默丢弃", () => {
+const { describeRouting } = loadTypeScript("pages/vpn/routing-display.ts");
   const body = JSON.stringify({ rules: [
     { type: "field", domain: ["full:example.com", "domain:example.org", "keyword:example"], outboundTag: "proxy" },
     { type: "field", ip: ["192.0.2.1/32"], outboundTag: "proxy" },

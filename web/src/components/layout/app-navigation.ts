@@ -1,4 +1,5 @@
 import {
+  MapPin,
   BarChart3,
   Bell,
   BookOpen,
@@ -80,6 +81,7 @@ export const navGroups: NavGroup[] = [
       { key: "weread", label: "微信读书", icon: BookOpen, permission: pagePermissionMap.weread },
       { key: "mahjong", label: "麻将战绩", icon: Trophy, permission: pagePermissionMap.mahjong },
       { key: "subscriptions", label: "订阅管理", icon: CreditCard, permission: pagePermissionMap.subscriptions },
+      { key: "chatArchive", label: "聊天归档", icon: BookOpen, permission: pagePermissionMap.chatArchive },
     ],
   },
   {
@@ -90,6 +92,12 @@ export const navGroups: NavGroup[] = [
       { key: "vpnDistribution", label: "VPN 分配", icon: UserCog, permission: pagePermissionMap.vpnDistribution },
       { key: "vpnResources", label: "VPN 资源", icon: Wifi, permission: pagePermissionMap.vpnResources },
     ],
+  },
+  {
+    id: "personal",
+    label: "个人工具",
+    icon: MapPin,
+    items: [{key:"trajectory",label:"我的轨迹",icon:MapPin,permission:pagePermissionMap.trajectory}],
   },
   {
     id: "system",

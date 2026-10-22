@@ -128,6 +128,10 @@ func (r commonRouting) RuleLines(client, proxyPolicy string) ([]string, error) {
 		switch {
 		case len(rule.Domain) > 0:
 			for _, domain := range rule.Domain {
+				if strings.EqualFold(strings.TrimSpace(domain), "geosite:cn") {
+					lines = append(lines, chinaDomainRule(client, target))
+					continue
+				}
 				line, lineErr := domainRuleLine(domain, target)
 				if lineErr != nil {
 					return nil, fmt.Errorf("第 %d 条规则: %w", index+1, lineErr)
@@ -154,6 +158,17 @@ func (r commonRouting) RuleLines(client, proxyPolicy string) ([]string, error) {
 			lines = append(lines, fmt.Sprintf("%s,%d,%s", matcher, port, target))
 		default:
 			network := strings.ToUpper(strings.TrimSpace(rule.Network))
+			if network == "TCP,UDP" {
+				if index != len(r.Rules)-1 {
+					return nil, fmt.Errorf("默认流量规则必须放在最后")
+				}
+				matcher := "FINAL"
+				if client == "clash" {
+					matcher = "MATCH"
+				}
+				lines = append(lines, matcher+","+target)
+				continue
+			}
 			if network != "TCP" && network != "UDP" {
 				return nil, fmt.Errorf("第 %d 条规则 network %q 不支持", index+1, rule.Network)
 			}
@@ -314,6 +329,9 @@ func mergeClashRouting(content []byte, routing commonRouting) (string, error) {
 		return "", err
 	}
 	document["rules"] = lines
+	if err := addChinaDomainProvider(document, routing); err != nil {
+		return "", err
+	}
 	if _, exists := document["proxy-groups"]; !exists {
 		document["proxy-groups"] = []map[string]any{{
 			"name": "PROXY", "type": "select", "proxies": clashProxyNames(document),

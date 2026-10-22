@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,6 +26,7 @@ func TestDevelopmentRouterServesLocalSPAAndProxiesAPI(t *testing.T) {
 		_, _ = io.WriteString(w, request.URL.RequestURI()+"|"+request.Header.Get("Authorization"))
 	}))
 	defer upstream.Close()
+	upstreamURL, _ := url.Parse(upstream.URL)
 	handler, err := NewDevelopmentRouter(staticDir, upstream.URL)
 	if err != nil {
 		t.Fatalf("NewDevelopmentRouter() error = %v", err)
@@ -40,6 +42,13 @@ func TestDevelopmentRouterServesLocalSPAAndProxiesAPI(t *testing.T) {
 	// 4. API 必须完整转发给线上服务。
 	apiRequest := httptest.NewRequest(http.MethodGet, "/api/v1/database/summary?fresh=1", nil)
 	apiRequest.Header.Set("Authorization", "Bearer test-token")
+	upstream.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Host != upstreamURL.Host {
+			w.WriteHeader(http.StatusMisdirectedRequest)
+			return
+		}
+		_, _ = io.WriteString(w, request.URL.RequestURI()+"|"+request.Header.Get("Authorization"))
+	})
 	apiRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(apiRecorder, apiRequest)
 	if apiRecorder.Code != http.StatusOK ||

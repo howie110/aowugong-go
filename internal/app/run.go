@@ -12,6 +12,7 @@ import (
 
 	"github.com/howiedata/aowugong-go/internal/auth"
 	"github.com/howiedata/aowugong-go/internal/blog"
+	"github.com/howiedata/aowugong-go/internal/chatarchive"
 	"github.com/howiedata/aowugong-go/internal/client"
 	"github.com/howiedata/aowugong-go/internal/config"
 	"github.com/howiedata/aowugong-go/internal/database"
@@ -31,6 +32,7 @@ import (
 	"github.com/howiedata/aowugong-go/internal/rbac"
 	"github.com/howiedata/aowugong-go/internal/scheduler"
 	"github.com/howiedata/aowugong-go/internal/subscription"
+	"github.com/howiedata/aowugong-go/internal/trajectory"
 	"github.com/howiedata/aowugong-go/internal/vaultwardenbackup"
 	"github.com/howiedata/aowugong-go/internal/vpn"
 	"github.com/howiedata/aowugong-go/internal/weread"
@@ -245,13 +247,15 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 	}
 	blogArticles := blog.NewArticleRepository(db)
 	handler := httpserver.NewRouter(httpserver.Dependencies{
+		Trajectory:   trajectory.NewService(db),
 		Notification: tasks.notification, NotificationTokens: cfg.NotificationTokens,
 		BlogMedia: blogMedia, BlogArticles: blogArticles, BlogStatuses: blog.NewStatusService(blog.NewRepository(db)),
 		StaticDir: cfg.HTTP.StaticDir, Auth: authService, RBAC: rbacService,
 		Subscription: tasks.subscriptions, Mahjong: mahjongService, Work: workService,
 		WeRead: wereadService, Monitoring: tasks.monitoring, Finance: financeService,
 		Position: positionService, StockAnalysis: stockAnalysisService, ArticleAnalysis: tasks.articles,
-		Jobs: jobRegistry, Database: databaseview.NewService(db),
+		Jobs: jobRegistry, Database: databaseview.NewService(db), ChatArchive: chatarchive.NewRepository(db),
+		ChatArchiveSync: chatarchive.NewRepository(db), ChatArchiveSyncKey: cfg.ChatArchiveSyncKey,
 		VPN: vpnService, Picture: pictureHandler, PictureHost: cfg.PictureProxy.Host,
 	})
 	success = true

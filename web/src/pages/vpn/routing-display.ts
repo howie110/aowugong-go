@@ -29,10 +29,10 @@ export function describeRouting(body: string): RoutingSection[] {
     if (rule.type !== "field" || !target || Object.keys(rule).some(key => !["type", "outboundTag", "domain", "ip", "port", "network"].includes(key))) throw new Error("存在暂不支持展示的规则");
     const matchers = [rule.domain?.length, rule.ip?.length, rule.port, rule.network].filter(Boolean);
     if (matchers.length !== 1) throw new Error("匹配条件不明确");
-    const isDefault = rule.outboundTag === "direct" && !!rule.network;
-    const title = isDefault ? "其余流量直连" : ({ proxy: "指定名单走代理", direct: "指定规则直连", block: "拦截规则" } as Record<string, string>)[rule.outboundTag];
+    const isDefault = !!rule.network;
+    const title = isDefault ? ({ proxy: "其余流量走代理", direct: "其余流量直连", block: "其余流量拦截" } as Record<string, string>)[rule.outboundTag] : ({ proxy: "指定名单走代理", direct: "指定规则直连", block: "拦截规则" } as Record<string, string>)[rule.outboundTag];
     const add = (matcher: string, value: string, note: string) => {
-      const groupTitle = rule.outboundTag === "proxy" ? `${proxyGroup(value)} · 代理` : title;
+      const groupTitle = rule.outboundTag === "proxy" && !isDefault ? `${proxyGroup(value)} · 代理` : title;
       let section = sections[sections.length - 1];
       if (!section || section.title !== groupTitle) {
         section = { title: groupTitle, rows: [] };
@@ -44,6 +44,10 @@ export function describeRouting(body: string): RoutingSection[] {
       const index = value.indexOf(":");
       const kind = index < 0 ? "domain" : value.slice(0, index);
       const domain = index < 0 ? value : value.slice(index + 1);
+      if (kind === "geosite" && domain === "cn") {
+        add("GEOSITE", "CN", "国内域名集合（ChinaMax，客户端更新）");
+        continue;
+      }
       const spec = ({ full: ["DOMAIN", "完整域名"], domain: ["DOMAIN-SUFFIX", "含所有子域名"], keyword: ["DOMAIN-KEYWORD", "包含关键字"], regexp: ["DOMAIN-REGEX", "域名正则"] } as Record<string, string[]>)[kind];
       if (!spec || !domain) throw new Error("无法解释域名规则");
       add(spec[0], domain, spec[1]);

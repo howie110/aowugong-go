@@ -139,6 +139,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	}
 
 	// 3. 先按客户端 IP 限流，再访问 OSS，避免无效请求消耗对象存储额度。
+	process, valid := imageProcess(request.URL.Query())
+	if !valid {
+		writeError(w, http.StatusBadRequest, "unsupported image variant")
+		return
+	}
 	allowed, retryAfter := h.limiter.Allow(clientIP(request), time.Now())
 	if !allowed {
 		w.Header().Set("Retry-After", strconv.Itoa(maxInt(1, int(retryAfter.Seconds()))))
@@ -159,6 +164,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	}
 	if metadata.ContentLength > h.maxObjectBytes {
 		writeError(w, http.StatusRequestEntityTooLarge, "image is too large")
+		return
+	}
+	if process != "" && (metadata.ContentType == "image/jpeg" || metadata.ContentType == "image/png") {
+		h.serveProcessed(w, request, key, process)
 		return
 	}
 	if etagMatches(request.Header.Get("If-None-Match"), metadata.ETag) {

@@ -165,6 +165,7 @@ aowugong-go 是 Go 模块化单体，统一提供：
 
 ### 3.3 投资研究和内容服务
 
+- 订阅管理列表将后端判定为“已结束”的记录放在底部，组内保持原有到期日排序；新增、编辑共用弹框，取消不保存，失败保留输入，成功关闭并刷新，保存期间禁止重复提交及关闭。字段、统计及删除规则不变。2026-10-16 随 `v20261016-content-ui` 部署，交互已通过本地测试，线上未执行真实订阅写入验收。
 - 微信读书通过扫码绑定账号并从书架发现公众号；人工启用的公众号由手动抓取任务检查最近 20 篇文章，不再按 08:00、20:00 自动抓取。
 - 只为数据库未知文章读取详情和微信公众号原文，不依赖外部 RSS 聚合。
 - 登录凭据使用 AOWUGONG_ENCRYPTION_KEY 派生的 AES-256-GCM 密钥加密后存入 PostgreSQL；二维码中间态只保存在当前 Go 进程内。
@@ -173,6 +174,48 @@ aowugong-go 是 Go 模块化单体，统一提供：
 - 股票仓位支持截图导入和敏感信息遮罩。
 - 私有工作导航保存在 storage/private/work/navigation.json，不放入数据库或公开页面。
 - 真实交易开关 FINANCE_ENABLE_REAL_TRADE 默认是 false，任何打开真实交易的动作都必须单独确认。
+
+#### 个人聊天归档（2026-10-17 已部署）
+
+- 组成：`skills/chat-archive-sync` Skill 包及 Python 同步脚本、现有 PostgreSQL、工作台“内容服务 → 聊天归档”（`/work/content/chat-archive`）。不加本地 SQLite、队列、独立上传服务；不做摘要、标签、长期记忆、聊天客户端或 Skill 云端管理。
+- 采集：适配本地 Codex rollout JSONL（含 `.jsonl.zst` 压缩日志）、Claude Code session JSONL，只读明确配置的文件或 glob。只保存用户/AI 纯文字，不保存源文件、附件及引用、工具调用/输出、系统指令、推理通道或摘要；未知事件仅计数。Claude 桌面版、云端会话不支持。压缩日志只在内存中解压，不生成文件副本；缺少 `zstd` 时明确失败。会话索引的旧 `.jsonl` 路径不存在不等于记录丢失，应检查对应 `.jsonl.zst`。
+- 同步：Skill 2.0 的 HTTPS 默认流程扫描全部授权源文件，与云端逐条比对消息身份/版本哈希，仅分批补齐缺失或变化的文字，再次比对并校验云端哈希；不依赖历史游标，因此能修复旧解析器漏采。每批最多500条且限制编码体积，失败重跑不重复追加；确认过的内容照常上传，来源不明的部分单独报告。原有 `/upload` 增量事务及游标协议仍兼容，补齐接口不修改它。压缩前后保持同一身份和解压偏移；单个源事件限128MiB，不上传源文件。读取中变化重读一次，坏压缩文件明确失败，末尾半行待下次读取；本地删除不删除云端，已不可获取的原文不能补救。
+- 身份：有稳定 ID 时按来源＋账号范围＋原会话/消息 ID 合并；缺少消息 ID 时使用设备/逻辑文件/事件位置的弱身份，不猜测跨设备合并。消息观察保留批次、偏移、父 ID、来源时间与完整性，结构块/附件字段为空；同内容的多设备观察不等于多次编辑，`version_hash` 区分内容。不提供分支树。
+- 查询：仅管理员且有页面权限可访问。消息列表默认每页 20 条，数据库按消息身份取最新观察，再排序、分页后读取正文；页面一条消息一行，展开显示原文和来源 ID，无导出按钮。独立 `/api/v1/chat-archive/statistics` 只聚合角色/时间，不传正文；总量包含所有日期，日统计默认北京时间最近 7 天，点击“更早 7 天”才查询历史。未知日期单独计数，统计与消息分页互不阻塞。统计和列表沿用同一消息 ID 快照；原有筛选/导出 API 保留管理员鉴权。
+- 存储：继续使用迁移 `migrations/postgres/00013_chat_archive.sql` 的四张表，不修改已发布迁移。兼容保留 `chat_archive_raw_batches` 表名，但纯文字采集的 `raw` 固定为空，`sha256` 校验消息与顺序，解析器版本为 `dialogue-only-3`。Codex 按逐块来源标记只取 `user.text`，AI 只取 `phase=final_answer` 或 `channel=final`；跳过子 Agent 会话、中间进度和注入指令，缺失/不匹配标记时不猜测收录。标题仅来自保留的真人输入，旧格式可能缺失。现有管理员导出接口保留，但新批次没有源文件字节可导出。新增专用 Key 鉴权的 HTTPS 同步接口，管理员浏览接口仍单独鉴权。
+- 代码入口：`skills/chat-archive-sync/scripts/{adapters,sync,http_store,configure_device}.py` 负责解析、采集 CLI、HTTPS 传输和设备配置，`store.py` 仅兼容旧 DSN；`internal/chatarchive/ingest*.go` 负责校验/事务写入/核验，`internal/httpserver/chatarchive_sync_handlers.go` 提供同步接口；`internal/chatarchive/audit.go` 与 `internal/httpserver/chatarchive_handlers.go` 提供 `/api/v1/chat-archive/messages` 只读核对接口；`web/src/lib/chat-archive.ts` 封装接口，`web/src/pages/chat-archive.tsx` 展示。`internal/chatarchive/statistics.go` 提供数据库聚合。迁移 14 新增 `source_at` 存储生成列及索引，来源时间无效时为 NULL，原始 source_time 不改动；旧客户端写入也会自动更新规范时间。
+
+**HTTPS 同步接口**
+
+仅此业务使用 `AOWUGONG_CHAT_ARCHIVE_SYNC_KEY`，32–4096 位非空白 ASCII，未配置即禁用；通过 `Authorization: Bearer <key>` 鉴权，不接受 URL 中的 Key，不能用此 Key 访问管理员业务 API。端点为 `GET /api/v1/chat-archive-sync/status`（兼容检查）、`POST /state`（source_key 查询进度）、`POST /upload`（原增量协议）、`GET /verify`（完整性核验），以及 v2 的 `POST /check`（来源/账号/会话内逐条查询 message_key＋version_hash，返回 present/different/missing）和 `POST /repair`（幂等追加缺失版本，返回 inserted/verified）。check/repair 每批最多500条；所有接口共用专用 Key、16MiB 请求限制、两路并发和速率限制，不返回聊天正文，不记录 Key/正文日志。
+
+新版入口 `scripts/{archive_run,reconcile,native_history}.py` 由 sync.py 调用，仍通过 http_store.py 统一封装接口。旧 Codex user 缺来源标记时，从本机 `thread/turns/list` 的 full 分页结果匹配原生 userMessage 证据；支持 proxy→stdio 只读服务回退，不调用 turn/start/resume。缺证据、摘要/部分历史或不明阶段不猜测上传。Claude 排除元消息/子任务/工具中间文字，助手确认 end_turn；不明文字报告待核实。配置可提供 codex_command 数组指定本机程序。repair 使用来源锁与会话锁，旧版本不覆盖，不修改 sync_states/补传标记；旧 upload 的精确重试按 last_success_at 对应批次核实，不被 repair 新批次干扰。没有新增迁移。
+
+客户端完成来源读取并确认未变化后才发送整份增量；服务端按来源锁和 expected_state 比较后原子提交。重复相同提交成功但不重复落库，不同内容或过期进度返回 409；客户端重新读取最多重试一次。保持 dialogue-only-3 哈希与原表格式。16 MiB 为筛选后文字/元数据大小，超限失败而非截断。HTTP 模式断网/失败由本次 CLI 明确报告，不承诺远端失败计数更新。
+
+**使用与配置**
+
+- Skill 源码随项目维护，本机 Codex 已安装 `~/.codex/skills/chat-archive-sync`。运行环境 Python 3.11+，HTTPS 模式只用标准库，不需要 psycopg 或 SSH；压缩日志仍需 zstd。旧 DSN 模式才需 requirements.txt。通用 Skill 不含凭据，私密交接包包含单独 API Key，不能公开分享。
+- 设备私有 JSON 使用 `api_url`、`api_key`、固定 `device_id`、`account_scope`、`sources: [{source,path}]` 和可选 `codex_index`。本机 HTTPS 配置为 `.cache/chat-archive/http-config.json`（Git 忽略、600），旧 config.json 保留但不再作为默认。公司电脑用 `configure_device.py --config <私密配置> --codex-home <授权数据目录>` 初始化新 device_id 和本机路径，支持 UTF-8；Unix chmod600，Windows 设置当前用户专属 ACL。Windows 尚未实机验证。不同来源账号不可混用 scope。Key 不写进源码、Skill 或日志。
+- 数据库继续只监听回环地址。新设备通过 HTTPS 调用站点，无需数据库账号/SSH 登录/隧道。历史 DSN 专用账号和文件未撤销；不用它们作为公司电脑交接内容。已有聊天记录保留，不因传输方式升级清库。
+- 可选配置 `codex_index` 指定 Agent 自己的会话索引；本机为 `/Users/howie/.codex/state_5.sqlite`。只读核对配置范围的真人会话及缺失日志，不建立本地同步状态库。没有索引时仅报告扫描数量，不能宣称覆盖全部聊天；索引存在也只能证明来源文件覆盖，不保证来源曾完整保留全部内容。
+
+```bash
+# 使用设备虚拟环境中的 Python；将路径替换为明确提供的私有配置
+python skills/chat-archive-sync/scripts/sync.py --config /private/path/archive.json --dry-run
+python skills/chat-archive-sync/scripts/sync.py --config /private/path/archive.json
+python skills/chat-archive-sync/scripts/sync.py --config /private/path/archive.json --verify
+```
+
+预览逐条比对但不写；正式同步永久保留纯文字（仍可能含敏感信息），用户调用同步即授权配置范围的本次上传。HTTPS 模式 --verify 比较本地与云端并校验完整性，不上传；旧 DSN 模式仍仅核验云端哈希。退出0表示配置内可确认的记录核对通过；退出2表示有待确认来源/缺失源文件或只读发现缺口，同步模式下已确认内容仍完成补传；退出1表示实际失败。不得将“已存哈希正确”或“已到文件末尾”说成源会话绝对完整。安装升级使用包内 install.py --config <这台设备原配置>，备份旧代码，保留设备ID/scope/授权路径并将配置复制到 Skill/config.json，不重新生成老设备身份。PostgreSQL 无法表示的字符转义并标记 escaped_source_text，不自动清理旧数据。
+
+**验证与运维边界**
+
+合成样本覆盖原有纯文字解析与增量边界、新接口鉴权/大小限制/参数校验/冲突/重复提交、隔离 PostgreSQL 事务回滚，以及真实 Python→HTTP→Go→PostgreSQL 端到端续传、501 条多批次写入、Go/Python 双向哈希核验。归档表继续纳入数据库备份；核验不等于源会话完整，也不能替代独立备份。线上测试只使用获授权记录，不能注入演示数据或自动清库；不启用定时同步或发送外部通知。
+
+当前发布：`v20261017-chat-archive-reconcile`（2026-10-17），上一版 `v20261017-chat-archive-performance`。新增 check/repair 接口已部署，未增加迁移；公网健康、专用Key核对/空补齐和未授权401验证通过，检查前后仍为100批次/14,893条观察，本次未上传真实聊天。Go全量测试/vet、54项Python测试通过；实际CLI经HTTP/隔离PostgreSQL完成502条历史漏采补齐、51页原生分类匹配、重跑零新增、保留游标、版本修改及后续追加。Windows实机和公司真实记录仍须在公司电脑执行，不能把测试当作已经全部归档。本机已更新Skill；完整私密包为 `.cache/chat-archive-sync-v2-private.zip`（含专用Key，不含SSH/数据库凭据），保留 `.cache/chat-archive/http-config.json`，均不提交Git。上一版迁移14与统计优化保留；数据库备份位于 root 专属 `/opt/aowugong-go/chat-api-stage.H5fRRf/performance-backup/database.dump`。400日志仅记录安全字段路径/错误类别。回滚应用不得删除列、回退数据或继续使用不理解新接口的客户端；代码尚未提交推送。
+
+历史补传协议（2026-10-17）：`v20261017-chat-archive-backfill` 正式支持公司原脚本的 `native_user_backfill_v1`。此字段是可选、有序且不重复的 SHA-256 数组，最多 100,000 项，不能再当普通附加字段丢弃。新增标记必须精确等于原标记集合加本次 `[position,message_key,body]` 的 Python JSON UTF-8 哈希；仅 Codex user 消息、保持原 offset/prefix/conversation/version 的请求可作为历史补传，仍执行范围检查、source-key 锁、完整 expected_state CAS 和事务写入。消息与标记一起提交，失败一起回滚，完全相同提交可重试；普通增量或重扫客户端省略标记时，服务端保留 expected_state 中的标记，过期请求不能覆盖它们。已验证公司排查包原 backfill_native.py 和 sync.py 在隔离库完成 502 条跨批次补传、预览、重跑零新增、后续普通同步保留标记，并测试并发/回滚/哈希校验；全量 Go 测试和 vet 通过。部署未上传真实聊天。补传成功后不得直接回滚到不理解该状态字段的旧版本，应先评估状态兼容性。
 
 ### 3.4 接手开发的关键入口
 
@@ -226,6 +269,7 @@ aowugong-go 是 Go 模块化单体，统一提供：
 - 后端新增 `internal/blog`，Markdown 读取与解析、状态业务与数据库访问按职责分文件；HTTP handler 进入现有 `internal/httpserver`，前端 API 统一放在 `web/src/lib`。沿用 handler → service → repository/client，不引入通用 CMS 或插件系统。
 - 博客首页迁入旧 Astro 雪人/小猫互动贴纸，宽屏时整组固定在左上角空白区，保留拖动、键盘微调、复位、位置记忆、音效和作者链接；沿用原素材，React 生命周期管理事件，不依赖 Astro。窄屏隐藏，与旧版桌面装饰定位一致。
 - 文章正文采用书页风格排版，恢复 H1/H2/H3 标记；正文外链在新标签打开。博客始终预留纵向滚动条空间。动态先图后文，配图最高 200px，点击查看原图。
+- 文章正文与文章标题继承博客的系统无衬线字体（Mac 中文通常为苹方），不再单独指定宋体；保留现有字号、行距、字距及代码块等宽字体。2026-10-16 随 `v20261016-content-ui` 部署。
 - 文章列表使用纯文字布局，不显示缩略图；图片保留在文章正文中。2026-10-01 已通过本地验收。
 - Markdown 由 Go 端一套解析器处理，读取既有 `title/date/tags/image` 元信息，正文输出经过安全处理的 HTML，目录从同一次解析提取。React 只展示，不再维护第二套 Markdown 解析。
 - 迁移核对既有换行、链接、图片、表格和代码块表现；不执行 Markdown 中的脚本。保留文章 slug、RSS、Sitemap 以及每篇文章的标题、描述和 canonical 元信息，不能让所有文章都返回工作台的默认标题。
@@ -349,6 +393,9 @@ v2rayN/v2rayNG 的标准节点订阅无法像 Clash、Surge 那样携带完整�
 - 管理员分配页和用户资源页按原始匹配顺序紧凑展示公共规则，相邻同用途规则分组，每组只显示一行备注，组内不再逐条注释；资源页将公共规则放在订阅资源之后，默认全部展开；管理员仍可复制 JSON 原文。展示直接解析接口返回的唯一规则文件，不维护第二份规则。2026-10-04 已部署 v20261004-vpn-rules-grouped。
 - 每次生成订阅都会重新读取该文件；更新私有规则文件后，支持合并规则的客户端刷新订阅即可得到新规则。v2rayN/v2rayNG 标准节点订阅不携带这些规则。
 - 规则目标统一为 proxy、direct、block，分别表示代理、直连和拒绝。
+- 公共策略为：保留明确指定的代理/直连/拦截规则，局域网、订阅服务及节点入口直连，国内域名集合和国内 IP 直连，其余默认走代理。节点入口随资源变更核对；显式例外优先于国内集合。
+- `geosite:cn` 是本项目的国内域名集合标识，转换为 blackmatrix7/ios_rule_script 的 ChinaMax 外部域名集：Clash 使用 domain rule-provider（86400 秒更新），Surge/Shadowrocket 使用 DOMAIN-SET，由客户端下载缓存；不在服务器按请求下载。集合来源是 [ChinaMax](https://github.com/blackmatrix7/ios_rule_script/tree/master/rule/Surge/ChinaMax)，不是自动探测封锁情况，也不承诺不同客户端的 GeoIP 数据完全相同。首次导入需确认规则集下载成功，必要时先使用可用代理更新。
+- `geoip:cn` 转为 `GEOIP,CN,DIRECT`；局域网使用明确 IPv4/IPv6 CIDR，避免依赖不同客户端对 PRIVATE 的解释。最后一条 `network: "tcp,udp"` 转为 Clash 的 MATCH 或 Surge/Shadowrocket 的 FINAL，禁止放在中间遮蔽后续规则。页面只读展示集合引用及默认代理，不展开集合全量域名。v2rayN 节点订阅仍不携带这些规则。
 - 文件缺失或为空时保持无公共规则的兼容行为；文件存在但 JSON 无效或格式不支持时，阻止生成不完整的订阅。
 - 例如 geosite:cn 和私有 IP 可以统一指向 direct，具体内容以当前文件为准。
 
@@ -392,6 +439,7 @@ v2rayN/v2rayNG 的标准节点订阅无法像 Clash、Surge 那样携带完整�
 - 状态图片经 Go 的鉴权接口上传，支持 JPEG、PNG、WebP、GIF，真实内容检测，每张最多 10 MiB、40MP，每条最多 9 张；不支持视频或浏览器直传。
 - 服务器 `.env` 使用 `BLOG_OSS_ENDPOINT`、`BLOG_OSS_BUCKET`、`BLOG_OSS_ACCESS_KEY_ID`、`BLOG_OSS_ACCESS_KEY_SECRET`。RAM 用户 `aowugong-blog` 的 `AowugongBlogStatusObjects` 策略只允许共享 Bucket 内 `blog/status/*` 的 PutObject/GetObject。`pic/` 继续使用原有只读身份。
 - OSS 使用同地域内网 Endpoint，公开 URL 为 `https://pic.aowugong.top/blog/status/...`。图片未被状态引用时不会自动公开列举；删除状态只删除数据库引用，不扩大运行账号的 OSS 删除权限。
+- 动态图片展示优化（2026-10-16 已部署 `v20261016-content-ui`）：公开动态、工作台「记录此刻」列表共用图库，编辑已有图片也使用缩略图；点击才请求清晰大图，并保留“查看原图”。原图及数据库引用不变，历史 `pic/` 与新 `blog/status/` JPEG/PNG 均可使用固定 `variant=thumb-v1`（长边 640、WebP 质量 80）和 `variant=large-v1`（长边 2048、WebP 质量 85）；等比缩小、不放大、自动纠正方向。Go 代理通过 OSS SDK 请求处理结果，使用结果自身的类型、长度及 ETag，沿用长期缓存、并发和大小限制，不接受任意 OSS 处理参数。GIF/WebP 保持原样以避免破坏动画；外部图片、带查询参数的历史地址和本地预览不改写。暂不引入 CDN，也不覆盖或批量重传原图，图片仍经服务器公网出口。线上照片抽测原图 6,330,852 字节、缩略图 49,658 字节、清晰大图 420,952 字节，处理请求成功；处理费用仍需按实际 OSS 账单观察。
 - 2026-09-30 已清除 Moments 的运行/停止容器、四个专用镜像、SQLite 数据和备份、systemd 备份任务、服务器目录、本地源码及私有配置、专用 DNS/Caddy 路由及证书、OSS `moments/`、专用 CORS 来源、RAM 用户/密钥/策略。清理前确认 Memo 为 0、媒体仅为空目录标记；共享 Bucket 和 `pic/` 保留。
 - GitHub `howie110/aowugong-moments` 已归档；删除 API 返回 403，**远端仓库尚未删除**，等待用户在仓库设置页删除。不要把归档误记为清理完成。
 
@@ -706,3 +754,21 @@ Content-Type: application/json
 
 - 日志与可观测性：系统复杂后，评估引入 Wide Event / Canonical Log Line，为请求、任务、消息、批量处理和人工覆盖统一记录上下文，让正常流程清晰、例外可追踪和可审计。当前只记录为优化方向，暂不实施具体架构。
 - 资料来源：[Logging Sucks](https://loggingsucks.com/)、[logging-best-practices skill](https://github.com/boristane/agent-skills/tree/main/skills/logging-best-practices)。
+
+## GPSLogger 我的轨迹（2026-10-22）
+
+已确认设计：Android GPSLogger 经 HTTPS POST 上传到现有 Go/chi 后端，保存现有 PostgreSQL；工作台「个人工具 → 我的轨迹」仅管理员使用，设备和轨迹按当前账号隔离。不新增 Java 服务，不做地图、地址解析或 AI 分析，不自动清理历史记录。用户已确认提交 main 并发布；上线结果另行记录。
+
+实施计划（brainstorming / writing-plans / executing-plans）：
+- [x] 数据层：迁移 15；设备 UUID、所属账号、密钥 SHA256、撤销时间；轨迹包含设备、定位/接收时间、WGS84 坐标、精度、速度(m/s)、方向、海拔、来源及白名单原始字段。验证坐标/时间/可选数值，设备+时间+坐标幂等；允许乱序和断网补传。
+- [x] HTTP：`POST /api/v1/trajectory/collect` 只接受 form 请求体和独立 Bearer 上传密钥；拒绝 URL 参数，限制 8 KiB、并发和速率，不记录正文/密钥。管理 API 复用登录、管理员和页面权限，按当前用户隔离设备创建/轮换/撤销和日期分页查询；原始密钥只在创建/轮换响应中出现。
+- [x] 工作台：`/work/personal/trajectory`；今日点数、最后定位/接收时间，设备和日期筛选、50 条分页明细、设备管理和 GPSLogger 配置复制；日期北京时间，设备失联只展示最后接收时间，不伪称实时在线。
+- [x] 验证：解析异常/时间边界、重复并发、撤销与轮换、跨账号隔离、普通用户禁止、分页、前端日期和请求格式；本地 PostgreSQL 和浏览器链路验收，Go 全量测试/vet、前端测试/构建。
+
+实现决策：上传格式 `application/x-www-form-urlencoded`，GPSLogger body `timestamp=%TIMESTAMP&lat=%LAT&lon=%LON&acc=%ACC&alt=%ALT&spd=%SPD&dir=%DIR&prov=%PROV`；定位时间为 Unix 秒，数据库存 UTC，查询按北京时间 [from,to)，最长 366 天。定位时间允许 2000 年起至服务器时间后 10 分钟；重复点保留首次内容和接收时间，另更新设备最后接收时间。密钥轮换立刻使旧密钥失效（旧请求队列需要重新发送），撤销保留设备和历史记录。设备上限每账号 20 台；首次凭证关闭后不能重新读取，可轮换。
+
+验收关注：断网补传不当成今天定位；空可选值与 0 区分；旧密钥并发写入不能越过撤销；分页在新点写入时使用固定查询快照；查询错误不显示为零条。轨迹表不进入通用数据库浏览器，避免绕过账号隔离。手机实际后台保活、重启和耗电需要安装后实机验收。
+
+本地验收：独立 PostgreSQL schema 的 race 测试通过，覆盖并发重复上传、分页期间新点插入、跨账号隔离、密钥轮换和撤销。浏览器验证管理员导航、空状态、创建设备、一次性密钥隐藏及有数据列表；模拟 GPSLogger 经真实 HTTP 接口上传 5 个点，重复点未新增、昨日补传未计入今日。Go 全量测试和 vet、前端 117 项测试与构建通过。截图 `.cache/trajectory-preview.png` 为合成数据。未部署、未在真实手机运行；后台保活、耗电和手机网络恢复补传仍需实机验收。
+
+手机配置入口：登录 https://aowugong.top/work/personal/trajectory，添加自己的设备并保存一次性上传密钥。GPSLogger 自定义 URL 使用 https://aowugong.top/api/v1/trajectory/collect，方法 POST；HTTP Headers 为 Content-Type: application/x-www-form-urlencoded 和 Authorization: Bearer <设备密钥>，每行一项；HTTP Body 使用本节模板。Basic Authentication 用户名、密码留空。启用 CSV 本地备份，关闭 Discard offline locations，授权后台定位并取消电池优化，修改配置后停止再启动记录。

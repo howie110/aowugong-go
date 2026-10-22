@@ -1,4 +1,6 @@
+const TrajectoryPage = lazy(() => import("@/pages/trajectory").then(module => ({ default: module.TrajectoryPage })));
 import { requestWorkbenchNavigation } from "@/lib/navigation-guard";
+import { canViewChatArchive } from "@/lib/chat-archive";
 import { Suspense, lazy, useEffect, useState } from "react";
 
 import { pageLabelMap } from "@/components/layout/app-navigation";
@@ -33,6 +35,7 @@ const ArticleAnalysisPage = lazy(() => import("@/pages/finance/article-analysis"
 const WeReadPage = lazy(() => import("@/pages/weread").then((module) => ({ default: module.WeReadPage })));
 const MahjongPage = lazy(() => import("@/pages/mahjong").then((module) => ({ default: module.MahjongPage })));
 const SubscriptionsPage = lazy(() => import("@/pages/subscriptions").then((module) => ({ default: module.SubscriptionsPage })));
+const ChatArchivePage = lazy(() => import("@/pages/chat-archive").then((module) => ({ default: module.ChatArchivePage })));
 const WorkPage = lazy(() => import("@/pages/work").then((module) => ({ default: module.WorkPage })));
 const PermissionsPage = lazy(() => import("@/pages/permissions").then((module) => ({ default: module.PermissionsPage })));
 const MonitoringPage = lazy(() => import("@/pages/monitoring").then((module) => ({ default: module.MonitoringPage })));
@@ -41,6 +44,8 @@ const VPNDistributionPage = lazy(() => import("@/pages/vpn").then((module) => ({
 const VPNResourcesPage = lazy(() => import("@/pages/vpn").then((module) => ({ default: module.VPNResourcesPage })));
 
 const selfManagedPages = new Set<FinancePageKey>([
+  "trajectory",
+  "chatArchive",
  "blogStatus",
   "positions",
   "stockAnalysis",
@@ -67,6 +72,8 @@ const pageOrder: FinancePageKey[] = [
   "weread",
   "mahjong",
   "subscriptions",
+  "trajectory",
+  "chatArchive",
   "backtest",
   "data",
   "jobs",
@@ -240,6 +247,8 @@ function FinancePageBody({
   if (pageKey === "subscriptions") {
     return <SubscriptionsPage />;
   }
+  if (pageKey === "trajectory") return <TrajectoryPage />;
+  if (pageKey === "chatArchive") return <ChatArchivePage />;
   if (pageKey === "work") {
     return <WorkPage />;
   }
@@ -289,6 +298,7 @@ function FinancePageBody({
 }
 
 function canAccessPage(user: UserProfile, pageKey: FinancePageKey) {
+  if (pageKey === "trajectory" || pageKey === "chatArchive") return canViewChatArchive(user);
   if ((user.roles ?? []).includes("admin")) {
     return true;
   }

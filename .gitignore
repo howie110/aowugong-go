@@ -23,6 +23,8 @@ web/node_modules/
 web/dist/
 dist/
 .cache/
+__pycache__/
+*.pyc
 
 # Runtime data and generated migration reports
 storage/*

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { guardUnsavedChanges } from "@/lib/navigation-guard";
+import { blogImageURL } from "@/lib/blog-image";
 import { saveStatus, uploadStatusImage, type BlogStatus } from "@/lib/blog";
 import { prepareStatusImages, validateStatusFile, type StatusImageItem } from "./status-images";
+import { Lightbox } from "./status-card";
 
 type Props = { initial?: BlogStatus; onSaved: (status: BlogStatus) => void; onCancel?: () => void };
 export function StatusEditor({ initial, onSaved, onCancel }: Props) {
@@ -13,6 +15,7 @@ export function StatusEditor({ initial, onSaved, onCancel }: Props) {
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
+  const [zoom, setZoom] = useState("");
   const locked = useRef(false);
   const input = useRef<HTMLInputElement>(null);
   const urls = useRef(new Set<string>());
@@ -63,7 +66,7 @@ export function StatusEditor({ initial, onSaved, onCancel }: Props) {
     <textarea aria-label={initial ? "编辑动态内容" : "记录内容"} placeholder="今天有什么想记录的？" maxLength={30000} value={body} disabled={busy} onChange={(event) => { setBody(event.target.value); setDirty(true); }} />
     <div className="blog-upload-grid">
       {images.map((item, index) => <div className="blog-upload-item" key={item.id} draggable={!busy} onDragStart={(event) => event.dataTransfer.setData("text/plain", String(index))} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const value = event.dataTransfer.getData("text/plain"); const from = Number(value); if (!busy && /^\d+$/.test(value) && from < images.length) move(from, index); }}>
-        <img src={item.preview} alt={item.file?.name ?? `图片 ${index + 1}`} draggable={false} />
+        <div><button type="button" className="w-full" aria-label={`预览图片 ${index + 1}`} onClick={() => setZoom(item.preview)}><img src={blogImageURL(item.preview, "thumb-v1")} alt={item.file?.name ?? `图片 ${index + 1}`} draggable={false} loading="lazy" decoding="async" /></button></div>
         <button type="button" disabled={busy} aria-label={`移除图片 ${index + 1}`} onClick={() => remove(item)}>×</button>
         <div className="flex items-center justify-between gap-1 py-1 text-xs"><button type="button" disabled={busy || index === 0} onClick={() => move(index, index - 1)} aria-label={`图片 ${index + 1} 前移`}>← 前移</button><span>{index + 1}</span><button type="button" disabled={busy || index === images.length - 1} onClick={() => move(index, index + 1)} aria-label={`图片 ${index + 1} 后移`}>后移 →</button></div>
       </div>)}
@@ -77,5 +80,6 @@ export function StatusEditor({ initial, onSaved, onCancel }: Props) {
     <p className="blog-editor-hint">选图仅本地预览，{initial ? "保存" : "发布"}时上传。每张最多 10 MiB，可拖动排序或点击前移、后移。</p>
     {progress && <p role="status" className="blog-editor-hint">{progress}</p>}
     {error && <div role="alert" className="blog-error">{error}</div>}
+    {zoom && <Lightbox url={zoom} optimized onClose={() => setZoom("")} />}
   </div>;
 }

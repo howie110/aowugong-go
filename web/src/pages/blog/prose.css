@@ -1,6 +1,6 @@
 /* Book-like reading rhythm, inspired by Retypeset. */
 .blog-prose {
-  font-family: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", STSong, Georgia, serif;
+  font-family: inherit;
   font-size: 17px;
   line-height: 1.95;
   letter-spacing: .025em;
@@ -76,7 +76,7 @@
 .blog-prose hr { border:0; border-top:1px solid var(--blog-line); width:25%; margin:3em auto; }
 .blog-prose details { margin:1.6em 0; padding:1em 1.2em; border:1px solid var(--blog-line); border-radius:4px; }
 .blog-prose summary { cursor:pointer; font-weight:600; }
-.blog-article-header h1 { font-family:"Songti SC", STSong, Georgia, serif; letter-spacing:.035em; }
+.blog-article-header h1 { font-family:inherit; letter-spacing:.035em; }
 .blog-toc { background:transparent; border-block:1px solid var(--blog-line); border-radius:0; padding:16px 0; }
 @media(max-width:760px) {
   .blog-prose { font-size:16px; line-height:1.9; letter-spacing:.015em; }

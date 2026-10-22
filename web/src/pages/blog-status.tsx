@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { deleteStatus, listStatuses, type BlogStatus } from "@/lib/blog";
 import { StatusEditor } from "./blog/status-editor";
+import { StatusImageGallery } from "./blog/status-card";
 import "./blog/styles.css";
 
 export function BlogStatusPage() {
@@ -58,7 +59,7 @@ export function BlogStatusPage() {
       {statuses.map((status) => <article key={status.id} className="blog-status-card">
         <div className="mb-4 text-xs text-muted-foreground"><time dateTime={status.published_at ?? status.created_at}>{new Date(status.published_at ?? status.created_at).toLocaleString("zh-CN")}</time>{!status.published && <span className="ml-2">未发布</span>}</div>
         {editing === status.id ? <StatusEditor initial={status} onSaved={(item) => saved(item, true)} onCancel={() => setEditing(null)} /> : <>
-          {status.images.length > 0 && <div className={`blog-image-grid${status.images.length === 1 ? " single" : ""}`}>{status.images.map((image, index) => <a href={image.url} key={`${image.key}-${index}`} target="_blank" rel="noopener noreferrer"><img src={image.url} alt={`动态图片 ${index + 1}`} loading="lazy" /></a>)}</div>}
+          <StatusImageGallery images={status.images} />
           <p className="blog-status-text">{status.body}</p>
           <div className="blog-status-actions"><Button variant="outline" disabled={!!editing || !!deleting || loading} onClick={() => { setEditing(status.id); setMessage(""); }}>编辑</Button><Button variant="outline" disabled={!!editing || !!deleting || loading} onClick={() => void remove(status)}>{deleting === status.id ? "删除中…" : "删除"}</Button></div>
         </>}

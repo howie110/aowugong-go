@@ -26,6 +26,10 @@ import (
 
 // Dependencies 描述路由器启动所需的依赖。
 type Dependencies struct {
+	Trajectory         trajectoryService
+	ChatArchiveSync    archiveSyncService
+	ChatArchiveSyncKey string
+	ChatArchive        archiveReadService
 	Notification       *notification.Service
 	NotificationTokens map[string]string
 	BlogMedia          *blog.MediaStore
@@ -72,6 +76,8 @@ func NewRouter(deps Dependencies) http.Handler {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 	})
 	api.Get("/api/v1/health", healthHandler)
+	registerTrajectoryRoutes(api, deps.Trajectory, deps.Auth, deps.RBAC)
+	registerArchiveSyncRoutes(api, deps.ChatArchiveSync, deps.ChatArchiveSyncKey)
 	if deps.Notification != nil && len(deps.NotificationTokens) > 0 {
 		api.Method(http.MethodPost, "/api/v1/notifications/wechat", newNotificationHandler(deps.Notification, deps.NotificationTokens))
 	}
@@ -86,6 +92,9 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 	if deps.Auth != nil && deps.RBAC != nil {
 		registerPermissionRoutes(api, deps.Auth, deps.RBAC)
+	}
+	if deps.Auth != nil && deps.RBAC != nil && deps.ChatArchive != nil {
+		registerArchiveRoutes(api, deps.Auth, deps.RBAC, deps.ChatArchive)
 	}
 	if deps.Auth != nil && deps.RBAC != nil && deps.Subscription != nil {
 		registerSubscriptionRoutes(api, deps.Auth, deps.RBAC, deps.Subscription)

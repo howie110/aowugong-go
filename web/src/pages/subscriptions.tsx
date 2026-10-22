@@ -1,5 +1,5 @@
-import { CalendarClock, Pencil, RefreshCw, Save, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { CalendarClock, Pencil, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DatePicker } from "@/components/date-picker";
 import {
@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field as FormField, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
@@ -48,7 +49,14 @@ export function SubscriptionsPage() {
   const [deleteTarget, setDeleteTarget] = useState<SubscriptionRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const saving = useRef(false);
   const summary = useMemo(() => buildSummary(records), [records]);
+  // 沿用后端的日期状态与组内排序，避免浏览器时区重新判断造成差异。
+  const sortedRecords = useMemo(() => [
+    ...records.filter((record) => record.current_status !== "已结束"),
+    ...records.filter((record) => record.current_status === "已结束"),
+  ], [records]);
 
   useEffect(() => {
     void loadRecords();
@@ -66,6 +74,7 @@ export function SubscriptionsPage() {
   }
 
   async function handleSave() {
+    if (saving.current) return;
     if (!form.service_name.trim()) {
       notify.warning("请输入订阅服务名");
       return;
@@ -75,6 +84,7 @@ export function SubscriptionsPage() {
       return;
     }
 
+    saving.current = true;
     setIsSaving(true);
     try {
       const payload = normalizePayload(form);
@@ -90,6 +100,7 @@ export function SubscriptionsPage() {
     } catch (error) {
       notify.errorFrom(error, "保存订阅记录失败");
     } finally {
+      saving.current = false;
       setIsSaving(false);
     }
   }
@@ -113,6 +124,7 @@ export function SubscriptionsPage() {
   }
 
   function handleEdit(record: SubscriptionRecord) {
+    setEditorOpen(true);
     setEditingId(record.id);
     setForm({
       service_name: record.service_name,
@@ -126,6 +138,7 @@ export function SubscriptionsPage() {
   }
 
   function resetForm() {
+    setEditorOpen(false);
     setEditingId(null);
     setForm(emptyForm);
   }
@@ -139,18 +152,26 @@ export function SubscriptionsPage() {
         <SummaryCard label="年费合计" value={formatMoney(summary.annualTotal)} detail={`月费约 ${formatMoney(summary.monthlyTotal)}`} />
       </div>
 
-      <SubscriptionEditorCard
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={() => void loadRecords()} disabled={isLoading || isSaving}>
+          {isLoading ? <Spinner /> : <RefreshCw className="h-4 w-4" />}刷新
+        </Button>
+        <Button type="button" onClick={() => { resetForm(); setEditorOpen(true); }} disabled={isLoading || isSaving}>
+          <Plus className="h-4 w-4" />新增订阅
+        </Button>
+      </div>
+
+      <SubscriptionEditorDialog
+        open={editorOpen}
         form={form}
         editingId={editingId}
         isSaving={isSaving}
-        isLoading={isLoading}
         onChange={setForm}
         onSave={handleSave}
-        onCancel={resetForm}
-        onRefresh={loadRecords}
+        onCancel={() => { if (!saving.current) resetForm(); }}
       />
 
-      <SubscriptionTable records={records} isLoading={isLoading} onEdit={handleEdit} onDelete={setDeleteTarget} />
+      <SubscriptionTable records={sortedRecords} isLoading={isLoading} onEdit={handleEdit} onDelete={setDeleteTarget} />
 
       <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
@@ -170,81 +191,73 @@ export function SubscriptionsPage() {
   );
 }
 
-function SubscriptionEditorCard({
+function SubscriptionEditorDialog({
+  open,
   form,
   editingId,
   isSaving,
-  isLoading,
   onChange,
   onSave,
   onCancel,
-  onRefresh,
 }: {
+  open: boolean;
   form: SubscriptionRecordPayload;
   editingId: number | null;
   isSaving: boolean;
-  isLoading: boolean;
   onChange: (form: SubscriptionRecordPayload) => void;
   onSave: () => void;
   onCancel: () => void;
-  onRefresh: () => void;
 }) {
   function updateField(key: keyof SubscriptionRecordPayload, value: string) {
     onChange({ ...form, [key]: value });
   }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <CardTitle>{editingId ? "编辑订阅" : "新增订阅"}</CardTitle>
-          <CardDescription>状态和离到期天数由到期日期自动计算。</CardDescription>
-        </div>
-        <Button type="button" variant="outline" size="sm" onClick={onRefresh} disabled={isLoading || isSaving}>
-          {isLoading ? <Spinner /> : <RefreshCw className="h-4 w-4" />}
-          刷新
-        </Button>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <Field label="订阅服务名">
-            <Input value={form.service_name} onChange={(event) => updateField("service_name", event.target.value)} placeholder="例如 阿里云服务器" />
-          </Field>
-          <Field label="类型">
-            <Input value={form.category} onChange={(event) => updateField("category", event.target.value)} placeholder="IT / 生活" />
-          </Field>
-          <Field label="年费用">
-            <Input type="number" inputMode="decimal" value={form.annual_fee} onChange={(event) => updateField("annual_fee", event.target.value)} />
-          </Field>
-          <Field label="月费用">
-            <Input type="number" inputMode="decimal" value={form.monthly_fee} onChange={(event) => updateField("monthly_fee", event.target.value)} />
-          </Field>
-          <Field label="开始日期">
-            <DatePicker value={form.starts_on || ""} onChange={(value) => updateField("starts_on", value)} clearable />
-          </Field>
-          <Field label="到期日期">
-            <DatePicker value={form.expires_on} onChange={(value) => updateField("expires_on", value)} />
-          </Field>
-          <div className="md:col-span-2">
-            <Field label="备注">
-              <Input value={form.note} onChange={(event) => updateField("note", event.target.value)} />
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel(); }}>
+      <DialogContent className="max-h-[85dvh] max-w-2xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{editingId ? "编辑订阅" : "新增订阅"}</DialogTitle>
+          <DialogDescription>状态和离到期天数由到期日期自动计算。</DialogDescription>
+        </DialogHeader>
+        <fieldset disabled={isSaving} className="min-w-0 space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="订阅服务名">
+              <Input value={form.service_name} onChange={(event) => updateField("service_name", event.target.value)} placeholder="例如 阿里云服务器" />
             </Field>
+            <Field label="类型">
+              <Input value={form.category} onChange={(event) => updateField("category", event.target.value)} placeholder="IT / 生活" />
+            </Field>
+            <Field label="年费用">
+              <Input type="number" inputMode="decimal" value={form.annual_fee} onChange={(event) => updateField("annual_fee", event.target.value)} />
+            </Field>
+            <Field label="月费用">
+              <Input type="number" inputMode="decimal" value={form.monthly_fee} onChange={(event) => updateField("monthly_fee", event.target.value)} />
+            </Field>
+            <Field label="开始日期">
+              <DatePicker value={form.starts_on || ""} onChange={(value) => updateField("starts_on", value)} clearable />
+            </Field>
+            <Field label="到期日期">
+              <DatePicker value={form.expires_on} onChange={(value) => updateField("expires_on", value)} />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="备注">
+                <Input value={form.note} onChange={(event) => updateField("note", event.target.value)} />
+              </Field>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-          {editingId ? (
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
             <Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>
               <X className="h-4 w-4" />
-              取消编辑
+              取消
             </Button>
-          ) : null}
-          <Button type="button" onClick={onSave} disabled={isSaving}>
-            {isSaving ? <Spinner /> : <Save className="h-4 w-4" />}
-            保存
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+            <Button type="button" onClick={onSave} disabled={isSaving}>
+              {isSaving ? <Spinner /> : <Save className="h-4 w-4" />}
+              保存
+            </Button>
+          </div>
+        </fieldset>
+      </DialogContent>
+    </Dialog>
   );
 }
 

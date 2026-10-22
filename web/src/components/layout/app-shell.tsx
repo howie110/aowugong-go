@@ -38,7 +38,7 @@ export function AppShell({ user, activePage, onNavigate, children }: AppShellPro
   const visibleNavGroups = navGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => canViewAllPages || permissionCodes.includes(item.permission)),
+      items: group.items.filter((item) => (item.key === "trajectory" || item.key === "chatArchive") ? canViewAllPages : canViewAllPages || permissionCodes.includes(item.permission)),
     }))
     .filter((group) => group.items.length > 0);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => readOpenGroups(activePage));

@@ -37,6 +37,7 @@ type LookupEnv func(string) (string, bool)
 
 // Config 汇总应用运行所需的配置。
 type Config struct {
+	ChatArchiveSyncKey string
 	NotificationTokens map[string]string
 	Environment        string
 	MigrationsDir      string
@@ -271,6 +272,12 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 
 	// 2. 使用非空环境变量覆盖默认配置。
+	if value, ok := lookup("AOWUGONG_CHAT_ARCHIVE_SYNC_KEY"); ok && value != "" {
+		if len(value) < 32 || len(value) > 4096 || strings.IndexFunc(value, func(r rune) bool { return r <= 32 || r >= 127 }) >= 0 {
+			return Config{}, fmt.Errorf("AOWUGONG_CHAT_ARCHIVE_SYNC_KEY must contain 32 to 4096 printable non-space ASCII characters")
+		}
+		cfg.ChatArchiveSyncKey = value
+	}
 	if value, ok := lookup("AOWUGONG_ENV"); ok && strings.TrimSpace(value) != "" {
 		cfg.Environment = strings.TrimSpace(value)
 	}

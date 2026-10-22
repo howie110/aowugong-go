@@ -20,6 +20,8 @@ const (
 	PermissionFinanceNotifications   = "page:finance:notifications"
 	PermissionMahjong                = "page:mahjong"
 	PermissionSubscriptions          = "page:subscriptions"
+	PermissionTrajectory             = "page:personal:trajectory"
+	PermissionChatArchive            = "page:chat_archive"
 	PermissionMonitoring             = "page:monitoring"
 	PermissionWork                   = "page:work"
 	PermissionPermissions            = "page:permissions"
@@ -58,6 +60,8 @@ type UserRoles struct {
 
 // DefaultPermissions 是由代码维护的全部页面权限基线。
 var DefaultPermissions = []Permission{
+	{Code: PermissionTrajectory, Name: "我的轨迹", Group: "personal", Description: "管理员记录和查看自己的 GPSLogger 轨迹。"},
+	{Code: PermissionChatArchive, Name: "聊天归档", Group: "content", Description: "仅管理员可查阅个人聊天归档、搜索和导出。"},
 	{Code: PermissionBlogStatus, Name: "状态", Group: "content", Description: "发布、编辑和删除博客状态。"},
 	{Code: PermissionFinanceOverview, Name: "控制台", Group: "finance", Description: "查看 finance 控制台总览。"},
 	{Code: PermissionWeread, Name: "微信读书", Group: "weread", Description: "查看微信读书看板。"},

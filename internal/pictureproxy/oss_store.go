@@ -48,7 +48,8 @@ func (s *OSSStore) Head(ctx context.Context, key string) (Metadata, error) {
 	if err := ctx.Err(); err != nil {
 		return Metadata{}, err
 	}
-	headers, err := s.bucket.GetObjectMeta(key)
+	// 简略元数据不含 Content-Type，无法可靠判断动画及处理规格。
+	headers, err := s.bucket.GetObjectDetailedMeta(key, oss.WithContext(ctx))
 	if err != nil {
 		return Metadata{}, normalizeOSSError(err)
 	}
@@ -65,6 +66,16 @@ func (s *OSSStore) Get(ctx context.Context, key string) (Object, error) {
 		return Object{}, normalizeOSSError(err)
 	}
 	return Object{Body: body}, nil
+}
+
+// GetProcessed 请求固定规格的 OSS 图片处理，不写回或覆盖原图。
+func (s *OSSStore) GetProcessed(ctx context.Context, key, process string) (Object, error) {
+	var headers http.Header
+	body, err := s.bucket.GetObject(key, oss.Process(process), oss.WithContext(ctx), oss.GetResponseHeader(&headers))
+	if err != nil {
+		return Object{}, normalizeOSSError(err)
+	}
+	return Object{Metadata: metadataFromHeaders(headers), Body: body}, nil
 }
 
 // metadataFromHeaders 把 OSS 响应头转换为代理元数据。

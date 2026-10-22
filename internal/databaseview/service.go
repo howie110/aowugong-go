@@ -328,7 +328,10 @@ func scanTableNames(rows *sql.Rows) ([]string, error) {
 		if err := rows.Scan(&name); err != nil {
 			return nil, fmt.Errorf("扫描数据库表名: %w", err)
 		}
-		names = append(names, name)
+		// 聊天原始记录和凭据可能混在正文中，只能经归档专用管理员接口访问。
+		if !strings.HasPrefix(name, "chat_archive_") && !strings.HasPrefix(name, "trajectory_") {
+			names = append(names, name)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("遍历数据库表名: %w", err)

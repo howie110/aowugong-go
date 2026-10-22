@@ -4,7 +4,68 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+// 国内集合必须生成客户端可加载的引用，默认代理必须位于规则末尾。
+func TestChinaDirectRoutingAcrossClients(t *testing.T) {
+	routing, err := parseCommonRouting([]byte(`{"rules":[
+ {"type":"field","domain":["domain:example.com"],"outboundTag":"proxy"},
+ {"type":"field","domain":["geosite:cn"],"outboundTag":"direct"},
+ {"type":"field","ip":["geoip:cn"],"outboundTag":"direct"},
+ {"type":"field","network":"tcp,udp","outboundTag":"proxy"}
+]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, client := range []string{"clash", "surge", "shadowrocket"} {
+		t.Run(client, func(t *testing.T) {
+			lines, err := routing.RuleLines(client, "MyProxy")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(lines) != 4 || lines[0] != "DOMAIN-SUFFIX,example.com,MyProxy" || lines[2] != "GEOIP,CN,DIRECT" {
+				t.Fatalf("wrong ordering: %v", lines)
+			}
+			if client == "clash" {
+				if lines[1] != "RULE-SET,aowugong-cn,DIRECT" || lines[3] != "MATCH,MyProxy" {
+					t.Fatal(lines)
+				}
+			} else if !strings.HasPrefix(lines[1], "DOMAIN-SET,https://") || !strings.HasSuffix(lines[1], ",DIRECT") || lines[3] != "FINAL,MyProxy" {
+				t.Fatal(lines)
+			}
+		})
+	}
+	body, err := mergeClashRouting([]byte("proxies: []\nrule-providers:\n  existing:\n    type: file\n    behavior: domain\n    path: ./existing.yaml\n"), routing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := yaml.Unmarshal([]byte(body), &config); err != nil {
+		t.Fatal(err)
+	}
+	providers := config["rule-providers"].(map[string]any)
+	provider := providers["aowugong-cn"].(map[string]any)
+	if providers["existing"] == nil || provider["type"] != "http" || provider["behavior"] != "domain" || provider["interval"] != 86400 || !strings.HasPrefix(provider["url"].(string), "https://") {
+		t.Fatalf("invalid providers: %v", providers)
+	}
+}
+
+func TestRoutingRejectsEarlyCatchAllAndUnknownDomainSet(t *testing.T) {
+	for _, content := range []string{
+		`{"rules":[{"type":"field","network":"tcp,udp","outboundTag":"proxy"},{"type":"field","domain":["domain:example.com"],"outboundTag":"direct"}]}`,
+		`{"rules":[{"type":"field","domain":["geosite:unknown"],"outboundTag":"direct"}]}`,
+	} {
+		routing, err := parseCommonRouting([]byte(content))
+		if err == nil {
+			_, err = routing.RuleLines("surge", "PROXY")
+		}
+		if err == nil {
+			t.Fatal("unsupported or unreachable routing accepted")
+		}
+	}
+}
 
 func TestParseCommonRoutingConvertsSupportedRules(t *testing.T) {
 	content := `{
