@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/howiedata/aowugong-go/internal/auth"
 	"github.com/howiedata/aowugong-go/internal/rbac"
 	"github.com/howiedata/aowugong-go/internal/testdatabase"
@@ -29,10 +30,10 @@ func (s *trajectoryStub) Devices(_ context.Context, owner int64) ([]trajectory.D
 	return []trajectory.Device{}, nil
 }
 func (s *trajectoryStub) Create(context.Context, int64, string) (trajectory.Credential, error) {
-	return trajectory.Credential{}, nil
+	return trajectory.Credential{Device: trajectory.Device{ID: "device-1", Name: "phone"}, Token: strings.Repeat("a", 64)}, nil
 }
 func (s *trajectoryStub) Rotate(context.Context, int64, string) (trajectory.Credential, error) {
-	return trajectory.Credential{}, nil
+	return trajectory.Credential{Device: trajectory.Device{ID: "device-1", Name: "phone"}, Token: strings.Repeat("a", 64)}, nil
 }
 func (s *trajectoryStub) Revoke(context.Context, int64, string) error { return nil }
 func (s *trajectoryStub) Report(context.Context, int64, trajectory.Query) (trajectory.Report, error) {
@@ -78,7 +79,7 @@ func TestTrajectoryAdminOnly(t *testing.T) {
 	}
 	a := auth.NewService(auth.NewRepository(db), auth.NewTokenManager("trajectory-test-secret", time.Hour))
 	s := &trajectoryStub{}
-	router := NewRouter(Dependencies{Auth: a, RBAC: rb, Trajectory: s})
+	router := NewRouter(Dependencies{Auth: a, RBAC: rb, Trajectory: s, TrajectoryPublicURL: "https://example.com"})
 	createHTTPTestUser(t, db, "trajectory-admin", "ta@example.com", "password", rbac.AdminRoleCode)
 	createHTTPTestUser(t, db, "trajectory-user", "tu@example.com", "password", rbac.InvestorRoleCode)
 	admin := loginHTTPTestUser(t, router, "trajectory-admin", "password")
@@ -97,5 +98,61 @@ func TestTrajectoryAdminOnly(t *testing.T) {
 	}
 	if s.owner <= 0 {
 		t.Fatal("owner missing")
+	}
+}
+
+func TestTrajectoryProfileRoutes(t *testing.T) {
+	db := testdatabase.Open(t)
+	rb := rbac.NewService(rbac.NewRepository(db))
+	if err := rb.SyncDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	a := auth.NewService(auth.NewRepository(db), auth.NewTokenManager("profile-test-secret", time.Hour))
+	router := NewRouter(Dependencies{Auth: a, RBAC: rb, Trajectory: &trajectoryStub{}, TrajectoryPublicURL: "https://example.com"})
+	createHTTPTestUser(t, db, "profile-admin", "profile@example.com", "password", rbac.AdminRoleCode)
+	token := loginHTTPTestUser(t, router, "profile-admin", "password")
+	request := func(method, path, body, bearer string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+bearer)
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, r)
+		return w
+	}
+	if w := request("POST", "/api/v1/trajectory/devices", `{"name":"phone"}`, ""); w.Code != 401 {
+		t.Fatal(w.Code)
+	}
+	w := request("POST", "/api/v1/trajectory/devices", `{"name":"phone"}`, token)
+	if w.Code != 201 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var payload struct {
+		ProfilePath string `json:"profile_path"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil || payload.ProfilePath == "" {
+		t.Fatal("missing import link")
+	}
+	old := payload.ProfilePath
+	if w := request("GET", old, "", ""); w.Code != 200 || !strings.Contains(w.Body.String(), "https://example.com/api/v1/trajectory/collect") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w = request("POST", "/api/v1/trajectory/devices/device-1/rotate", "", token)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if request("GET", old, "", "").Code != 404 {
+		t.Fatal("old link survived rotation")
+	}
+	if request("GET", payload.ProfilePath, "", "").Code != 200 {
+		t.Fatal("new link unavailable")
+	}
+	if request("POST", "/api/v1/trajectory/devices/device-1/revoke", "", token).Code != 200 {
+		t.Fatal("revoke failed")
+	}
+	if request("GET", payload.ProfilePath, "", "").Code != 404 {
+		t.Fatal("revoked link available")
 	}
 }

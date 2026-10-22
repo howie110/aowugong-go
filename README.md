@@ -771,6 +771,6 @@ Content-Type: application/json
 
 本地验收：独立 PostgreSQL schema 的 race 测试通过，覆盖并发重复上传、分页期间新点插入、跨账号隔离、密钥轮换和撤销。浏览器验证管理员导航、空状态、创建设备、一次性密钥隐藏及有数据列表；模拟 GPSLogger 经真实 HTTP 接口上传 5 个点，重复点未新增、昨日补传未计入今日。Go 全量测试和 vet、前端 117 项测试与构建通过。截图 `.cache/trajectory-preview.png` 为合成数据。尚未在真实手机运行；后台保活、耗电和手机网络恢复补传仍需实机验收。
 
-手机配置入口：登录 https://aowugong.top/work/personal/trajectory，添加自己的设备并保存一次性上传密钥。GPSLogger 自定义 URL 使用 https://aowugong.top/api/v1/trajectory/collect，方法 POST；HTTP Headers 为 Content-Type: application/x-www-form-urlencoded 和 Authorization: Bearer <设备密钥>，每行一项；HTTP Body 使用本节模板。Basic Authentication 用户名、密码留空。启用 CSV 本地备份，关闭 Discard offline locations，授权后台定位并取消电池优化，修改配置后停止再启动记录。
+手机配置入口：登录 https://aowugong.top/work/personal/trajectory，添加设备后点击「一键导入 GPSLogger」，或复制链接到手机 App「从 URL」。后端依据 `AOWUGONG_PUBLIC_URL` 生成 Java Properties 配置：HTTPS POST 上传、独立 Bearer 密钥、60 秒间隔、CSV 本地备份、不丢弃离线点。下载票据独立随机生成，15 分钟有效，可重试；仅进程内保存临时配置，到期清除，服务重启、轮换或撤销后失效；最多缓存 256 份。数据库继续只保存密钥哈希。设备密钥变更串行处理，避免并发轮换与撤销留下旧链接。已有设备可更换密钥重新生成配置，旧密钥立即失效。手机仍需手动允许后台定位、取消电池优化并启动记录。
 
 生产发布：2026-10-22，版本 `v20261022-trajectory`；发布源码保留原线上聊天归档等功能，访问统计和小票分账工作台仍为待发布。发布快照 Go 全量测试、race、vet 和前端 113 项测试及构建通过。数据库已备份到 `/opt/aowugong-go/shared/backups/trajectory-20261022T034505Z`，迁移到 15；服务健康、轨迹接口未登录/错误密钥拒绝、公网前端文件一致性检查通过。未用真实手机或真实定位数据做生产写入验收。上一版本 `/opt/aowugong-go/releases/v20261017-chat-archive-reconcile` 保留供回滚，新增轨迹表兼容旧程序。

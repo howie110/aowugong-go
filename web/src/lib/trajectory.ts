@@ -6,7 +6,11 @@ export type TrajectoryDevice = {
   revoked_at: string | null;
   last_received_at: string | null;
 };
-export type TrajectoryCredential = { device: TrajectoryDevice; token: string };
+export type TrajectoryCredential = {
+  device: TrajectoryDevice;
+  token: string;
+  profile_path: string;
+};
 export type TrajectoryPoint = {
   id: number;
   device_id: string;

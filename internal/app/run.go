@@ -247,8 +247,9 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 	}
 	blogArticles := blog.NewArticleRepository(db)
 	handler := httpserver.NewRouter(httpserver.Dependencies{
-		Trajectory:   trajectory.NewService(db),
-		Notification: tasks.notification, NotificationTokens: cfg.NotificationTokens,
+		Trajectory:          trajectory.NewService(db),
+		TrajectoryPublicURL: cfg.HTTP.PublicURL,
+		Notification:        tasks.notification, NotificationTokens: cfg.NotificationTokens,
 		BlogMedia: blogMedia, BlogArticles: blogArticles, BlogStatuses: blog.NewStatusService(blog.NewRepository(db)),
 		StaticDir: cfg.HTTP.StaticDir, Auth: authService, RBAC: rbacService,
 		Subscription: tasks.subscriptions, Mahjong: mahjongService, Work: workService,

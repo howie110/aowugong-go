@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -40,10 +41,12 @@ func trajectoryError(w http.ResponseWriter, err error) {
 		writeError(w, 503, "unavailable", "轨迹服务暂不可用，请稍后重试")
 	}
 }
-func registerTrajectoryRoutes(router chi.Router, s trajectoryService, a *auth.Service, rb *rbac.Service) {
+func registerTrajectoryRoutes(router chi.Router, s trajectoryService, a *auth.Service, rb *rbac.Service, publicURL string) {
 	if s == nil {
 		return
 	}
+	profiles := newTrajectoryProfiles(publicURL)
+	var credentialChanges sync.Mutex
 	limiter := rate.NewLimiter(20, 100)
 	slots := make(chan struct{}, 8)
 	router.Route("/api/v1/trajectory", func(routes chi.Router) {
@@ -56,6 +59,7 @@ func registerTrajectoryRoutes(router chi.Router, s trajectoryService, a *auth.Se
 				next.ServeHTTP(w, r.WithContext(ctx))
 			})
 		})
+		routes.Get("/profiles/{ticket}/aowugong.properties", profiles.download)
 		routes.Post("/collect", func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.RawQuery != "" {
 				trajectoryError(w, trajectory.ErrInvalid)
@@ -121,6 +125,8 @@ func registerTrajectoryRoutes(router chi.Router, s trajectoryService, a *auth.Se
 				writeJSON(w, 200, result)
 			})
 			admin.Post("/devices", func(w http.ResponseWriter, r *http.Request) {
+				credentialChanges.Lock()
+				defer credentialChanges.Unlock()
 				r.Body = http.MaxBytesReader(w, r.Body, 1024)
 				var body struct {
 					Name string `json:"name"`
@@ -137,23 +143,34 @@ func registerTrajectoryRoutes(router chi.Router, s trajectoryService, a *auth.Se
 					trajectoryError(w, e)
 					return
 				}
-				writeJSON(w, 201, result)
+				writeJSON(w, 201, struct {
+					trajectory.Credential
+					ProfilePath string `json:"profile_path"`
+				}{result, profiles.issue(result, time.Now())})
 			})
 			admin.Post("/devices/{id}/rotate", func(w http.ResponseWriter, r *http.Request) {
+				credentialChanges.Lock()
+				defer credentialChanges.Unlock()
 				u, _ := currentUser(r)
 				result, e := s.Rotate(r.Context(), u.ID, chi.URLParam(r, "id"))
 				if e != nil {
 					trajectoryError(w, e)
 					return
 				}
-				writeJSON(w, 200, result)
+				writeJSON(w, 200, struct {
+					trajectory.Credential
+					ProfilePath string `json:"profile_path"`
+				}{result, profiles.issue(result, time.Now())})
 			})
 			admin.Post("/devices/{id}/revoke", func(w http.ResponseWriter, r *http.Request) {
+				credentialChanges.Lock()
+				defer credentialChanges.Unlock()
 				u, _ := currentUser(r)
 				if e := s.Revoke(r.Context(), u.ID, chi.URLParam(r, "id")); e != nil {
 					trajectoryError(w, e)
 					return
 				}
+				profiles.revoke(chi.URLParam(r, "id"))
 				writeJSON(w, 200, map[string]bool{"ok": true})
 			})
 			admin.Get("/points", func(w http.ResponseWriter, r *http.Request) {
