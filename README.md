@@ -778,7 +778,7 @@ Content-Type: application/json
 - 世界地图 `web/src/pages/analytics/world.json` 从 Natural Earth `ne_110m_admin_0_countries.geojson` 转换为等距圆柱投影 SVG 路径，公共领域；来源：https://github.com/nvkelso/natural-earth-vector/blob/master/geojson/ne_110m_admin_0_countries.geojson 。Umami 仅参考字段、统计与交互设计，未直接复制其实现代码。
 - 全量采集包含统计页本身；默认记录本人访问。排除开关仅作用当前浏览器之后的浏览，不删除历史记录。采集失败不自动重试，因此短暂故障、拦截器及禁用 JS 会导致少计。
 
-本地验证记录：Go 全量测试与 vet 通过；前端 113 项测试与 `npm run build` 通过。临时 PostgreSQL 独立 schema 下的 race 测试验证并发幂等、30 分钟新访问、指标/入口计数、筛选参数化、时间右边界、敏感参数剔除和 365 天清理。浏览器使用临时管理员实际验证全站采集、管理员看板、无匹配筛选与清除筛选。测试截图位于 `.cache/analytics-preview.png`，全部为本地测试数据。本次已获授权发布；地理库尚未配置，生产 Caddy 为 host 网络，仅信任回环代理。
+本地验证记录：Go 全量测试与 vet 通过；前端 113 项测试与 `npm run build` 通过。临时 PostgreSQL 独立 schema 下的 race 测试验证并发幂等、30 分钟新访问、指标/入口计数、筛选参数化、时间右边界、敏感参数剔除和 365 天清理。浏览器使用临时管理员实际验证全站采集、管理员看板、无匹配筛选与清除筛选。测试截图位于 `.cache/analytics-preview.png`，全部为本地测试数据。已发布并完成生产迁移；地理库尚未配置，生产 Caddy 为 host 网络，仅信任回环代理。
 
 ## 小票分账统计（2026-10-22）
 
@@ -789,7 +789,7 @@ Content-Type: application/json
 - [x] `/internal/statistics` GET：默认关闭，回环直连、拒绝转发头、专用 Bearer Key、参数校验和超时。北京时间 [from,to)，最多 366 天，查询只读快照。
 - [x] `internal/receiptsplit` 受限客户端（回环、拒绝重定向、响应限制）和 30 秒/32 组缓存，管理员 `/api/v1/receipt-split/statistics`。
 - [x] React 独立页面：日期、运营者开关、指标、趋势和每日明细，配置缺失/失败/无数据状态；导航与权限接入。
-- [x] 双项目测试、前端构建与链路验收、同步文档。本次已获授权发布，不触发通知。
+- [x] 双项目测试、前端构建与链路验收、同步文档。已发布并完成线上接口检查，不触发通知。
 
 
 运行配置：`AOWUGONG_RECEIPT_SPLIT_URL` 设置为 `http://127.0.0.1:18080`，`AOWUGONG_RECEIPT_SPLIT_STATS_KEY` 配置与小票后端 `RECEIPT_STATS_KEY` 一致的独立 Key；只读取本项目显式配置，两者均空表示未配置，半配置或非回环 URL 导致启动校验失败。不读取小票项目私有配置文件，浏览器不接触 Key。仅允许 HTTP 回环 IP 根地址，拒绝重定向，HTTP 超时 5 秒、响应上限 1 MiB；响应版本、日期、日序列和计数结构校验失败时显示不可用，不伪造零值。缓存最多 32 组、每组 30 秒；错误不入缓存，不返回过期旧数据。
@@ -798,7 +798,7 @@ Content-Type: application/json
 
 本次发布 Go 工作台并配置回环统计连接；小票后端已部署，小程序无改动。运行时只读取 Go 项目自己的连接配置，密钥由部署流程从已声明的小票服务配置同步。
 
-后续部署状态（2026-10-22）：用户另行授权后，receipt-split 后端已发布源码 `0485893`，版本目录 `/opt/receipt-split/releases/20261022-048589373e54`；回环统计接口和公网健康检查通过，独立 Key 已保存在其私有配置，运营者名单未配置。本次将补齐 aowugong-go 页面和连接配置；最终上线检查结果见下文发布记录。
+后续部署状态（2026-10-22）：用户另行授权后，receipt-split 后端已发布源码 `0485893`，版本目录 `/opt/receipt-split/releases/20261022-048589373e54`；回环统计接口和公网健康检查通过，独立 Key 已保存在其私有配置，运营者名单未配置。aowugong-go 页面和连接配置已补齐，线上管理员统计接口检查通过。
 
 本地验证记录：两个 Go 项目全量测试与 vet 通过，receipt-split store/server race 测试通过；工作台前端 114 项测试及构建通过，小程序既有 66 项测试通过。使用独立临时 SQLite/PostgreSQL、demo OCR、关闭通知的本地服务完成实际接口联调及浏览器验收：日期筛选、每日补零、运营者排除前后计数一致；管理员鉴权、缓存过期后上游故障、不完整日期响应均有回归测试。验收截图 `.cache/receipt-split-preview.png` 使用合成数据；测试服务验收后关闭；本次发布前重新执行必要检查。
 
@@ -822,4 +822,4 @@ Content-Type: application/json
 
 生产发布：2026-10-22，版本 `v20261022-trajectory-copyprofile`，设备操作仅「复制配置 URL」，已有设备原密钥保持有效。发布前在隔离 PostgreSQL 验证原密钥和兼容凭证上传、跨账号隔离、轮换撤销失效及分页，race 测试通过；轨迹/httpserver/app vet、前端 113 项测试及构建通过。备份 `/opt/aowugong-go/shared/backups/trajectory-copyprofile-20261022T060313Z`，数据库仍为迁移 15；部署前后设备密钥摘要一致，服务健康、权限拒绝和公网前端一致性检查通过。上一版本 `/opt/aowugong-go/releases/v20261022-trajectory-import` 保留供回滚。现有手机已确认手动配置上传成功；兼容配置文件的真实安卓导入仍待手机验收。
 
-网站运维发布准备：用户已授权提交 main 并部署访问统计和小票分账。Caddy host 网络，可信代理设置 `127.0.0.1/32,::1/128`；小票回环统计接口已验证版本 1，独立统计 Key 在服务器内写入 Go 的私有运行配置，不进入 Git。迁移 16 新增访问统计表；轨迹表与上传密钥保持不变。地理位置库和运营者排除名单尚未配置，界面保留对应提示。
+网站运维生产发布（2026-10-22）：已推送 main，代码 `4fbdbb45390b44781921eaffb73c96cb027974e9`，线上版本 `/opt/aowugong-go/releases/v20261022-website-operations`。数据库备份 `/opt/aowugong-go/shared/backups/website-operations-20261022T063722Z`，迁移 16 已完成；原轨迹密钥摘要保持不变。小票统计密钥仅在服务器内同步至 Go 私有环境配置，Caddy host 网络，可信代理为 `127.0.0.1/32,::1/128`。Go 全量测试/vet、访问统计与轨迹隔离 PostgreSQL race 测试、HTTP/小票客户端 race 测试及前端 117 项测试/构建通过。生产健康检查、管理员统计读取、匿名访问拒绝、网站运维页面与发布文件一致性和采集入口检查通过；采集验收使用已知机器人 UA，不注入测试浏览事件。访问统计从本次上线起采集，未导入 Umami 历史；小票读取已有历史汇总。地理位置库和运营者排除名单尚未配置，界面保留提示。上一版本 `v20261022-trajectory-copyprofile` 保留供回滚。
