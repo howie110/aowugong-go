@@ -757,7 +757,7 @@ Content-Type: application/json
 
 ## GPSLogger 我的轨迹（2026-10-22）
 
-已确认设计：Android GPSLogger 经 HTTPS POST 上传到现有 Go/chi 后端，保存现有 PostgreSQL；工作台「个人工具 → 我的轨迹」仅管理员使用，设备和轨迹按当前账号隔离。不新增 Java 服务，不做地图、地址解析或 AI 分析，不自动清理历史记录。已提交 main 并部署生产，代码版本 `eb6ef23555898aa0d901ec62ef275d3bc24e9f54`。
+已确认设计：Android GPSLogger 经 HTTPS POST 上传到现有 Go/chi 后端，保存现有 PostgreSQL；工作台「个人工具 → 我的轨迹」仅管理员使用，设备和轨迹按当前账号隔离。不新增 Java 服务，不做地图、地址解析或 AI 分析，不自动清理历史记录。已提交 main 并部署生产，代码版本 `d2426665f28642053b053a506dcfaccde7a06aab`。
 
 实施计划（brainstorming / writing-plans / executing-plans）：
 - [x] 数据层：迁移 15；设备 UUID、所属账号、密钥 SHA256、撤销时间；轨迹包含设备、定位/接收时间、WGS84 坐标、精度、速度(m/s)、方向、海拔、来源及白名单原始字段。验证坐标/时间/可选数值，设备+时间+坐标幂等；允许乱序和断网补传。
@@ -773,4 +773,4 @@ Content-Type: application/json
 
 手机配置入口：登录 https://aowugong.top/work/personal/trajectory，添加设备后点击「一键导入 GPSLogger」，或复制链接到手机 App「从 URL」。后端依据 `AOWUGONG_PUBLIC_URL` 生成 Java Properties 配置：HTTPS POST 上传、独立 Bearer 密钥、60 秒间隔、CSV 本地备份、不丢弃离线点。下载票据独立随机生成，15 分钟有效，可重试；仅进程内保存临时配置，到期清除，服务重启、轮换或撤销后失效；最多缓存 256 份。数据库继续只保存密钥哈希。设备密钥变更串行处理，避免并发轮换与撤销留下旧链接。已有设备可更换密钥重新生成配置，旧密钥立即失效。手机仍需手动允许后台定位、取消电池优化并启动记录。
 
-生产发布：2026-10-22，版本 `v20261022-trajectory`；发布源码保留原线上聊天归档等功能，访问统计和小票分账工作台仍为待发布。发布快照 Go 全量测试、race、vet 和前端 113 项测试及构建通过。数据库已备份到 `/opt/aowugong-go/shared/backups/trajectory-20261022T034505Z`，迁移到 15；服务健康、轨迹接口未登录/错误密钥拒绝、公网前端文件一致性检查通过。未用真实手机或真实定位数据做生产写入验收。上一版本 `/opt/aowugong-go/releases/v20261017-chat-archive-reconcile` 保留供回滚，新增轨迹表兼容旧程序。
+生产发布：2026-10-22，版本 `v20261022-trajectory-import`，已包含短期配置链接及精简界面。保留原线上功能，访问统计和小票分账工作台仍待发布。此版本轨迹 HTTP race 测试（含配置生成、过期、轮换、撤销和权限）、httpserver/app vet、前端 113 项测试及构建通过。备份位于 `/opt/aowugong-go/shared/backups/trajectory-import-20261022T055531Z`，数据库仍为迁移 15；服务健康、未授权请求拒绝、无效配置链接 404、公网前端文件一致性检查通过。上一版本 `/opt/aowugong-go/releases/v20261022-trajectory` 保留供回滚。真实安卓导入及后台定位仍待手机验收。
