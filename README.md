@@ -773,6 +773,8 @@ Content-Type: application/json
 
 C10–C16 本地验证：全量 Go race 测试通过 420 个测试项（含子测试），其中 14 个 PostgreSQL 集成测试无跳过；Go vet、126 项前端测试、前端构建、14 项发布脚本测试、Shell/YAML 语法与 diff 检查通过。未配置独立小票临时服务、可用私有 VPN 资源的两项环境测试仍跳过；未访问生产资源，也未在 GitHub 执行新流水线。测试数据库验证后已停止。此处为优化完成时的验证记录；实际发布状态见后续部署记录。
 
+优化部署记录（2026-10-22）：C1–C16 代码提交 `ffad8d9aa6a39ae349b3bc627182c29be641e09c` 已推送 main，生产版本为 `/opt/aowugong-go/releases/v20261022-simplify-c1-c16`，上一版本 `v20261022-website-operations` 保留为 previous。统一发布入口完成前端 126 项测试/构建、Go 全量普通/race 测试和 vet，显式使用隔离 PostgreSQL；14 项发布脚本测试通过。16 个迁移文件与发布前生产完全一致，无新增 schema 变更。内外网健康、主页/网站运维/我的轨迹页面及入口资源一致性、四个敏感 API 匿名 401 检查通过，JWT/加密/数据库/小票统计凭据摘要前后一致。运行配置和服务文件备份在 `/opt/aowugong-go/deploy-simplify.SBtIbL/before`，仅 root 可访问。未发送外部通知，未修改其他服务；本地测试数据库已停止。此后如仅提交本段部署记录，线上 REVISION 仍对应上述代码提交。
+
 - 日志与可观测性：系统复杂后，评估引入 Wide Event / Canonical Log Line，为请求、任务、消息、批量处理和人工覆盖统一记录上下文，让正常流程清晰、例外可追踪和可审计。当前只记录为优化方向，暂不实施具体架构。
 - 资料来源：[Logging Sucks](https://loggingsucks.com/)、[logging-best-practices skill](https://github.com/boristane/agent-skills/tree/main/skills/logging-best-practices)。
 
