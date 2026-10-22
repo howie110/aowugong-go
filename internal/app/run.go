@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/howiedata/aowugong-go/internal/analytics"
 	"github.com/howiedata/aowugong-go/internal/auth"
 	"github.com/howiedata/aowugong-go/internal/blog"
 	"github.com/howiedata/aowugong-go/internal/chatarchive"
@@ -30,6 +31,7 @@ import (
 	"github.com/howiedata/aowugong-go/internal/notification"
 	"github.com/howiedata/aowugong-go/internal/pictureproxy"
 	"github.com/howiedata/aowugong-go/internal/rbac"
+	"github.com/howiedata/aowugong-go/internal/receiptsplit"
 	"github.com/howiedata/aowugong-go/internal/scheduler"
 	"github.com/howiedata/aowugong-go/internal/subscription"
 	"github.com/howiedata/aowugong-go/internal/trajectory"
@@ -246,10 +248,19 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 		}
 	}
 	blogArticles := blog.NewArticleRepository(db)
+	analyticsService, err := analytics.NewService(db, jwtSecret, cfg.AnalyticsGeoPath)
+	if err != nil {
+		return nil, fmt.Errorf("初始化访问统计: %w", err)
+	}
+	receiptStats, err := receiptsplit.NewClient(cfg.ReceiptSplitURL, cfg.ReceiptSplitKey)
+	if err != nil {
+		return nil, fmt.Errorf("初始化小票统计: %w", err)
+	}
 	handler := httpserver.NewRouter(httpserver.Dependencies{
-		Trajectory:          trajectory.NewService(db, vpnSecret),
-		TrajectoryPublicURL: cfg.HTTP.PublicURL,
-		Notification:        tasks.notification, NotificationTokens: cfg.NotificationTokens,
+		Trajectory: trajectory.NewService(db, vpnSecret), TrajectoryPublicURL: cfg.HTTP.PublicURL,
+		ReceiptSplit: receiptStats,
+		Analytics:    analyticsService, AnalyticsPublicURL: cfg.HTTP.PublicURL, AnalyticsTrustedProxies: cfg.AnalyticsTrustedProxies,
+		Notification: tasks.notification, NotificationTokens: cfg.NotificationTokens,
 		BlogMedia: blogMedia, BlogArticles: blogArticles, BlogStatuses: blog.NewStatusService(blog.NewRepository(db)),
 		StaticDir: cfg.HTTP.StaticDir, Auth: authService, RBAC: rbacService,
 		Subscription: tasks.subscriptions, Mahjong: mahjongService, Work: workService,

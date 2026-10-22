@@ -17,6 +17,8 @@ export type FinancePageKey =
   | "mahjong"
   | "subscriptions"
   | "trajectory"
+  | "receiptSplit"
+  | "analytics"
   | "chatArchive"
   | "monitoring"
   | "work"
@@ -78,6 +80,8 @@ export const pagePermissionMap: Record<FinancePageKey, string> = {
   mahjong: "page:mahjong",
   subscriptions: "page:subscriptions",
   trajectory: "page:personal:trajectory",
+  receiptSplit: "page:website:receipt_split",
+  analytics: "page:website:analytics",
   chatArchive: "page:chat_archive",
   monitoring: "page:monitoring",
   work: "page:work",
@@ -89,6 +93,8 @@ export const pagePermissionMap: Record<FinancePageKey, string> = {
 
 export const pageMetaMap: Record<FinancePageKey, { title: string; description: string }> = {
   trajectory: { title: "我的轨迹", description: "保存自己的位置记录，查看采集与补传情况。" },
+  receiptSplit: { title:"小票分账", description:"查看小票分账用户、识别任务和账单使用趋势。" },
+  analytics: { title: "访问统计", description: "查看全站访问趋势、页面与来源分布。" },
   chatArchive: { title: "聊天归档", description: "核对消息数量、时间与同步记录。" },
   blogStatus: { title: "记录此刻", description: "发布文字与图片，记录生活片刻。" },
   overview: {
@@ -175,6 +181,8 @@ export function getFinancePageMeta(pageKey: FinancePageKey) {
 
 const pageEndpointMap: Record<FinancePageKey, string> = {
   trajectory: "/api/v1/trajectory/points",
+  receiptSplit: "/api/v1/receipt-split/statistics",
+  analytics: "/api/v1/analytics/report/",
   chatArchive: "/api/v1/chat-archive/conversations",
  blogStatus: "/api/v1/blog/admin/statuses",
   overview: "/api/v1/finance/overview/",
@@ -200,6 +208,8 @@ const pageEndpointMap: Record<FinancePageKey, string> = {
 
 export function getFinancePagePath(pageKey: FinancePageKey) {
   if (pageKey === "trajectory") return "/work/personal/trajectory";
+  if (pageKey === "receiptSplit") return "/work/website/receipt-split";
+  if (pageKey === "analytics") return "/work/website/analytics";
   if (pageKey === "chatArchive") return "/work/content/chat-archive";
  if (pageKey === "blogStatus") return "/work/content/status";
   if (pageKey === "overview") {
@@ -247,6 +257,8 @@ export function getFinancePagePath(pageKey: FinancePageKey) {
 export function getFinancePageFromPath(pathname: string): FinancePageKey {
   const path = pathname.replace(/^\/+|\/+$/g, "");
   if (path === "work/personal/trajectory") return "trajectory";
+  if (path === "work/website/receipt-split") return "receiptSplit";
+  if (path === "work/website/analytics") return "analytics";
   if (path === "work/content/chat-archive") return "chatArchive";
  if (path === "work/content/status") return "blogStatus";
   if (path === "work") {

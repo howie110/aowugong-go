@@ -100,6 +100,12 @@ export const navGroups: NavGroup[] = [
     items: [{key:"trajectory",label:"我的轨迹",icon:MapPin,permission:pagePermissionMap.trajectory}],
   },
   {
+    id: "website",
+    label: "网站运维",
+    icon: BarChart3,
+    items: [{ key: "analytics", label: "访问统计", icon: BarChart3, permission: pagePermissionMap.analytics }, { key:"receiptSplit",label:"小票分账",icon:TableProperties,permission:pagePermissionMap.receiptSplit }],
+  },
+  {
     id: "system",
     label: "系统运维",
     icon: ShieldCheck,

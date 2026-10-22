@@ -1,4 +1,6 @@
 const TrajectoryPage = lazy(() => import("@/pages/trajectory").then(module => ({ default: module.TrajectoryPage })));
+const ReceiptSplitPage = lazy(() => import("@/pages/receipt-split").then(module => ({ default:module.ReceiptSplitPage })));
+const AnalyticsPage = lazy(() => import("@/pages/analytics").then((module) => ({ default: module.AnalyticsPage })));
 import { requestWorkbenchNavigation } from "@/lib/navigation-guard";
 import { canViewChatArchive } from "@/lib/chat-archive";
 import { Suspense, lazy, useEffect, useState } from "react";
@@ -45,6 +47,8 @@ const VPNResourcesPage = lazy(() => import("@/pages/vpn").then((module) => ({ de
 
 const selfManagedPages = new Set<FinancePageKey>([
   "trajectory",
+  "receiptSplit",
+  "analytics",
   "chatArchive",
  "blogStatus",
   "positions",
@@ -73,6 +77,8 @@ const pageOrder: FinancePageKey[] = [
   "mahjong",
   "subscriptions",
   "trajectory",
+  "receiptSplit",
+  "analytics",
   "chatArchive",
   "backtest",
   "data",
@@ -248,6 +254,8 @@ function FinancePageBody({
     return <SubscriptionsPage />;
   }
   if (pageKey === "trajectory") return <TrajectoryPage />;
+  if (pageKey === "receiptSplit") return <ReceiptSplitPage />;
+  if (pageKey === "analytics") return <AnalyticsPage />;
   if (pageKey === "chatArchive") return <ChatArchivePage />;
   if (pageKey === "work") {
     return <WorkPage />;
@@ -298,7 +306,7 @@ function FinancePageBody({
 }
 
 function canAccessPage(user: UserProfile, pageKey: FinancePageKey) {
-  if (pageKey === "trajectory" || pageKey === "chatArchive") return canViewChatArchive(user);
+  if (pageKey === "trajectory" || pageKey === "chatArchive" || pageKey === "analytics" || pageKey === "receiptSplit") return canViewChatArchive(user);
   if ((user.roles ?? []).includes("admin")) {
     return true;
   }

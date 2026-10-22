@@ -755,6 +755,53 @@ Content-Type: application/json
 - 日志与可观测性：系统复杂后，评估引入 Wide Event / Canonical Log Line，为请求、任务、消息、批量处理和人工覆盖统一记录上下文，让正常流程清晰、例外可追踪和可审计。当前只记录为优化方向，暂不实施具体架构。
 - 资料来源：[Logging Sucks](https://loggingsucks.com/)、[logging-best-practices skill](https://github.com/boristane/agent-skills/tree/main/skills/logging-best-practices)。
 
+## 访问统计（2026-10-22）
+
+已确认范围：本 Go 项目的全部页面（公开主页、博客、登录、工作台），不含独立子站与 API/资源请求。入口为「网站运维 → 访问统计」，管理员专用。复用 Go/chi、PostgreSQL、React/shadcn 和既有认证权限，不增加服务实例。
+
+实施计划与口径：
+- [x] `internal/analytics`、迁移 16：匿名访客按服务端 HMAC(IP、UA、月度周期)识别，不保存原始 IP/UA，不关联账号；30 分钟无浏览开始新访问。服务端时间为准，事件 UUID 幂等，访问更新与事件插入同一事务。
+- [x] `internal/httpserver/analytics_handlers.go`：同源采集、大小限制、全局限流、可信代理校验；管理员统计接口使用参数化查询与查询超时。
+- [x] `web/src/lib/analytics-tracker.ts`：启动一次，采集首次加载与 history/popstate 路由变化，忽略 hash、非白名单查询参数及相同地址的重复路由通知；刷新仍计浏览。排除当前浏览器可选，默认包含管理员。
+- [x] `web/src/pages/analytics`：五指标及前期对比、趋势、网页/来源/环境/位置排行、地图、星期小时热力图，共用时间和精确匹配维度筛选；北京时间展示。
+- [x] 接入导航、权限和启动配置；验证匿名识别、敏感参数剔除、并发/幂等、过滤、边界、管理员权限，运行 Go/前端检查。
+
+统计口径：范围采用 [from,to)，访客为范围内去重匿名标识（跨月可能重复），访问次数为去重 visit_id；跳出率与时长按范围及筛选后每次访问的浏览记录计算，单次仅一个浏览记为跳出、时长 0；多页首末浏览时间差之和除以访问次数，不代表活跃阅读时长。入口/退出页是整次访问的首末页，进行中的退出页可能变化。前期对比使用相邻等长区间，同样的筛选。URL 只保留 utm_source/utm_medium/utm_campaign，来源仅存外部域名。渠道为简单规则分类，无法识别时为 referral/unknown。
+
+
+运行配置与保留策略：
+- `AOWUGONG_ANALYTICS_GEOIP_PATH` 可选，指向 GeoLite2 City 兼容 MMDB；未配置时位置为空、看板明确提示，不影响其他统计。地理库需运维自行取得并定期替换，启动时读入内存，更新后重启生效；不向外部服务查询访客 IP。
+- `AOWUGONG_ANALYTICS_TRUSTED_PROXIES` 为逗号分隔 CIDR，默认只信任回环地址。生产 Caddy 若经 Docker 网桥连接，部署前核对实际代理地址并仅添加必要 CIDR；按 X-Forwarded-For 右至左剥离可信代理，不信任任意客户端头。
+- 采集只接受与 `AOWUGONG_PUBLIC_URL` 对应的 Origin/Host，默认本地开发代理不能向生产统计写入。匿名标识使用现有有效 JWT 密钥加独立用途标签做 HMAC；轮换该密钥会改变访客身份，统计不记录账号和原始 IP/UA。浏览器不生成持久访客 Cookie。
+- 访问明细保留 365 天；成功采集后至多每分钟清理 100 次最后活动已超过 365 天的访问及关联事件，只涉及两张 analytics 表。无流量时清理暂停，历史数据不导入，不生成外部通知。
+- 管理员接口 `GET /api/v1/analytics/report/`，公开同源采集 `POST /api/v1/analytics/collect`；读取在可重复读快照内执行，范围最多 366 天，SQL 超时 8 秒、请求超时 15 秒。入口/退出排行按访问次数，其他排行及地图按浏览量；普通维度最多 100 项，国家最多 300 项。
+- 世界地图 `web/src/pages/analytics/world.json` 从 Natural Earth `ne_110m_admin_0_countries.geojson` 转换为等距圆柱投影 SVG 路径，公共领域；来源：https://github.com/nvkelso/natural-earth-vector/blob/master/geojson/ne_110m_admin_0_countries.geojson 。Umami 仅参考字段、统计与交互设计，未直接复制其实现代码。
+- 全量采集包含统计页本身；默认记录本人访问。排除开关仅作用当前浏览器之后的浏览，不删除历史记录。采集失败不自动重试，因此短暂故障、拦截器及禁用 JS 会导致少计。
+
+本地验证记录：Go 全量测试与 vet 通过；前端 113 项测试与 `npm run build` 通过。临时 PostgreSQL 独立 schema 下的 race 测试验证并发幂等、30 分钟新访问、指标/入口计数、筛选参数化、时间右边界、敏感参数剔除和 365 天清理。浏览器使用临时管理员实际验证全站采集、管理员看板、无匹配筛选与清除筛选。测试截图位于 `.cache/analytics-preview.png`，全部为本地测试数据。本次已获授权发布；地理库尚未配置，生产 Caddy 为 host 网络，仅信任回环代理。
+
+## 小票分账统计（2026-10-22）
+
+入口「网站运维 → 小票分账」，管理员专用。receipt-split 负责 SQLite 只读聚合，本服务通过回环 HTTP 和独立 Key 读取汇总，不读取另一项目数据库，不返回身份/账单内容，不修改小程序。
+
+实施计划（沿用 writing-plans / executing-plans / 测试驱动流程）：
+- [x] receipt-split 日期聚合与每日补零：历史登录用户、周期识别用户/任务及状态、账单人数/数量；排除 local-developer，可选排除运营者。历史登录用户不受时间筛选影响，不声称支持日活/新增用户。
+- [x] `/internal/statistics` GET：默认关闭，回环直连、拒绝转发头、专用 Bearer Key、参数校验和超时。北京时间 [from,to)，最多 366 天，查询只读快照。
+- [x] `internal/receiptsplit` 受限客户端（回环、拒绝重定向、响应限制）和 30 秒/32 组缓存，管理员 `/api/v1/receipt-split/statistics`。
+- [x] React 独立页面：日期、运营者开关、指标、趋势和每日明细，配置缺失/失败/无数据状态；导航与权限接入。
+- [x] 双项目测试、前端构建与链路验收、同步文档。本次已获授权发布，不触发通知。
+
+
+运行配置：`AOWUGONG_RECEIPT_SPLIT_URL` 设置为 `http://127.0.0.1:18080`，`AOWUGONG_RECEIPT_SPLIT_STATS_KEY` 配置与小票后端 `RECEIPT_STATS_KEY` 一致的独立 Key；只读取本项目显式配置，两者均空表示未配置，半配置或非回环 URL 导致启动校验失败。不读取小票项目私有配置文件，浏览器不接触 Key。仅允许 HTTP 回环 IP 根地址，拒绝重定向，HTTP 超时 5 秒、响应上限 1 MiB；响应版本、日期、日序列和计数结构校验失败时显示不可用，不伪造零值。缓存最多 32 组、每组 30 秒；错误不入缓存，不返回过期旧数据。
+
+工作台路径 `/work/website/receipt-split`，权限 `page:website:receipt_split`，同时强制管理员角色。数据接口 `/api/v1/receipt-split/statistics` 接受 from/to 日期和 exclude_operators 布尔值，默认排除运营者；未设置名单时只排除固定开发账号并明确提示。上游接口不经 Caddy，本服务不修改 receipt-split 数据。统计含历史登录用户、识别用户/任务、账单用户/数量、已完成任务成功率、每日趋势与明细；不声称覆盖完整日活、新增或匿名分享访问。
+
+本次发布 Go 工作台并配置回环统计连接；小票后端已部署，小程序无改动。运行时只读取 Go 项目自己的连接配置，密钥由部署流程从已声明的小票服务配置同步。
+
+后续部署状态（2026-10-22）：用户另行授权后，receipt-split 后端已发布源码 `0485893`，版本目录 `/opt/receipt-split/releases/20261022-048589373e54`；回环统计接口和公网健康检查通过，独立 Key 已保存在其私有配置，运营者名单未配置。本次将补齐 aowugong-go 页面和连接配置；最终上线检查结果见下文发布记录。
+
+本地验证记录：两个 Go 项目全量测试与 vet 通过，receipt-split store/server race 测试通过；工作台前端 114 项测试及构建通过，小程序既有 66 项测试通过。使用独立临时 SQLite/PostgreSQL、demo OCR、关闭通知的本地服务完成实际接口联调及浏览器验收：日期筛选、每日补零、运营者排除前后计数一致；管理员鉴权、缓存过期后上游故障、不完整日期响应均有回归测试。验收截图 `.cache/receipt-split-preview.png` 使用合成数据；测试服务验收后关闭；本次发布前重新执行必要检查。
+
 ## GPSLogger 我的轨迹（2026-10-22）
 
 已确认设计：Android GPSLogger 经 HTTPS POST 上传到现有 Go/chi 后端，保存现有 PostgreSQL；工作台「个人工具 → 我的轨迹」仅管理员使用，设备和轨迹按当前账号隔离。不新增 Java 服务，不做地图、地址解析或 AI 分析，不自动清理历史记录。已提交 main 并部署生产，代码版本 `b0858672a2b122c08440087b9cf0f8814fe57c9a`。
@@ -774,3 +821,5 @@ Content-Type: application/json
 手机配置入口：登录 https://aowugong.top/work/personal/trajectory，每个有效设备仅显示「复制配置 URL」，粘贴到 GPSLogger「从 URL」。已有设备无需轮换密钥，复制配置不修改数据库凭证或影响已配置手机。配置使用兼容凭证（设备 UUID + 128 位 HMAC，绑定原密钥摘要，以现有加密配置密钥和独立用途标识签名）；原随机密钥仍可上传。轮换原密钥、撤销设备或停用账号会使相应凭证失效；服务器加密密钥变更使兼容凭证失效，但不影响原随机密钥。数据库仍只存原密钥摘要，不保存明文或新增表。POST /devices/{id}/profile 复用管理员权限与所属账号检查。临时下载链接 15 分钟有效、仅内存保存、不缓存；复制可重新生成链接。配置含 HTTPS POST、60 秒记录、本地 CSV 备份和离线补传。手机需手动授权后台定位及取消电池优化。
 
 生产发布：2026-10-22，版本 `v20261022-trajectory-copyprofile`，设备操作仅「复制配置 URL」，已有设备原密钥保持有效。发布前在隔离 PostgreSQL 验证原密钥和兼容凭证上传、跨账号隔离、轮换撤销失效及分页，race 测试通过；轨迹/httpserver/app vet、前端 113 项测试及构建通过。备份 `/opt/aowugong-go/shared/backups/trajectory-copyprofile-20261022T060313Z`，数据库仍为迁移 15；部署前后设备密钥摘要一致，服务健康、权限拒绝和公网前端一致性检查通过。上一版本 `/opt/aowugong-go/releases/v20261022-trajectory-import` 保留供回滚。现有手机已确认手动配置上传成功；兼容配置文件的真实安卓导入仍待手机验收。
+
+网站运维发布准备：用户已授权提交 main 并部署访问统计和小票分账。Caddy host 网络，可信代理设置 `127.0.0.1/32,::1/128`；小票回环统计接口已验证版本 1，独立统计 Key 在服务器内写入 Go 的私有运行配置，不进入 Git。迁移 16 新增访问统计表；轨迹表与上传密钥保持不变。地理位置库和运营者排除名单尚未配置，界面保留对应提示。

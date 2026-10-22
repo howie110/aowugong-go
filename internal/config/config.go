@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -37,24 +38,28 @@ type LookupEnv func(string) (string, bool)
 
 // Config 汇总应用运行所需的配置。
 type Config struct {
-	ChatArchiveSyncKey string
-	NotificationTokens map[string]string
-	Environment        string
-	MigrationsDir      string
-	SQLiteSourcePath   string
-	HTTP               HTTP
-	Database           Database
-	Development        Development
-	Auth               Auth
-	Storage            Storage
-	GitHubBackup       GitHubBackup
-	VaultwardenBackup  VaultwardenBackup
-	VPN                VPN
-	PictureProxy       PictureProxy
-	BlogMedia          BlogMedia
-	Clients            Clients
-	Finance            Finance
-	Scheduler          Scheduler
+	ReceiptSplitURL         string
+	ReceiptSplitKey         string
+	AnalyticsGeoPath        string
+	AnalyticsTrustedProxies []netip.Prefix
+	ChatArchiveSyncKey      string
+	NotificationTokens      map[string]string
+	Environment             string
+	MigrationsDir           string
+	SQLiteSourcePath        string
+	HTTP                    HTTP
+	Database                Database
+	Development             Development
+	Auth                    Auth
+	Storage                 Storage
+	GitHubBackup            GitHubBackup
+	VaultwardenBackup       VaultwardenBackup
+	VPN                     VPN
+	PictureProxy            PictureProxy
+	BlogMedia               BlogMedia
+	Clients                 Clients
+	Finance                 Finance
+	Scheduler               Scheduler
 }
 
 // BlogMedia 保存博客图片专用写入身份；空配置时禁用上传。
@@ -306,6 +311,19 @@ func Load(lookup LookupEnv) (Config, error) {
 		cfg.Auth.EncryptionKey = strings.TrimSpace(value)
 	}
 	loadString(lookup, "AOWUGONG_WORK_NAVIGATION_PATH", &cfg.Storage.WorkNavigationPath)
+	loadString(lookup, "AOWUGONG_RECEIPT_SPLIT_URL", &cfg.ReceiptSplitURL)
+	loadString(lookup, "AOWUGONG_RECEIPT_SPLIT_STATS_KEY", &cfg.ReceiptSplitKey)
+	loadString(lookup, "AOWUGONG_ANALYTICS_GEOIP_PATH", &cfg.AnalyticsGeoPath)
+	proxyCIDRs := "127.0.0.0/8,::1/128"
+	loadString(lookup, "AOWUGONG_ANALYTICS_TRUSTED_PROXIES", &proxyCIDRs)
+	for _, item := range strings.Split(proxyCIDRs, ",") {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(item))
+		if err != nil {
+			return Config{}, fmt.Errorf("访问统计可信代理 CIDR 无效: %w", err)
+		}
+		cfg.AnalyticsTrustedProxies = append(cfg.AnalyticsTrustedProxies, prefix)
+	}
+
 	loadString(lookup, "AOWUGONG_DATABASE_URL", &cfg.Database.URL)
 	loadString(lookup, "AOWUGONG_SQLITE_SOURCE_PATH", &cfg.SQLiteSourcePath)
 	loadString(lookup, "AOWUGONG_DEV_UPSTREAM_URL", &cfg.Development.UpstreamURL)

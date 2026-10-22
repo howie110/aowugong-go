@@ -1,3 +1,4 @@
+import { startAnalytics } from "@/lib/analytics-tracker";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { useState } from "react";
@@ -42,6 +43,8 @@ function normalizePath(pathname: string) {
   const normalized = pathname.replace(/\/+$/, "");
   return normalized || "/";
 }
+
+startAnalytics();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

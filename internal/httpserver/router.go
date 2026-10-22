@@ -4,6 +4,7 @@ package httpserver
 import (
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -26,33 +27,37 @@ import (
 
 // Dependencies 描述路由器启动所需的依赖。
 type Dependencies struct {
-	Trajectory          trajectoryService
-	TrajectoryPublicURL string
-	ChatArchiveSync     archiveSyncService
-	ChatArchiveSyncKey  string
-	ChatArchive         archiveReadService
-	Notification        *notification.Service
-	NotificationTokens  map[string]string
-	BlogMedia           *blog.MediaStore
-	BlogArticles        *blog.ArticleRepository
-	BlogStatuses        *blog.StatusService
-	StaticDir           string
-	Auth                *auth.Service
-	RBAC                *rbac.Service
-	Subscription        *subscription.Service
-	Mahjong             *mahjong.Service
-	Work                *work.Service
-	WeRead              *weread.Service
-	Monitoring          *monitoring.Service
-	Finance             *financeservice.DashboardService
-	Position            *position.Service
-	StockAnalysis       *stockanalysis.Service
-	ArticleAnalysis     *articleanalysis.Service
-	Jobs                *scheduler.Registry
-	Database            databaseReadService
-	VPN                 *vpn.Service
-	Picture             http.Handler
-	PictureHost         string
+	Trajectory              trajectoryService
+	TrajectoryPublicURL     string
+	ReceiptSplit            receiptStatisticsService
+	Analytics               analyticsService
+	AnalyticsPublicURL      string
+	AnalyticsTrustedProxies []netip.Prefix
+	ChatArchiveSync         archiveSyncService
+	ChatArchiveSyncKey      string
+	ChatArchive             archiveReadService
+	Notification            *notification.Service
+	NotificationTokens      map[string]string
+	BlogMedia               *blog.MediaStore
+	BlogArticles            *blog.ArticleRepository
+	BlogStatuses            *blog.StatusService
+	StaticDir               string
+	Auth                    *auth.Service
+	RBAC                    *rbac.Service
+	Subscription            *subscription.Service
+	Mahjong                 *mahjong.Service
+	Work                    *work.Service
+	WeRead                  *weread.Service
+	Monitoring              *monitoring.Service
+	Finance                 *financeservice.DashboardService
+	Position                *position.Service
+	StockAnalysis           *stockanalysis.Service
+	ArticleAnalysis         *articleanalysis.Service
+	Jobs                    *scheduler.Registry
+	Database                databaseReadService
+	VPN                     *vpn.Service
+	Picture                 http.Handler
+	PictureHost             string
 }
 
 type router struct {
@@ -78,6 +83,8 @@ func NewRouter(deps Dependencies) http.Handler {
 	})
 	api.Get("/api/v1/health", healthHandler)
 	registerTrajectoryRoutes(api, deps.Trajectory, deps.Auth, deps.RBAC, deps.TrajectoryPublicURL)
+	registerReceiptSplitRoutes(api, deps.ReceiptSplit, deps.Auth, deps.RBAC)
+	registerAnalyticsRoutes(api, deps.Analytics, deps.Auth, deps.RBAC, deps.AnalyticsPublicURL, deps.AnalyticsTrustedProxies)
 	registerArchiveSyncRoutes(api, deps.ChatArchiveSync, deps.ChatArchiveSyncKey)
 	if deps.Notification != nil && len(deps.NotificationTokens) > 0 {
 		api.Method(http.MethodPost, "/api/v1/notifications/wechat", newNotificationHandler(deps.Notification, deps.NotificationTokens))
