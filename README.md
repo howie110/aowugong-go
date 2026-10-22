@@ -757,7 +757,7 @@ Content-Type: application/json
 
 ## GPSLogger 我的轨迹（2026-10-22）
 
-已确认设计：Android GPSLogger 经 HTTPS POST 上传到现有 Go/chi 后端，保存现有 PostgreSQL；工作台「个人工具 → 我的轨迹」仅管理员使用，设备和轨迹按当前账号隔离。不新增 Java 服务，不做地图、地址解析或 AI 分析，不自动清理历史记录。已提交 main 并部署生产，代码版本 `d2426665f28642053b053a506dcfaccde7a06aab`。
+已确认设计：Android GPSLogger 经 HTTPS POST 上传到现有 Go/chi 后端，保存现有 PostgreSQL；工作台「个人工具 → 我的轨迹」仅管理员使用，设备和轨迹按当前账号隔离。不新增 Java 服务，不做地图、地址解析或 AI 分析，不自动清理历史记录。已提交 main 并部署生产，代码版本 `b0858672a2b122c08440087b9cf0f8814fe57c9a`。
 
 实施计划（brainstorming / writing-plans / executing-plans）：
 - [x] 数据层：迁移 15；设备 UUID、所属账号、密钥 SHA256、撤销时间；轨迹包含设备、定位/接收时间、WGS84 坐标、精度、速度(m/s)、方向、海拔、来源及白名单原始字段。验证坐标/时间/可选数值，设备+时间+坐标幂等；允许乱序和断网补传。
@@ -773,4 +773,4 @@ Content-Type: application/json
 
 手机配置入口：登录 https://aowugong.top/work/personal/trajectory，每个有效设备仅显示「复制配置 URL」，粘贴到 GPSLogger「从 URL」。已有设备无需轮换密钥，复制配置不修改数据库凭证或影响已配置手机。配置使用兼容凭证（设备 UUID + 128 位 HMAC，绑定原密钥摘要，以现有加密配置密钥和独立用途标识签名）；原随机密钥仍可上传。轮换原密钥、撤销设备或停用账号会使相应凭证失效；服务器加密密钥变更使兼容凭证失效，但不影响原随机密钥。数据库仍只存原密钥摘要，不保存明文或新增表。POST /devices/{id}/profile 复用管理员权限与所属账号检查。临时下载链接 15 分钟有效、仅内存保存、不缓存；复制可重新生成链接。配置含 HTTPS POST、60 秒记录、本地 CSV 备份和离线补传。手机需手动授权后台定位及取消电池优化。
 
-生产发布：2026-10-22，版本 `v20261022-trajectory-import`，已包含短期配置链接及精简界面。保留原线上功能，访问统计和小票分账工作台仍待发布。此版本轨迹 HTTP race 测试（含配置生成、过期、轮换、撤销和权限）、httpserver/app vet、前端 113 项测试及构建通过。备份位于 `/opt/aowugong-go/shared/backups/trajectory-import-20261022T055531Z`，数据库仍为迁移 15；服务健康、未授权请求拒绝、无效配置链接 404、公网前端文件一致性检查通过。上一版本 `/opt/aowugong-go/releases/v20261022-trajectory` 保留供回滚。真实安卓导入及后台定位仍待手机验收。
+生产发布：2026-10-22，版本 `v20261022-trajectory-copyprofile`，设备操作仅「复制配置 URL」，已有设备原密钥保持有效。发布前在隔离 PostgreSQL 验证原密钥和兼容凭证上传、跨账号隔离、轮换撤销失效及分页，race 测试通过；轨迹/httpserver/app vet、前端 113 项测试及构建通过。备份 `/opt/aowugong-go/shared/backups/trajectory-copyprofile-20261022T060313Z`，数据库仍为迁移 15；部署前后设备密钥摘要一致，服务健康、权限拒绝和公网前端一致性检查通过。上一版本 `/opt/aowugong-go/releases/v20261022-trajectory-import` 保留供回滚。现有手机已确认手动配置上传成功；兼容配置文件的真实安卓导入仍待手机验收。
