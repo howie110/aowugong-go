@@ -40,7 +40,9 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 	for _, source := range sources {
 		if s.options.Articles == nil {
 			message := "文章客户端未配置"
-			_ = s.repository.UpdateSourceStatus(ctx, source.ID, "error", message)
+			if err := s.repository.UpdateSourceStatus(ctx, source.ID, "error", message); err != nil {
+				return result, fmt.Errorf("来源 %s: %s；保存失败状态: %w", source.SourceName, message, err)
+			}
 			result.FailedSources = append(result.FailedSources, map[string]string{"source": source.SourceName, "error": message})
 			continue
 		}

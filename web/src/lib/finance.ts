@@ -1,4 +1,4 @@
-import { authorizedFetch } from "@/lib/auth";
+import { requestJSON } from "@/lib/request";
 import type { WeReadDashboardData } from "@/lib/weread";
 
 export type FinancePageKey =
@@ -206,119 +206,45 @@ const pageEndpointMap: Record<FinancePageKey, string> = {
   permissions: "/api/v1/permissions/summary",
 };
 
+// 页面路径只在此维护；保留已有 URL 和未知路径的控制台回退。
+const pagePaths: Record<FinancePageKey, string> = {
+  overview: "/work",
+  blogStatus: "/work/content/status",
+  weread: "/weread",
+  positions: "/positions",
+  stockAnalysis: "/stock-analysis",
+  articleFetch: "/article-fetch",
+  articleAnalysis: "/article-analysis",
+  backtest: "/backtest",
+  data: "/data",
+  jobs: "/jobs",
+  trading: "/trading",
+  notifications: "/notifications",
+  mahjong: "/mahjong",
+  subscriptions: "/subscriptions",
+  trajectory: "/work/personal/trajectory",
+  receiptSplit: "/work/website/receipt-split",
+  analytics: "/work/website/analytics",
+  chatArchive: "/work/content/chat-archive",
+  monitoring: "/monitoring",
+  work: "/work/navigation",
+  database: "/database",
+  vpnDistribution: "/vpn-distribution",
+  vpnResources: "/vpn-resources",
+  permissions: "/permissions",
+};
+const pagesByPath = new Map(Object.entries(pagePaths).map(([key, path]) => [path.slice(1), key as FinancePageKey]));
+
 export function getFinancePagePath(pageKey: FinancePageKey) {
-  if (pageKey === "trajectory") return "/work/personal/trajectory";
-  if (pageKey === "receiptSplit") return "/work/website/receipt-split";
-  if (pageKey === "analytics") return "/work/website/analytics";
-  if (pageKey === "chatArchive") return "/work/content/chat-archive";
- if (pageKey === "blogStatus") return "/work/content/status";
-  if (pageKey === "overview") {
-    return "/work";
-  }
-  if (pageKey === "stockAnalysis") {
-    return "/stock-analysis";
-  }
-  if (pageKey === "articleAnalysis") {
-    return "/article-analysis";
-  }
-  if (pageKey === "articleFetch") {
-    return "/article-fetch";
-  }
-  if (pageKey === "weread") {
-    return "/weread";
-  }
-  if (pageKey === "work") {
-    return "/work/navigation";
-  }
-  if (pageKey === "mahjong") {
-    return "/mahjong";
-  }
-  if (pageKey === "subscriptions") {
-    return "/subscriptions";
-  }
-  if (pageKey === "permissions") {
-    return "/permissions";
-  }
-  if (pageKey === "monitoring") {
-    return "/monitoring";
-  }
-  if (pageKey === "database") {
-    return "/database";
-  }
-  if (pageKey === "vpnDistribution") {
-    return "/vpn-distribution";
-  }
-  if (pageKey === "vpnResources") {
-    return "/vpn-resources";
-  }
-  return `/${pageKey}`;
+  return pagePaths[pageKey];
 }
 
 export function getFinancePageFromPath(pathname: string): FinancePageKey {
-  const path = pathname.replace(/^\/+|\/+$/g, "");
-  if (path === "work/personal/trajectory") return "trajectory";
-  if (path === "work/website/receipt-split") return "receiptSplit";
-  if (path === "work/website/analytics") return "analytics";
-  if (path === "work/content/chat-archive") return "chatArchive";
- if (path === "work/content/status") return "blogStatus";
-  if (path === "work") {
-    return "overview";
-  }
-  if (path === "work/navigation") {
-    return "work";
-  }
-  if (path === "stock-analysis") {
-    return "stockAnalysis";
-  }
-  if (path === "article-analysis") {
-    return "articleAnalysis";
-  }
-  if (path === "article-fetch") {
-    return "articleFetch";
-  }
-  if (path === "vpn-distribution") {
-    return "vpnDistribution";
-  }
-  if (path === "vpn-resources") {
-    return "vpnResources";
-  }
-  if (
-    path === "weread" ||
-    path === "positions" ||
-    path === "backtest" ||
-    path === "data" ||
-    path === "jobs" ||
-    path === "trading" ||
-    path === "notifications" ||
-    path === "mahjong" ||
-    path === "subscriptions" ||
-    path === "monitoring" ||
-    path === "work" ||
-    path === "database" ||
-    path === "permissions"
-  ) {
-    return path;
-  }
-  return "overview";
+  return pagesByPath.get(pathname.replace(/^\/+|\/+$/g, "")) ?? "overview";
 }
 
-export class ApiError extends Error {
-  status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-  }
-}
+export { ApiError } from "@/lib/request";
 
 export async function fetchFinancePage(pageKey: FinancePageKey): Promise<FinancePageData> {
-  const response = await authorizedFetch(pageEndpointMap[pageKey]);
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new ApiError(data?.detail || "获取页面数据失败", response.status);
-  }
-
-  return (await response.json()) as FinancePageData;
+  return requestJSON<FinancePageData>(pageEndpointMap[pageKey], {}, "获取页面数据失败");
 }

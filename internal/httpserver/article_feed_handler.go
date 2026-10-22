@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/howiedata/aowugong-go/internal/finance/articleanalysis"
+	"github.com/howiedata/aowugong-go/internal/timezone"
 )
 
 type rssDocument struct {
@@ -141,7 +142,7 @@ func parseRSSArticleTime(value string) time.Time {
 	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
 		return parsed
 	}
-	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	location := timezone.Beijing
 	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02"} {
 		if parsed, err := time.ParseInLocation(layout, value, location); err == nil {
 			return parsed

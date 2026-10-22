@@ -9,6 +9,8 @@ import (
 	"time"
 
 	appdatabase "github.com/howiedata/aowugong-go/internal/database"
+
+	"github.com/howiedata/aowugong-go/internal/timezone"
 )
 
 // Repository 负责投资文章、来源和分析结果的 PostgreSQL 读写。
@@ -979,6 +981,6 @@ func dateOnly(value string) string {
 // 副作用：读取系统时钟。
 func shanghaiNowText() string {
 	// 1. 中国标准时间全年固定 UTC+8。
-	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	location := timezone.Beijing
 	return time.Now().In(location).Format("2006-01-02 15:04:05")
 }

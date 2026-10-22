@@ -102,3 +102,10 @@ func TestCronSchedulerStopCancelsRunningJob(t *testing.T) {
 		t.Fatal("running task was not canceled")
 	}
 }
+
+func TestCronDefaultTimezoneDoesNotUseHostTimezone(t *testing.T) {
+	scheduler := NewCronScheduler(NewRegistry(nil, nil, nil, WithoutDatabaseLock()), nil)
+	if got := scheduler.cron.Location().String(); got != "Asia/Shanghai" {
+		t.Fatalf("default location = %s", got)
+	}
+}

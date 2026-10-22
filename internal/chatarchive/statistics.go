@@ -3,6 +3,8 @@ package chatarchive
 import (
 	"context"
 	"time"
+
+	"github.com/howiedata/aowugong-go/internal/timezone"
 )
 
 type RoleCounts struct {
@@ -28,7 +30,7 @@ func (r *Repository) Statistics(ctx context.Context, snapshot int64, before stri
 	if snapshot < 0 {
 		return out, ErrInvalidFilter
 	}
-	zone := time.FixedZone("Beijing", 8*3600)
+	zone := timezone.Beijing
 	end := time.Now().In(zone)
 	end = time.Date(end.Year(), end.Month(), end.Day()+1, 0, 0, 0, 0, zone)
 	if before != "" {

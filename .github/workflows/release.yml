@@ -11,6 +11,21 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ANALYTICS_TEST_DSN: postgres://postgres:test-only@127.0.0.1:5432/analytics_test?sslmode=disable
+      TRAJECTORY_TEST_DSN: postgres://postgres:test-only@127.0.0.1:5432/analytics_test?sslmode=disable
+      CHAT_ARCHIVE_TEST_DSN: postgres://postgres:test-only@127.0.0.1:5432/chat_archive_test?sslmode=disable
+      CHAT_ARCHIVE_TEST_PYTHON: python3
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -28,48 +43,37 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Test and build frontend
-        working-directory: web
-        run: |
-          npm ci
-          npm test
-          npm run build
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Test Go backend
-        run: go test -p 1 ./...
-
-      - name: Test Go backend with race detector
-        run: go test -race -p 1 ./...
-
-      - name: Vet Go backend
-        run: go vet ./...
-
-      - name: Verify server scripts
-        run: |
-          for script in scripts/*.sh; do
-            bash -n "$script"
-          done
-
-      - name: Build Linux amd64 release
+      - name: Prepare isolated integration databases
         env:
-          CGO_ENABLED: "0"
-          GOOS: linux
-          GOARCH: amd64
+          PGPASSWORD: test-only
         run: |
-          version="${GITHUB_REF_NAME}"
-          package="aowugong-go-${version}-linux-amd64"
-          mkdir -p "dist/${package}/web" "dist/${package}/migrations"
-          go build -trimpath -ldflags="-s -w" -o "dist/${package}/aowugong" ./cmd/aowugong
-          go build -trimpath -ldflags="-s -w" -o "dist/${package}/aowugong-migrate" ./cmd/migrate
-          cp -R web/dist "dist/${package}/web/dist"
-          cp -R migrations/postgres "dist/${package}/migrations/postgres"
-          cp -R init scripts "dist/${package}/"
-          git archive HEAD skills | tar -x -C "dist/${package}"
-          cp README.md "dist/${package}/README.md"
-          printf '%s\n' "${version}" > "dist/${package}/VERSION"
-          chmod +x "dist/${package}/aowugong" "dist/${package}/aowugong-migrate" "dist/${package}/scripts/"*.sh
-          tar -C dist -czf "dist/${package}.tar.gz" "${package}"
-          (cd dist && sha256sum "${package}.tar.gz" > "${package}.tar.gz.sha256")
+          createdb -h 127.0.0.1 -U postgres analytics_test
+          createdb -h 127.0.0.1 -U postgres chat_archive_test
+          python3 -m pip install -r skills/chat-archive-sync/scripts/requirements.txt
+
+      - name: Require PostgreSQL integration tests without skips
+        run: |
+          go test -count=1 -p 1 -json ./internal/analytics ./internal/trajectory ./internal/chatarchive ./internal/httpserver -run 'Test(Postgres|StatisticsLargeArchive|ChatArchivePythonHTTPRoundTrip|ChatArchiveReconcileCLI)' > /tmp/postgres-tests.jsonl || { cat /tmp/postgres-tests.jsonl; exit 1; }
+          python3 - <<'PYTHON'
+          import json
+          events = [json.loads(line) for line in open('/tmp/postgres-tests.jsonl')]
+          passed = [e['Test'] for e in events if e.get('Test') and e['Action'] == 'pass']
+          skipped = [e['Test'] for e in events if e.get('Test') and e['Action'] == 'skip']
+          required = {'TestPostgresCollectionAndReport', 'TestPostgresTrajectoryLifecycle', 'TestPostgresArchiveQueriesAndExport', 'TestChatArchivePythonHTTPRoundTrip', 'TestChatArchiveReconcileCLI'}
+          assert required.issubset(passed) and not skipped, f"Integration coverage missing: passed={passed}, skipped={skipped}"
+          print(f"PostgreSQL integration tests passed: {len(passed)}; skipped: 0")
+          PYTHON
+
+      - name: Verify release tooling
+        run: node --test scripts/tests/*.test.mjs
+
+      - name: Verify and build release
+        run: node scripts/build-release.mjs "${GITHUB_REF_NAME}"
 
       - name: Publish GitHub release
         env:

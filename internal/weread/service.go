@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/client"
+	"github.com/howiedata/aowugong-go/internal/timezone"
 )
 
 // Service 把微信读书网关响应整理为页面契约。
@@ -22,10 +23,7 @@ type Service struct {
 // 副作用：无。
 func NewService(gateway *client.WeReadClient) *Service {
 	// 1. 固定业务时区，系统缺少时区数据库时使用本地时区兜底。
-	location, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		location = time.Local
-	}
+	location := timezone.Shanghai
 	return &Service{client: gateway, location: location}
 }
 

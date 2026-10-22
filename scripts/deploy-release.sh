@@ -15,6 +15,7 @@ PUBLIC_URL="${PUBLIC_URL:-https://aowugong.top}"
 ENV_FILE="${ENV_FILE:-}"
 RELEASE_ARCHIVE="${RELEASE_ARCHIVE:-}"
 HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-60}"
+SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 MAIN_SERVICE="aowugong-go"
 CANARY_SERVICE="aowugong-go-canary"
 
@@ -41,16 +42,14 @@ case "$DEPLOY_MODE" in
 esac
 
 require_root
-for command_name in curl tar sha256sum systemctl install sed useradd runuser swapon swapoff mkswap sysctl df; do
+for command_name in curl tar sha256sum systemctl install sed; do
   require_command "$command_name"
 done
 [ -n "$VERSION" ] || die "用法: deploy-release.sh <v版本号>"
 printf '%s' "$VERSION" | grep -Eq '^v[0-9A-Za-z._-]+$' || die "版本号格式无效: $VERSION"
 printf '%s' "$APP_PORT" | grep -Eq '^[0-9]+$' || die "APP_PORT 必须是数字"
-ensure_swap
-if ! id "$RUN_USER" >/dev/null 2>&1; then
-  useradd --system --home-dir "$APP_ROOT" --create-home --shell /usr/sbin/nologin "$RUN_USER"
-fi
+id "$RUN_USER" >/dev/null 2>&1 || die "运行用户不存在，请先执行 initialize-server.sh"
+[ -d "$APP_ROOT/releases" ] && [ -f "$APP_ROOT/shared/.env" ] || die "服务器未初始化，请先执行 initialize-server.sh"
 RUN_GROUP="$(id -gn "$RUN_USER")"
 
 package="aowugong-go-${VERSION}-linux-amd64"
@@ -63,6 +62,7 @@ old_release_target=""
 old_previous_target=""
 service_state="$temporary_directory/service.state"
 runtime_env_backup="$temporary_directory/runtime.env.before"
+unit_backup="$temporary_directory/unit.before"
 changed=0
 
 # render_service 按发布模式安装 systemd unit。
@@ -75,7 +75,7 @@ render_service() {
   local rendered="$temporary_directory/${SERVICE_NAME}.service"
   sed -e "s|@APP_ROOT@|$APP_ROOT|g" -e "s|@RUN_USER@|$RUN_USER|g" -e "s|@RUN_GROUP@|$RUN_GROUP|g" \
     "$template" > "$rendered"
-  install -m 0644 "$rendered" "/etc/systemd/system/${SERVICE_NAME}.service"
+  install -m 0644 "$rendered" "$SYSTEMD_UNIT_DIR/${SERVICE_NAME}.service"
 }
 
 # configure_runtime_env 写入 PostgreSQL 运行路径和当前发布参数。
@@ -132,12 +132,18 @@ cleanup_deploy() {
     systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
     if [ -n "$old_release_target" ]; then
       point_symlink "$RELEASE_LINK" "$old_release_target"
-      render_service "$old_release_target"
     else
-      rm -f "$RELEASE_LINK" "/etc/systemd/system/${SERVICE_NAME}.service"
+      rm -f "$RELEASE_LINK"
+    fi
+    if [ -f "$unit_backup" ]; then
+      install -m 0644 "$unit_backup" "$SYSTEMD_UNIT_DIR/${SERVICE_NAME}.service"
+    else
+      rm -f "$SYSTEMD_UNIT_DIR/${SERVICE_NAME}.service"
     fi
     if [ -f "$runtime_env_backup" ]; then
       install -m 0600 -o "$RUN_USER" -g "$RUN_GROUP" "$runtime_env_backup" "$RUNTIME_ENV"
+    else
+      rm -f "$RUNTIME_ENV"
     fi
     if [ "$DEPLOY_MODE" = "main" ]; then
       if [ -n "$old_previous_target" ]; then
@@ -175,34 +181,11 @@ for required_path in aowugong aowugong-migrate web/dist/index.html migrations/po
   [ -e "$source_release/$required_path" ] || die "发布包缺少: $required_path"
 done
 
-# 2. 安装版本目录并准备共享环境。
-mkdir -p "$APP_ROOT/releases" "$APP_ROOT/shared/storage/backup" "$APP_ROOT/shared/storage/exports" \
-  "$APP_ROOT/shared/storage/uploads" "$APP_ROOT/shared/storage/temp" "$APP_ROOT/shared/storage/logs" \
-  "$APP_ROOT/shared/storage/private"
-if [ ! -d "$release_directory" ]; then
-  mv "$source_release" "$release_directory"
-fi
+# 2. 安装独立版本目录，不修改 shared 权限或其他服务。
+[ ! -e "$release_directory" ] || die "版本目录已存在，请使用新版本号: $VERSION"
+mv "$source_release" "$release_directory"
 chown -R root:root "$release_directory"
 chmod 0755 "$release_directory/aowugong" "$release_directory/aowugong-migrate" "$release_directory/scripts/"*.sh
-chown -R "$RUN_USER:$RUN_GROUP" "$APP_ROOT/shared"
-
-# 2.1 同步可选 Vaultwarden 备份和证书辅助脚本，并确保应用用户可读取 root 生成的归档。
-if [ -f /etc/systemd/system/vaultwarden-backup.service ] && [ -f "$release_directory/scripts/backup-vaultwarden.sh" ]; then
-  vaultwarden_backup_dir="$APP_ROOT/shared/storage/backup/vaultwarden"
-  install -m 0750 -o root -g root "$release_directory/scripts/backup-vaultwarden.sh" /usr/local/sbin/vaultwarden-backup
-  install -d -m 0750 -o root -g "$RUN_GROUP" "$vaultwarden_backup_dir"
-  find "$vaultwarden_backup_dir" -maxdepth 1 -type f \( -name 'vaultwarden-*.tar.gz' -o -name 'vaultwarden-*.tar.gz.sha256' \) \
-    -exec chown root:"$RUN_GROUP" {} + -exec chmod 0640 {} +
-fi
-if [ ! -f "$shared_env" ]; then
-  [ -n "$ENV_FILE" ] || die "首次部署必须通过 ENV_FILE 提供生产配置"
-  install -m 0600 -o "$RUN_USER" -g "$RUN_GROUP" "$ENV_FILE" "$shared_env"
-fi
-if [ "$DEPLOY_MODE" = "canary" ]; then
-  install -m 0600 -o "$RUN_USER" -g "$RUN_GROUP" "${ENV_FILE:-$shared_env}" "$RUNTIME_ENV"
-elif [ -n "$ENV_FILE" ]; then
-  install -m 0600 -o "$RUN_USER" -g "$RUN_GROUP" "$ENV_FILE" "$RUNTIME_ENV"
-fi
 
 # 3. 原子切换软链接并启动目标服务。
 save_service_state "$SERVICE_NAME" "$service_state"
@@ -210,8 +193,16 @@ if [ -L "$RELEASE_LINK" ]; then old_release_target="$(readlink -f "$RELEASE_LINK
 if [ "$DEPLOY_MODE" = "main" ] && [ -L "$APP_ROOT/previous" ]; then
   old_previous_target="$(readlink -f "$APP_ROOT/previous")"
 fi
-install -m 0600 "$RUNTIME_ENV" "$runtime_env_backup"
+if [ -f "$RUNTIME_ENV" ]; then install -m 0600 "$RUNTIME_ENV" "$runtime_env_backup"; fi
+if [ -f "$SYSTEMD_UNIT_DIR/${SERVICE_NAME}.service" ]; then
+  install -m 0600 "$SYSTEMD_UNIT_DIR/${SERVICE_NAME}.service" "$unit_backup"
+fi
 changed=1
+if [ "$DEPLOY_MODE" = "canary" ]; then
+  install -m 0600 -o "$RUN_USER" -g "$RUN_GROUP" "${ENV_FILE:-$shared_env}" "$RUNTIME_ENV"
+elif [ -n "$ENV_FILE" ]; then
+  install -m 0600 -o "$RUN_USER" -g "$RUN_GROUP" "$ENV_FILE" "$RUNTIME_ENV"
+fi
 configure_runtime_env "$RUNTIME_ENV" "$RELEASE_LINK"
 validate_runtime_env "$RUNTIME_ENV"
 if [ "$DEPLOY_MODE" = "main" ] && [ -n "$old_release_target" ]; then

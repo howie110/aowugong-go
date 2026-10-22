@@ -70,7 +70,7 @@ func TestClassifySignalBatchRetriesMalformedJSON(t *testing.T) {
 		`{"decisions":[`,
 		`{"decisions":[{"name":"券商","action":"create","canonical_name":"证券行业","type":"sector","confidence":0.98}]}`,
 	}}
-	service := NewService(nil, ServiceOptions{Analyzer: gateway})
+	service := NewService(nil, ServiceOptions{AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: gateway}}})
 	batch := []signalCandidate{{Name: "券商", Type: "sector"}}
 
 	// 2. 当前批次应在第二次响应后成功，而不是让整个任务直接失败。
@@ -303,7 +303,7 @@ func TestServiceAnalyzeAndClassifyPendingPersistsUnknownNames(t *testing.T) {
 	mock.ExpectCommit()
 
 	// 2. 执行分类并核对新增数量、提示词和数据库交互。
-	service := NewService(NewRepository(db), ServiceOptions{Model: "test-model", Analyzer: gateway})
+	service := NewService(NewRepository(db), ServiceOptions{AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: gateway}}})
 	result, err := service.AnalyzeAndClassifyPending(context.Background(), 10, false)
 	if err != nil {
 		t.Fatalf("AnalyzeAndClassifyPending() error = %v", err)

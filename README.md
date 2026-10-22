@@ -643,6 +643,7 @@ Content-Type: application/json
     npm test
     npm run build
     cd ..
+    node --test scripts/tests/*.test.mjs
     for script in scripts/*.sh; do bash -n "$script"; done
 
 还应运行 git diff --check，确认没有空白错误、凭证和私有资源文件进入变更。
@@ -651,14 +652,16 @@ Content-Type: application/json
 
 本地构建 Linux amd64 发布包：
 
-    GOTOOLCHAIN=auto pwsh -File ./scripts/build-release.ps1 -Version v1.0.0
+    GOTOOLCHAIN=auto node scripts/build-release.mjs v1.0.0
+
+本地与 CI 共用此入口；原 PowerShell 命令仍作为薄包装保留。需要 Node.js、Go、Git、tar 和 Bash（Windows 可用 Git Bash）。发布要求干净且已提交的工作区；前后端验证、Go Race/Vet、脚本语法检查任一步失败即停止，不生成新的发布包。运行支持文件从同一 Git 提交归档，包内 `REVISION` 记录提交，`VERSION` 记录发布名称。
 
 发布包包含：
 
 - Linux amd64 Go 二进制。
 - web/dist 静态资源。
 - PostgreSQL 版本化迁移。
-- systemd 模板、部署脚本、回滚脚本和本 README。
+- systemd 模板、部署脚本、回滚脚本、已提交的 skills 工具源码和本 README。
 
 发布包不包含 .env、VPN 原始文件、工作导航、节点内容、数据库备份或任何生产私有配置。Git tag 会触发 GitHub Actions，执行前后端测试、Race、Vet 和构建。
 
@@ -668,7 +671,9 @@ Content-Type: application/json
 
 部署动作限于构建、上传、原子切换 current、重启 aowugong-go.service 和健康检查；不自动发送钉钉、邮件、微信等通知。正式发布前确认 migration 向后兼容，并保留数据库备份。
 
-现有 deploy-release.sh 还包含初始化操作：缺少 Swap 时创建 Swap、准备用户和目录、调整 shared 权限、更新运行环境和 systemd unit，并可能同步 Vaultwarden 备份脚本。执行前应核对这些副作用是否符合本次范围，不能把整个脚本视为仅切换二进制。脚本设置 AOWUGONG_DATABASE_SKIP_MIGRATIONS=false，因此服务重启会检查并执行尚未应用的 PostgreSQL 迁移；不能承诺普通部署绝不修改 schema。
+首次准备服务器时，显式运行 `ENV_FILE=/明确的私有配置路径 bash scripts/initialize-server.sh`，它负责必要的 Swap、运行用户、共享目录和初始配置；已有配置不覆盖，共享数据不递归改权限。`bootstrap-release.sh` 是下载安装入口，会先初始化再发布。日常升级直接调用 `deploy-release.sh`，未初始化时只报错，不自动准备机器。
+
+日常部署不操作 Swap、用户或 Vaultwarden，也不递归修改 shared 权限；仍更新应用运行配置与 systemd unit、切换版本并检查健康。失败恢复原配置、原 unit、版本链接及服务状态；新建的 Canary 配置在失败时移除。已有同名版本目录拒绝复用。脚本设置 AOWUGONG_DATABASE_SKIP_MIGRATIONS=false，因此重启会执行尚未应用的 PostgreSQL 迁移；应用回滚不回滚 schema。Vaultwarden 辅助脚本的更新属于该独立服务的显式维护，Go 日常发布不再顺带同步。`SYSTEMD_UNIT_DIR` 默认 `/etc/systemd/system`，测试时才指定隔离目录。
 
 本地发布包可通过 RELEASE_ARCHIVE 指定，必须同时提供对应 .sha256 文件。使用与发布包匹配的部署脚本；旧服务器脚本可能仍要求已删除的 configs/.env.example，不能为绕过校验恢复废弃模板。每次使用新版本目录，并分别检查服务状态、内网/公网健康接口和本次变更涉及的功能。
 
@@ -751,6 +756,22 @@ Content-Type: application/json
 已知交接状态（历史核实，不代表实时线上状态）：2026-09-12 已部署 v20260912-113811-vpn-routing，服务运行及公网健康检查通过；当时 common-routing.json 缺失或为空，因此规则只读展示功能上线不等于规则已配置。后续仍需补齐并验证公共规则、核实魔戒资源的实际展示与客户端订阅可用性。v2rayN 标准节点订阅无法满足规则一并同步的目标，不能仅凭页面展示规则宣称该缺口已解决。
 
 ## 14. 后续优化方向
+
+已确认治理批次（2026-10-22，C1–C3）：发布构建共用 Node 入口，PowerShell/CI 不维护第二份打包清单；服务器初始化与日常部署分开；文章抓取页的绑定文案、公众号保留、三个操作按钮改为渲染/回调测试。保留现有技术栈、SQLite 测试能力与轨迹旧密钥兼容。不一次性改写其他页面的源码匹配测试。发布脚本测试使用临时目录和系统命令替身，覆盖包内容、构建失败退出、首次部署、升级、失败恢复及回滚；不能替代真实 Linux/systemd 验收。
+
+后续已确认 C4–C6：移除未调用的 GPSLoggerSetup 与旧手动配置生成函数，轨迹配置以当前设备行复制 URL 为入口，后端旧密钥兼容、轮换和撤销接口保留。工作台路径由 finance.ts 的单一映射维护，保留原 URL、前后斜杠归一化与未知路径回退控制台。文章客户端未配置且来源状态写入失败时，Sync 返回明确错误；微信读书认证/验证异常分支合并凭据保存和健康状态写入失败，保留 errors.Is 对原始错误的识别，不增加自动重试或改变成功文章落库流程。
+
+已确认 C7–C9：删除没有业务调用的 Item 组件及其文件存在断言；麻将热力图测试迁入 web/tests 并接入 npm test，保留原有日期窗口、同日汇总和颜色断言；按用户确认删除旧 FastAPI crontab 校验、清理与恢复函数。当前部署与回滚不依赖这三个函数，本次未访问或修改服务器 crontab，亦未核查仓库外历史调用。
+
+已确认 C10–C16：VPN 由公开根地址和数据库状态直接管理，删除空 Distributor/远端载荷层，保留原 Token 派生及 JSON 字段；配置校验失败同时报告状态落库失败。文章分析统一使用 AnalysisModels 配置，测试与生产使用同一初始化入口。剩余工作台 JSON 客户端复用 requestJSON，保留 ApiError 身份、状态码、业务提示、Blob/FormData 和原有认证处理。删除未使用正文回退及无效参数，测试专用构造器/包装函数移入测试文件，保留裁剪图片落盘行为。
+
+业务时区统一由 internal/timezone 提供，标准库内嵌 tzdata 消除运行环境差异：Shanghai 使用 IANA 历史规则，供日历日期和调度；Beijing 保留原统计/文本格式的固定 UTC+8 契约。Cron 缺省时区及麻将导入不再依赖主机 time.Local。发布 CI 使用 PostgreSQL 15 临时服务和 analytics_test/chat_archive_test 专用库，显式提供全部测试 DSN 和 Python 环境；集成测试缺失或跳过即阻止发布。保留回测/策略、旧聊天归档 DSN 模式，不扩大业务删除范围。
+
+治理衡量采用同一范围下的源码物理行数（含空行/注释），分别列出生产、测试、脚本/CI 及总量，排除依赖、构建产物、锁文件与文档。总量减少是直观指标，同时核对依赖、兼容入口和行为测试；不靠压缩排版、删除必要测试或挪到统计范围外制造下降。
+
+行数基线（C10–C16 前 → 后）：生产 48,367 → 48,174，测试 16,376 → 16,436，脚本/CI 1,934 → 1,975，总计 66,677 → 66,585，净减 92 行。相对上次提交（C1–C16 累计），生产减少 338 行、脚本/CI 减少 35 行、测试增加 458 行，总计增加 85 行；累计总量尚未下降，不能将测试补齐隐藏为“全仓减量”。统计范围为 Git 已跟踪及未忽略新增文件的 `.go/.ts/.tsx/.js/.cjs/.mjs/.py/.sh/.ps1/.yml/.yaml/.css/.sql`；测试文件/目录优先归类为测试，其余 scripts/.github 归类脚本/CI。
+
+C10–C16 本地验证：全量 Go race 测试通过 420 个测试项（含子测试），其中 14 个 PostgreSQL 集成测试无跳过；Go vet、126 项前端测试、前端构建、14 项发布脚本测试、Shell/YAML 语法与 diff 检查通过。未配置独立小票临时服务、可用私有 VPN 资源的两项环境测试仍跳过；未访问生产资源，也未在 GitHub 执行新流水线。测试数据库验证后已停止。此处为优化完成时的验证记录；实际发布状态见后续部署记录。
 
 - 日志与可观测性：系统复杂后，评估引入 Wide Event / Canonical Log Line，为请求、任务、消息、批量处理和人工覆盖统一记录上下文，让正常流程清晰、例外可追踪和可审计。当前只记录为优化方向，暂不实施具体架构。
 - 资料来源：[Logging Sucks](https://loggingsucks.com/)、[logging-best-practices skill](https://github.com/boristane/agent-skills/tree/main/skills/logging-best-practices)。

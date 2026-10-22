@@ -305,7 +305,7 @@ func TestRepositoryAndReportPreserveArticleContracts(t *testing.T) {
 	}
 
 	// 4. 核对 60 天信号和 3 天市场统计。
-	service := NewService(repository, ServiceOptions{Model: "deepseek-v4-pro"})
+	service := NewService(repository, ServiceOptions{})
 	report, err := service.Report(ctx, 60, 3)
 	if err != nil {
 		t.Fatalf("Report() error = %v", err)

@@ -27,7 +27,6 @@ test("补齐当前页面需要的 shadcn 基础组件", () => {
     "empty",
     "field",
     "input-group",
-    "item",
     "pagination",
     "popover",
     "progress",

@@ -186,11 +186,10 @@ func (s *Service) processOne(ctx context.Context, request BatchRequest, upload U
 	if err != nil {
 		return UploadResult{}, err
 	}
-	cropData, cropPath, err := s.saveAssetCrop(request.SnapshotDate, imageSHA, decoded)
+	cropData, _, err := s.saveAssetCrop(request.SnapshotDate, imageSHA, decoded)
 	if err != nil {
 		return UploadResult{}, err
 	}
-	_ = cropPath
 
 	// 3. 识别资产区域并解析账户资产。
 	rawAsset, err := s.ocr.Recognize(ctx, cropData)

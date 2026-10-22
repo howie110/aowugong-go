@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -45,57 +46,12 @@ func TestV2rayQRCodePayloadKeepsSubscriptionForMultipleNodes(t *testing.T) {
 	}
 }
 
-type memoryDistributor struct {
-	baseURL string
-	values  map[string]DistributionPayload
-	revoked []string
-}
-
-// Configured 返回测试分发器是否有根地址。
-// 输入：无。
-// 输出：有地址时返回 true。
-// 副作用：无。
-func (d *memoryDistributor) Configured() bool {
-	// 1. 使用根地址模拟配置完整状态。
-	return d.baseURL != ""
-}
-
-// BaseURL 返回测试订阅根地址。
-// 输入：无。
-// 输出：返回固定 HTTPS 地址。
-// 副作用：无。
-func (d *memoryDistributor) BaseURL() string {
-	// 1. 返回构造时地址。
-	return d.baseURL
-}
-
-// Publish 在内存中保存一台设备配置。
-// 输入：ctx 未使用，tokenHash 是 KV 键，payload 是配置。
-// 输出：总是成功。
-// 副作用：写入测试 Map。
-func (d *memoryDistributor) Publish(ctx context.Context, tokenHash string, payload DistributionPayload) error {
-	// 1. 覆盖相同哈希，模拟 Worker KV PUT。
-	d.values[tokenHash] = payload
-	return nil
-}
-
-// Revoke 从内存删除一台设备配置。
-// 输入：ctx 未使用，tokenHash 是 KV 键。
-// 输出：总是成功。
-// 副作用：删除测试 Map 并记录哈希。
-func (d *memoryDistributor) Revoke(ctx context.Context, tokenHash string) error {
-	// 1. 幂等删除并保留撤销审计。
-	delete(d.values, tokenHash)
-	d.revoked = append(d.revoked, tokenHash)
-	return nil
-}
-
 // TestServiceCreatesRotatesAndRevokesUserSubscription 验证用户订阅完整生命周期和 Token 轮换。
-// 输入：隔离 SQLite、临时 Clash 配置和内存分发器。
-// 输出：创建可订阅，轮换更换地址，撤销清空远端配置。
-// 副作用：创建临时文件，读写 SQLite 和测试 Map。
+// 输入：隔离 SQLite、临时 Clash 配置和公开根地址。
+// 输出：创建可订阅，轮换更换地址，撤销阻断订阅。
+// 副作用：创建临时文件，读写 SQLite 。
 func TestServiceCreatesRotatesAndRevokesUserSubscription(t *testing.T) {
-	// 1. 准备隔离仓储、资源和远端分发器。
+	// 1. 准备隔离仓储、资源和公开根地址。
 	db := testdatabase.Open(t)
 	directory := t.TempDir()
 	content := `proxies:
@@ -117,8 +73,8 @@ func TestServiceCreatesRotatesAndRevokesUserSubscription(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "common-routing.json"), []byte(commonRouting), 0o600); err != nil {
 		t.Fatalf("os.WriteFile(common-routing.json) error = %v", err)
 	}
-	distributor := &memoryDistributor{baseURL: "https://vpn.example.test", values: make(map[string]DistributionPayload)}
-	service := NewService(NewRepository(db), NewSourceCatalog(directory), distributor, "test-secret")
+	publicURL := "  https://vpn.example.test/  "
+	service := NewService(NewRepository(db), NewSourceCatalog(directory), publicURL, "test-secret")
 	userID := createVPNTestUser(t, db, "android-user")
 
 	// 2. 创建后取得 HTTPS 地址，数据库结构不包含明文 Token 字段。
@@ -127,8 +83,8 @@ func TestServiceCreatesRotatesAndRevokesUserSubscription(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 	oldURL := created.Subscriptions["v2ray"]
-	if !strings.HasPrefix(oldURL, "https://vpn.example.test/api/v1/vpn/subscriptions/") || created.Status != StatusActive || len(distributor.values) != 1 {
-		t.Fatalf("created device = %#v, remote count = %d", created, len(distributor.values))
+	if !strings.HasPrefix(oldURL, "https://vpn.example.test/api/v1/vpn/subscriptions/") || created.Status != StatusActive {
+		t.Fatalf("created device = %#v", created)
 	}
 	encodedCreated, marshalErr := json.Marshal(created)
 	if marshalErr != nil {
@@ -167,34 +123,37 @@ func TestServiceCreatesRotatesAndRevokesUserSubscription(t *testing.T) {
 		}
 	}
 
-	// 3. 轮换后 URL 和远端哈希改变，旧哈希已撤销。
+	// 3. 轮换后 URL 改变，旧 Token 已失效。
 	rotated, err := service.Rotate(context.Background(), created.ID, userID, true)
 	if err != nil {
 		t.Fatalf("Rotate() error = %v", err)
 	}
 	newURL := rotated.Subscriptions["v2ray"]
-	if newURL == oldURL || rotated.TokenVersion != 2 || len(distributor.values) != 1 || len(distributor.revoked) != 1 {
+	if newURL == oldURL || rotated.TokenVersion != 2 {
 		t.Fatalf("rotated device = %#v", rotated)
 	}
 	oldToken := subscriptionToken(t, oldURL)
-	if distributor.revoked[0] != hashToken(oldToken) {
-		t.Errorf("revoked hash does not match old token")
+	if _, err := service.Subscription(context.Background(), created.ID, oldToken, "v2ray"); err == nil {
+		t.Fatal("old token still accepted")
 	}
 
-	// 4. 撤销当前设备后远端配置清空且页面不再返回订阅地址。
+	// 4. 撤销当前设备后页面不再返回订阅地址。
 	revoked, err := service.Revoke(context.Background(), created.ID, userID, true)
 	if err != nil {
 		t.Fatalf("Revoke() error = %v", err)
 	}
-	if revoked.Status != StatusRevoked || len(revoked.Subscriptions) != 0 || len(distributor.values) != 0 {
-		t.Fatalf("revoked device = %#v, remote count = %d", revoked, len(distributor.values))
+	if _, err := service.Subscription(context.Background(), created.ID, subscriptionToken(t, newURL), "v2ray"); err == nil {
+		t.Fatal("revoked token still accepted")
+	}
+	if revoked.Status != StatusRevoked || len(revoked.Subscriptions) != 0 {
+		t.Fatalf("revoked device = %#v", revoked)
 	}
 }
 
 // TestServiceScopesSubscriptionsByLoginUser 验证普通用户只能读取自己的订阅。
-// 输入：两个登录用户、同一测试资源和内存分发器。
+// 输入：两个登录用户、同一测试资源和公开根地址。
 // 输出：管理员看到全部记录，普通用户只看到自己且不能读取他人二维码。
-// 副作用：创建临时文件，读写隔离 SQLite 和测试 Map。
+// 副作用：创建临时文件，读写隔离 SQLite 。
 func TestServiceScopesSubscriptionsByLoginUser(t *testing.T) {
 	// 1. 准备两个用户和可发布的单节点资源。
 	db := testdatabase.Open(t)
@@ -207,8 +166,8 @@ func TestServiceScopesSubscriptionsByLoginUser(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "common-routing.json"), []byte(commonRouting), 0o600); err != nil {
 		t.Fatalf("os.WriteFile(common-routing.json) error = %v", err)
 	}
-	distributor := &memoryDistributor{baseURL: "https://vpn.example.test", values: make(map[string]DistributionPayload)}
-	service := NewService(NewRepository(db), NewSourceCatalog(directory), distributor, "test-secret")
+	publicURL := "  https://vpn.example.test/  "
+	service := NewService(NewRepository(db), NewSourceCatalog(directory), publicURL, "test-secret")
 	firstUserID := createVPNTestUser(t, db, "first-user")
 	secondUserID := createVPNTestUser(t, db, "second-user")
 	first, err := service.Create(context.Background(), CreateRequest{UserID: firstUserID, ProfileCode: "demo"})
@@ -262,8 +221,8 @@ func TestServiceAllowsMultipleProfilesForOneUser(t *testing.T) {
 			t.Fatalf("os.WriteFile(%s) error = %v", profile, err)
 		}
 	}
-	distributor := &memoryDistributor{baseURL: "https://vpn.example.test", values: make(map[string]DistributionPayload)}
-	service := NewService(NewRepository(db), NewSourceCatalog(directory), distributor, "test-secret")
+	publicURL := "  https://vpn.example.test/  "
+	service := NewService(NewRepository(db), NewSourceCatalog(directory), publicURL, "test-secret")
 	userID := createVPNTestUser(t, db, "admin")
 
 	// 2. 同一用户分别开通 DMIT 和魔戒，重复同一资源仍应被拒绝。
@@ -275,8 +234,8 @@ func TestServiceAllowsMultipleProfilesForOneUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create(mojie) error = %v", err)
 	}
-	if dmit.ID == mojie.ID || len(distributor.values) != 2 {
-		t.Fatalf("subscriptions = %#v, remote count = %d", []UserSubscription{dmit, mojie}, len(distributor.values))
+	if dmit.ID == mojie.ID {
+		t.Fatalf("subscriptions = %#v", []UserSubscription{dmit, mojie})
 	}
 	if _, err := service.Create(context.Background(), CreateRequest{UserID: userID, ProfileCode: "dmit"}); err != ErrConflict {
 		t.Fatalf("duplicate profile error = %v, want %v", err, ErrConflict)
@@ -300,7 +259,7 @@ func TestServiceAllowsMultipleProfilesForOneUser(t *testing.T) {
 }
 
 // TestServiceCreatesDraftWithoutDistributor 验证未配置公网分发时仍可先创建设备草稿。
-// 输入：隔离 SQLite、临时 Clash 配置和未配置内存分发器。
+// 输入：隔离 SQLite、临时 Clash 配置和未配置公开根地址。
 // 输出：返回草稿设备且不生成订阅地址。
 // 副作用：创建临时文件并写入 SQLite。
 func TestServiceCreatesDraftWithoutDistributor(t *testing.T) {
@@ -311,8 +270,8 @@ func TestServiceCreatesDraftWithoutDistributor(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "clash_demo.yaml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("os.WriteFile() error = %v", err)
 	}
-	distributor := &memoryDistributor{values: make(map[string]DistributionPayload)}
-	service := NewService(NewRepository(db), NewSourceCatalog(directory), distributor, "test-secret")
+	publicURL := ""
+	service := NewService(NewRepository(db), NewSourceCatalog(directory), publicURL, "test-secret")
 	userID := createVPNTestUser(t, db, "draft-user")
 
 	// 2. 创建成功后保持草稿状态，不发布远端配置或返回不可用地址。
@@ -320,8 +279,8 @@ func TestServiceCreatesDraftWithoutDistributor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	if created.Status != StatusDraft || len(created.Subscriptions) != 0 || len(distributor.values) != 0 {
-		t.Fatalf("created device = %#v, remote count = %d", created, len(distributor.values))
+	if created.Status != StatusDraft || len(created.Subscriptions) != 0 {
+		t.Fatalf("created device = %#v", created)
 	}
 
 	// 3. 草稿无需分发器即可撤销，远端撤销调用保持为空。
@@ -329,8 +288,8 @@ func TestServiceCreatesDraftWithoutDistributor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Revoke() error = %v", err)
 	}
-	if revoked.Status != StatusRevoked || len(distributor.revoked) != 0 {
-		t.Fatalf("revoked device = %#v, remote revoke count = %d", revoked, len(distributor.revoked))
+	if revoked.Status != StatusRevoked {
+		t.Fatalf("revoked device = %#v", revoked)
 	}
 }
 
@@ -371,4 +330,47 @@ func subscriptionToken(t *testing.T, rawURL string) string {
 		t.Fatalf("subscription path = %q", parsed.Path)
 	}
 	return parts[5]
+}
+
+func TestPublicationFailurePersistsAndReportsWriteFailure(t *testing.T) {
+	for _, rejectWrite := range []bool{false, true} {
+		t.Run(strconv.FormatBool(rejectWrite), func(t *testing.T) {
+			db := testdatabase.Open(t)
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "clash_demo.yaml"), []byte("proxies: [invalid"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			repo := NewRepository(db)
+			service := NewService(repo, NewSourceCatalog(dir), "https://vpn.example.test", "secret")
+			user := createVPNTestUser(t, db, "failure-user")
+			stored, err := repo.Create(context.Background(), CreateRequest{UserID: user, ProfileCode: "demo"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rejectWrite {
+				if _, err := db.Exec(`CREATE TRIGGER reject_vpn_failure BEFORE UPDATE ON vpn_subscription_device BEGIN SELECT RAISE(FAIL, 'write blocked'); END`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, operation := range []func(context.Context, int64, int64, bool) (UserSubscription, error){service.Publish, service.Rotate} {
+				_, err := operation(context.Background(), stored.ID, user, true)
+				if err == nil || !strings.Contains(err.Error(), "生成 VPN 订阅配置") {
+					t.Fatalf("missing build error: %v", err)
+				}
+				if rejectWrite && !strings.Contains(err.Error(), "write blocked") {
+					t.Fatalf("missing persistence error: %v", err)
+				}
+			}
+			got, err := repo.Get(context.Background(), stored.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.TokenVersion != stored.TokenVersion {
+				t.Fatal("failed rotation changed token")
+			}
+			if !rejectWrite && (got.Status != StatusError || got.LastError == "") {
+				t.Fatalf("failure not persisted: %+v", got)
+			}
+		})
+	}
 }

@@ -86,14 +86,6 @@ type ConfigContent struct {
 	Body        string `json:"body"`
 }
 
-// DistributionPayload 描述统一发布流程校验的完整用户订阅。
-type DistributionPayload struct {
-	User     string                   `json:"user"`
-	Profile  string                   `json:"profile"`
-	Formats  map[string]ConfigContent `json:"formats"`
-	IssuedAt string                   `json:"issued_at"`
-}
-
 type storedSubscription struct {
 	ID           int64
 	UserID       int64

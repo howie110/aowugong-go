@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/client"
+	"github.com/howiedata/aowugong-go/internal/timezone"
 )
 
 // DailySource 定义日线同步服务使用的 Tushare HTTP 能力。
@@ -51,10 +52,7 @@ func NewService(repository *Repository, source DailySource, options SyncOptions)
 	if options.Now == nil {
 		options.Now = time.Now
 	}
-	location, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		location = time.FixedZone("Asia/Shanghai", 8*60*60)
-	}
+	location := timezone.Shanghai
 	return &Service{repository: repository, source: source, options: options, location: location}
 }
 

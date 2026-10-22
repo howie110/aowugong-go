@@ -34,6 +34,7 @@ import (
 	"github.com/howiedata/aowugong-go/internal/receiptsplit"
 	"github.com/howiedata/aowugong-go/internal/scheduler"
 	"github.com/howiedata/aowugong-go/internal/subscription"
+	"github.com/howiedata/aowugong-go/internal/timezone"
 	"github.com/howiedata/aowugong-go/internal/trajectory"
 	"github.com/howiedata/aowugong-go/internal/vaultwardenbackup"
 	"github.com/howiedata/aowugong-go/internal/vpn"
@@ -221,7 +222,7 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 	vpnService := vpn.NewService(
 		vpn.NewRepository(db),
 		vpn.NewSourceCatalog(cfg.VPN.SourceDir),
-		vpn.NewDirectDistributor(cfg.VPN.PublicURL),
+		cfg.VPN.PublicURL,
 		vpnSecret,
 	)
 	if err := tasks.articleRepository.SyncWeReadSource(ctx); err != nil {
@@ -233,10 +234,7 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
-	location, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		return nil, fmt.Errorf("加载调度时区 Asia/Shanghai: %w", err)
-	}
+	location := timezone.Shanghai
 	cronScheduler := scheduler.NewCronScheduler(jobRegistry, location)
 
 	// 9. 把同一业务服务和任务注册表交给 HTTP 路由。

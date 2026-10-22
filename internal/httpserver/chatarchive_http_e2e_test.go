@@ -66,6 +66,8 @@ sys.path.insert(0, os.environ['ARCHIVE_SCRIPTS'])
 from sync import SyncConfig, sync_source
 from store import ArchiveStore
 from http_store import HTTPArchiveStore
+from psycopg.conninfo import make_conninfo
+archive_dsn = make_conninfo(os.environ['ARCHIVE_DSN'], options='-c search_path=chat_archive_http_test')
 
 class MetadataHTTPStore(HTTPArchiveStore):
  def _request(self,path,payload=None):
@@ -79,7 +81,7 @@ with tempfile.TemporaryDirectory() as tmp:
  p=Path(tmp)/'会话.jsonl'
  p.write_text('{"type":"session_meta","payload":{"id":"session-http"}}\n'+event('a','旧记录 😀 <>&\u2028'),encoding='utf-8')
  cfg=SyncConfig('test-device','test-account','codex',str(p))
- with ArchiveStore(os.environ['ARCHIVE_DSN']) as old:
+ with ArchiveStore(archive_dsn) as old:
   assert sync_source(cfg,old)['messages']==1
  with p.open('a',encoding='utf-8') as f: f.write(event('b','HTTP 新消息 " \\'))
  with MetadataHTTPStore(os.environ['ARCHIVE_URL'],'t'*40) as api:
@@ -93,7 +95,7 @@ with tempfile.TemporaryDirectory() as tmp:
   p2.write_text('{"type":"session_meta","payload":{"id":"session-batch"}}\n'+''.join(event(str(i),'batch中文'+str(i)) for i in range(501)),encoding='utf-8')
   assert sync_source(SyncConfig('test-device','test-account','codex',str(p2)),api)['messages']==501
   assert api.verify()['message_observations']==503
- with ArchiveStore(os.environ['ARCHIVE_DSN']) as old:
+ with ArchiveStore(archive_dsn) as old:
   assert old.verify()['message_observations']==503
  if os.environ.get('ARCHIVE_DIAGNOSTIC_ZIP'):
   with zipfile.ZipFile(os.environ['ARCHIVE_DIAGNOSTIC_ZIP']) as z:
@@ -141,7 +143,7 @@ with tempfile.TemporaryDirectory() as tmp:
   print('Actual company backfill: 502 historical messages, multi-batch, preview, repeat, marker persistence and subsequent regular sync passed')
 print('Python HTTP round-trip: existing data, incremental upload, repeat, multi-batch, dual verification passed')
 `)
-	command.Env = append(os.Environ(), "ARCHIVE_SCRIPTS="+scripts, "ARCHIVE_URL="+server.URL, "ARCHIVE_DSN="+dsn+" options='-c search_path=chat_archive_http_test'")
+	command.Env = append(os.Environ(), "ARCHIVE_SCRIPTS="+scripts, "ARCHIVE_URL="+server.URL, "ARCHIVE_DSN="+dsn)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("round trip: %v\n%s", err, output)

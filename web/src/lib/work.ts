@@ -1,5 +1,4 @@
-import { ApiError } from "@/lib/finance";
-import { authorizedFetch } from "@/lib/auth";
+import { requestJSON } from "@/lib/request";
 
 export type WorkNavigationLink = {
   title: string;
@@ -21,12 +20,5 @@ export type WorkNavigationData = {
 };
 
 export async function fetchWorkNavigation(): Promise<WorkNavigationData> {
-  const response = await authorizedFetch("/api/v1/work/navigation");
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new ApiError(data?.detail || "获取工作导航数据失败", response.status);
-  }
-
-  return (await response.json()) as WorkNavigationData;
+  return requestJSON<WorkNavigationData>("/api/v1/work/navigation", {}, "获取工作导航数据失败");
 }

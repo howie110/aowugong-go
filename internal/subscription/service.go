@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/money"
+	"github.com/howiedata/aowugong-go/internal/timezone"
 )
 
 const dateLayout = "2006-01-02"
@@ -26,10 +27,7 @@ type Service struct {
 // 副作用：无。
 func NewService(repository *Repository) *Service {
 	// 1. 固定业务日期时区，加载失败时使用本地时区兜底。
-	location, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		location = time.Local
-	}
+	location := timezone.Shanghai
 	return &Service{repository: repository, today: time.Now, location: location}
 }
 

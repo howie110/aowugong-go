@@ -16,12 +16,12 @@ test("根路径使用公开备案主页，工作台使用独立入口", () => {
 });
 
 test("工作台首页和工作导航使用不同路径", () => {
-  const financeSource = readSource("src/lib/finance.ts");
-
-  assert.match(financeSource, /pageKey === "overview"[\s\S]*?return "\/work"/);
-  assert.match(financeSource, /pageKey === "work"[\s\S]*?return "\/work\/navigation"/);
-  assert.match(financeSource, /path === "work"[\s\S]*?return "overview"/);
-  assert.match(financeSource, /path === "work\/navigation"[\s\S]*?return "work"/);
+  const { loadTypeScript } = require("./helpers/load-typescript.cjs");
+  const routes = loadTypeScript("lib/finance.ts");
+  assert.equal(routes.getFinancePagePath("overview"), "/work");
+  assert.equal(routes.getFinancePagePath("work"), "/work/navigation");
+  assert.equal(routes.getFinancePageFromPath("/work"), "overview");
+  assert.equal(routes.getFinancePageFromPath("/work/navigation"), "work");
 });
 
 test("登录成功后进入工作台，不回到公开根页面", () => {

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/howiedata/aowugong-go/internal/timezone"
 	"github.com/robfig/cron/v3"
 )
 
@@ -26,7 +27,7 @@ type CronScheduler struct {
 func NewCronScheduler(registry *Registry, location *time.Location) *CronScheduler {
 	// 1. 缺少时区时使用系统本地时区兜底。
 	if location == nil {
-		location = time.Local
+		location = timezone.Shanghai
 	}
 	return &CronScheduler{registry: registry, location: location, cron: cron.New(cron.WithLocation(location))}
 }

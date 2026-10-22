@@ -203,7 +203,7 @@ func TestServiceSyncsArticlesAndAnalyzesThroughUnifiedEntry(t *testing.T) {
 		t.Fatalf("SyncDefaultSource() error = %v", err)
 	}
 	sourceClient := &fixedArticleGateway{}
-	service := NewService(repository, ServiceOptions{Model: "test-model", Articles: sourceClient, Analyzer: fixedAnalysisGateway{}})
+	service := NewService(repository, ServiceOptions{Articles: sourceClient, AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: fixedAnalysisGateway{}}}})
 
 	// 2. 通过统一入口执行抓取和分析。
 	result, err := service.Sync(ctx, 30, true, 10)
@@ -247,7 +247,7 @@ func TestServiceAnalyzesAndClassifiesArticleWithOneModelCall(t *testing.T) {
 	}
 	gateway := &countingCombinedAnalysisGateway{}
 	service := NewService(repository, ServiceOptions{
-		Model: "test-model", Articles: &fixedArticleGateway{}, Analyzer: gateway,
+		Articles: &fixedArticleGateway{}, AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: gateway}},
 	})
 
 	// 2. 一次模型请求后，文章和概念别名都必须成功落库。
@@ -288,7 +288,7 @@ func TestServiceRetriesMalformedArticleJSON(t *testing.T) {
 		t.Fatalf("SyncDefaultSource() error = %v", err)
 	}
 	gateway := &retryingArticleAnalysisGateway{}
-	service := NewService(repository, ServiceOptions{Model: "test-model", Articles: &fixedArticleGateway{}, Analyzer: gateway})
+	service := NewService(repository, ServiceOptions{Articles: &fixedArticleGateway{}, AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: gateway}}})
 
 	// 2. 损坏响应只触发一次重试，最终应按成功文章处理。
 	result, err := service.Sync(ctx, 30, true, 10)
@@ -331,7 +331,7 @@ func TestServiceRepairsMissingArticleClassifications(t *testing.T) {
 		t.Fatalf("SyncDefaultSource() error = %v", err)
 	}
 	gateway := &incompleteArticleClassificationGateway{}
-	service := NewService(repository, ServiceOptions{Model: "test-model", Articles: &fixedArticleGateway{}, Analyzer: gateway})
+	service := NewService(repository, ServiceOptions{Articles: &fixedArticleGateway{}, AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: gateway}}})
 
 	// 2. 缺失决策由仅分类调用补齐，整篇文章不得被标为失败。
 	result, err := service.Sync(ctx, 30, true, 10)
@@ -367,7 +367,7 @@ func TestServiceScheduledSyncDrainsMultipleAnalysisBatches(t *testing.T) {
 		t.Fatalf("SyncDefaultSource() error = %v", err)
 	}
 	service := NewService(repository, ServiceOptions{
-		Model: "test-model", Articles: manyArticleGateway{count: 51}, Analyzer: fixedAnalysisGateway{},
+		Articles: manyArticleGateway{count: 51}, AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: fixedAnalysisGateway{}}},
 	})
 
 	// 2. 执行生产同步入口并核对跨批累计和最终 pending。
@@ -422,7 +422,7 @@ func TestServiceScheduledSyncFailsWhenArticleLatestIsStale(t *testing.T) {
 		t.Fatalf("SyncDefaultSource() error = %v", err)
 	}
 	service := NewService(repository, ServiceOptions{
-		Model: "test-model", Articles: staleArticleGateway{}, Analyzer: fixedAnalysisGateway{},
+		Articles: staleArticleGateway{}, AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: fixedAnalysisGateway{}}},
 		Now: func() time.Time { return time.Date(2026, 8, 6, 10, 0, 0, 0, time.FixedZone("CST", 8*3600)) },
 	})
 

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/howiedata/aowugong-go/internal/timezone"
 )
 
 var (
@@ -17,7 +19,7 @@ var (
 	ErrNotFound     = errors.New("设备不存在")
 	ErrLimit        = errors.New("每个账号最多创建 20 台设备")
 )
-var Shanghai = time.FixedZone("Asia/Shanghai", 8*3600)
+var Shanghai = timezone.Beijing
 
 const PageSize = 50
 

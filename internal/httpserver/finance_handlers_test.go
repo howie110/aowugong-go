@@ -41,7 +41,7 @@ func TestFinanceSummaryRoutesRequirePermissionAndReturnCurrentData(t *testing.T)
 	if err := articleRepository.SyncDefaultSource(ctx, ""); err != nil {
 		t.Fatalf("SyncDefaultSource() error = %v", err)
 	}
-	articleService := articleanalysis.NewService(articleRepository, articleanalysis.ServiceOptions{Model: "test-model"})
+	articleService := articleanalysis.NewService(articleRepository, articleanalysis.ServiceOptions{})
 	jobRegistry := scheduler.NewRegistry(db, nil, nil)
 	if err := jobRegistry.Register(scheduler.Definition{
 		Name: "test_job", Schedule: "0 9 * * *", Timeout: time.Minute,

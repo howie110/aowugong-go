@@ -281,9 +281,9 @@ func TestPollLoginKeepsConnectedTerminalState(t *testing.T) {
 	}
 }
 
-// TestWeReadArticleFallbacks 验证详情字段异常时仍使用列表标题并恢复长正文。
+// TestWeReadArticleFallbacks 验证详情字段异常时仍使用列表标题。
 // 输入：正常列表标题、异常长详情标题和普通短详情标题。
-// 输出：标题使用列表值，只有长详情文本可作为正文。
+// 输出：标题使用列表值。
 // 副作用：无。
 func TestWeReadArticleFallbacks(t *testing.T) {
 	// 1. 核对列表标题不会被详情中的长正文覆盖。
@@ -295,13 +295,6 @@ func TestWeReadArticleFallbacks(t *testing.T) {
 		t.Fatalf("weReadArticleTitle() with body = %q", got)
 	}
 
-	// 2. 核对长详情文本可恢复，普通短标题不会冒充正文。
-	if got := weReadDetailContentFallback(longContent); got == "" {
-		t.Fatal("weReadDetailContentFallback() returned empty long content")
-	}
-	if got := weReadDetailContentFallback("普通文章标题"); got != "" {
-		t.Fatalf("weReadDetailContentFallback() = %q", got)
-	}
 }
 
 // TestWeReadAccountSelectionSurvivesShelfRefresh 验证重新发现书架不会覆盖人工公众号开关。

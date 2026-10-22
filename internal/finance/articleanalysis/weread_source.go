@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/client"
+	"github.com/howiedata/aowugong-go/internal/timezone"
 	qrcode "github.com/skip2/go-qrcode"
 )
 
@@ -518,13 +519,17 @@ func (s *WeReadSource) Fetch(ctx context.Context, sourceID int64, _ string, limi
 		if listErr != nil {
 			if errors.Is(listErr, client.ErrWeReadArticleAuth) || errors.Is(listErr, client.ErrWeReadArticleVerification) {
 				if credentials != originalCredentials {
-					_ = s.saveCredentials(ctx, credentials, false)
+					if saveErr := s.saveCredentials(ctx, credentials, false); saveErr != nil {
+						listErr = errors.Join(listErr, fmt.Errorf("保存刷新后的微信读书凭据: %w", saveErr))
+					}
 				}
 				status := "invalid"
 				if errors.Is(listErr, client.ErrWeReadArticleVerification) {
 					status = "error"
 				}
-				_ = s.repository.recordWeReadCredentialCheck(ctx, status, account.Title+": "+listErr.Error(), now)
+				if healthErr := s.repository.recordWeReadCredentialCheck(ctx, status, account.Title+": "+listErr.Error(), now); healthErr != nil {
+					listErr = errors.Join(listErr, fmt.Errorf("保存微信读书凭据检查状态: %w", healthErr))
+				}
 				return nil, listErr
 			}
 			failures = append(failures, account.Title+": "+listErr.Error())
@@ -763,7 +768,7 @@ func publicWeReadLoginStatus(flow *weReadLoginFlow) WeReadLoginStatus {
 // 副作用：无。
 func buildWeReadCredentialCheckResult(health weReadCredentialHealth, checkedAt time.Time, accountCount int) WeReadCredentialCheckResult {
 	// 1. 从绑定时间计算到本次检查或首次失效的持续时间。
-	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	location := timezone.Beijing
 	end := checkedAt
 	if health.InvalidAt != "" {
 		if invalidAt, err := time.ParseInLocation("2006-01-02 15:04:05", health.InvalidAt, location); err == nil {
@@ -810,7 +815,7 @@ func dueWeReadAccounts(accounts []WeReadAccount, now time.Time) []WeReadAccount 
 			due = append(due, account)
 			continue
 		}
-		checkedAt, err := time.ParseInLocation("2006-01-02 15:04:05", account.LastCheckedAt, time.FixedZone("Asia/Shanghai", 8*60*60))
+		checkedAt, err := time.ParseInLocation("2006-01-02 15:04:05", account.LastCheckedAt, timezone.Beijing)
 		if err != nil {
 			due = append(due, account)
 			continue
@@ -852,19 +857,6 @@ func weReadArticleTitle(listedTitle, detailTitle string) string {
 	return ""
 }
 
-// weReadDetailContentFallback 从详情异常长标题中恢复被上游错放的正文。
-// 输入：detailTitle 是微信读书详情接口的 title 字段。
-// 输出：明显为长正文时返回规范文本，否则返回空字符串。
-// 副作用：无。
-func weReadDetailContentFallback(detailTitle string) string {
-	// 1. 只接受超过两百字的长文本，避免把普通长标题误判为正文。
-	content := strings.Join(strings.Fields(strings.TrimSpace(detailTitle)), " ")
-	if len([]rune(content)) <= 200 {
-		return ""
-	}
-	return content
-}
-
 // weReadPublishedAt 把 Unix 秒转换为数据库统一上海时间文本。
 // 输入：timestamp 是文章发布时间秒。
 // 输出：返回 YYYY-MM-DD HH:MM:SS，非法时间返回空字符串。
@@ -874,7 +866,7 @@ func weReadPublishedAt(timestamp int64) string {
 	if timestamp <= 0 {
 		return ""
 	}
-	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	location := timezone.Beijing
 	return time.Unix(timestamp, 0).In(location).Format("2006-01-02 15:04:05")
 }
 

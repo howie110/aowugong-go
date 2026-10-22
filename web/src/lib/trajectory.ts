@@ -92,15 +92,6 @@ export const revokeTrajectoryDevice = (id: string) =>
     { method: "POST" },
     "撤销设备失败",
   );
-export function gpsLoggerConfig(origin: string, token: string) {
-  return {
-    url: `${origin}${base}/collect`,
-    method: "POST",
-    headers: `Content-Type: application/x-www-form-urlencoded\nAuthorization: Bearer ${token}`,
-    body: "timestamp=%TIMESTAMP&lat=%LAT&lon=%LON&acc=%ACC&alt=%ALT&spd=%SPD&dir=%DIR&prov=%PROV",
-  };
-}
-
 export const getTrajectoryProfile = (id: string) =>
   requestJSON<{ profile_path: string }>(
     `${base}/devices/${encodeURIComponent(id)}/profile`,

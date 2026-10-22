@@ -10,10 +10,12 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/howiedata/aowugong-go/internal/timezone"
 )
 
 var ErrInvalid = errors.New("invalid analytics input")
-var Shanghai = time.FixedZone("Asia/Shanghai", 8*3600)
+var Shanghai = timezone.Beijing
 
 // NormalizeURL 仅保存页面路径及允许的营销参数，不保留片段与任意查询数据。
 func NormalizeURL(raw string) (string, string, error) {

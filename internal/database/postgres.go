@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/config"
+	"github.com/howiedata/aowugong-go/internal/timezone"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 )
@@ -247,6 +248,6 @@ func RebindPostgres(query string) string {
 // 副作用：无。
 func TimestampText(value time.Time) string {
 	// 1. 统一转换到固定上海时区后去除亚秒，保持历史文本排序语义。
-	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	location := timezone.Beijing
 	return value.In(location).Format("2006-01-02 15:04:05")
 }

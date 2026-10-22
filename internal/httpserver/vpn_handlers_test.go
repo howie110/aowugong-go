@@ -37,7 +37,7 @@ func TestVPNRoutesSeparateViewerAndAdministratorPermissions(t *testing.T) {
 	}
 	vpnService := vpn.NewService(
 		vpn.NewRepository(db), vpn.NewSourceCatalog(directory),
-		vpn.NewDirectDistributor(""), "vpn-token-secret",
+		"", "vpn-token-secret",
 	)
 	handler := NewRouter(Dependencies{Auth: authService, RBAC: rbacService, VPN: vpnService})
 
@@ -121,7 +121,7 @@ func TestVPNSubscriptionUsesDeviceTokenWithoutLogin(t *testing.T) {
 	}
 	vpnService := vpn.NewService(
 		vpn.NewRepository(db), vpn.NewSourceCatalog(directory),
-		vpn.NewDirectDistributor("http://vpn.example.test"), "vpn-token-secret",
+		"http://vpn.example.test", "vpn-token-secret",
 	)
 	var subscriptionUserID int64
 	if err := db.QueryRowContext(ctx, `

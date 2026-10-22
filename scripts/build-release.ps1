@@ -1,60 +1,7 @@
-﻿param(
+param(
     [string]$Version = "dev-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 )
-
 $ErrorActionPreference = "Stop"
-$Root = Split-Path -Parent $PSScriptRoot
-$Package = "aowugong-go-$Version-linux-amd64"
-$Dist = Join-Path $Root "dist"
-$PackageDir = Join-Path $Dist $Package
-
-Push-Location $Root
-try {
-    Push-Location "web"
-    try {
-        npm ci
-        npm test
-        npm run build
-    }
-    finally {
-        Pop-Location
-    }
-
-    go test ./...
-    go vet ./...
-
-    Remove-Item -LiteralPath $PackageDir -Recurse -Force -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force (Join-Path $PackageDir "web") | Out-Null
-    New-Item -ItemType Directory -Force (Join-Path $PackageDir "migrations") | Out-Null
-    $env:CGO_ENABLED = "0"
-    $env:GOOS = "linux"
-    $env:GOARCH = "amd64"
-    go build -trimpath -ldflags "-s -w" -o (Join-Path $PackageDir "aowugong") ./cmd/aowugong
-    go build -trimpath -ldflags "-s -w" -o (Join-Path $PackageDir "aowugong-migrate") ./cmd/migrate
-    Copy-Item "web/dist" (Join-Path $PackageDir "web/dist") -Recurse
-    Copy-Item "migrations/postgres" (Join-Path $PackageDir "migrations/postgres") -Recurse
-    Copy-Item "init", "scripts" $PackageDir -Recurse
-    # Include only committed skill sources, never local credentials or caches.
-    $SkillArchive = [IO.Path]::GetTempFileName()
-    try {
-        git archive --format=tar --output=$SkillArchive HEAD skills
-        if ($LASTEXITCODE -ne 0) { throw "Failed to archive skill sources" }
-        tar -xf $SkillArchive -C $PackageDir
-        if ($LASTEXITCODE -ne 0) { throw "Failed to extract skill sources" }
-    }
-    finally {
-        Remove-Item -LiteralPath $SkillArchive -Force
-    }
-    Copy-Item "README.md" $PackageDir
-    [IO.File]::WriteAllText((Join-Path $PackageDir "VERSION"), "$Version`n")
-
-    $Archive = Join-Path $Dist "$Package.tar.gz"
-    Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue
-    tar -C $Dist -czf $Archive $Package
-    $Hash = (Get-FileHash -Algorithm SHA256 $Archive).Hash.ToLowerInvariant()
-    [IO.File]::WriteAllText("$Archive.sha256", "$Hash  $Package.tar.gz`n")
-    Write-Host "Release artifact: $Archive"
-}
-finally {
-    Pop-Location
-}
+# 保留已有调用方式；验证、文件清单与打包只在 Node 入口维护。
+node (Join-Path $PSScriptRoot "build-release.mjs") $Version
+if ($LASTEXITCODE -ne 0) { throw "Release build failed ($LASTEXITCODE)" }

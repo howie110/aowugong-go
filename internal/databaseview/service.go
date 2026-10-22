@@ -129,7 +129,7 @@ func (s *Service) Summary(ctx context.Context) (Summary, error) {
 		if err != nil {
 			return Summary{}, err
 		}
-		count, err := s.countRows(ctx, name, "", columns)
+		count, err := s.countRows(ctx, name, "")
 		if err != nil {
 			return Summary{}, err
 		}
@@ -161,7 +161,7 @@ func (s *Service) Rows(ctx context.Context, table, search string, page, pageSize
 
 	// 2. 构造参数化搜索、总数和稳定倒序分页查询。
 	whereSQL, searchArgs := buildSearch(columns, search)
-	total, err := s.countRows(ctx, table, whereSQL, columns, searchArgs...)
+	total, err := s.countRows(ctx, table, whereSQL, searchArgs...)
 	if err != nil {
 		return RowsPage{}, err
 	}
@@ -203,7 +203,7 @@ func (s *Service) ExportCSV(ctx context.Context, table, search string, output io
 		return ErrSearchTooLong
 	}
 	whereSQL, args := buildSearch(columns, search)
-	total, err := s.countRows(ctx, table, whereSQL, columns, args...)
+	total, err := s.countRows(ctx, table, whereSQL, args...)
 	if err != nil {
 		return err
 	}
@@ -409,18 +409,15 @@ func (s *Service) columns(ctx context.Context, table string) ([]Column, error) {
 }
 
 // countRows 统计指定白名单表的筛选行数。
-// 输入：ctx 控制查询，table 已校验，whereSQL 由内部构造，columns 用于保留函数契约，args 是搜索参数。
+// 输入：ctx 控制查询，table 已校验，whereSQL 由内部构造，args 是搜索参数。
 // 输出：返回匹配行数。
 // 副作用：只读 PostgreSQL。
 func (s *Service) countRows(
 	ctx context.Context,
 	table string,
 	whereSQL string,
-	columns []Column,
 	args ...any,
 ) (int64, error) {
-	// 1. 保留字段参数用于强调 whereSQL 只可由当前模块按字段清单生成。
-	_ = columns
 	var count int64
 	if err := s.db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM "+quoteIdentifier(table)+whereSQL, args...).Scan(&count); err != nil {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/howiedata/aowugong-go/internal/client"
 	"github.com/howiedata/aowugong-go/internal/config"
+	"github.com/howiedata/aowugong-go/internal/timezone"
 )
 
 const monitorProbeTimeout = 10 * time.Second
@@ -28,10 +29,7 @@ type Service struct {
 // 副作用：无。
 func NewService(repository *Repository, monitorClient *client.MonitoringClient, cfg config.Clients) *Service {
 	// 1. 固定业务时区并保存显式依赖。
-	location, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		location = time.Local
-	}
+	location := timezone.Shanghai
 	return &Service{repository: repository, client: monitorClient, config: cfg, now: time.Now, location: location}
 }
 

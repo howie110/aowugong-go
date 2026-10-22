@@ -107,3 +107,33 @@ test("未保存内容阻止工作台切换，确认后放行并清理监听", ()
     assert.equal(api.requestWorkbenchNavigation(), true);
   } finally { global.window = previous; }
 });
+
+test("所有工作台路径双向一致，保留既有 URL、斜杠和未知路径回退", () => {
+  const { api } = client("lib/finance.ts", () => Response.json({}));
+  const special = { overview: '/work', work: '/work/navigation', blogStatus: '/work/content/status', stockAnalysis: '/stock-analysis', articleAnalysis: '/article-analysis', articleFetch: '/article-fetch', trajectory: '/work/personal/trajectory', receiptSplit: '/work/website/receipt-split', analytics: '/work/website/analytics', chatArchive: '/work/content/chat-archive', vpnDistribution: '/vpn-distribution', vpnResources: '/vpn-resources' };
+  const paths = new Set();
+  for (const key of Object.keys(api.pagePermissionMap)) {
+    const expected = special[key] || `/${key}`;
+    assert.equal(api.getFinancePagePath(key), expected);
+    assert.equal(api.getFinancePageFromPath(expected), key);
+    assert.equal(api.getFinancePageFromPath(`/${expected}//`), key);
+    assert.ok(!paths.has(expected)); paths.add(expected);
+  }
+  for (const path of ['', '/', '/unknown']) assert.equal(api.getFinancePageFromPath(path), 'overview');
+});
+
+test("收拢后的页面接口保留 ApiError 身份和状态", async () => {
+  const { api } = client("lib/finance.ts", () => new Response("expired", { status: 401 }));
+  await assert.rejects(api.fetchFinancePage("overview"), error => error instanceof api.ApiError && error.status === 401 && error.message === "获取页面数据失败");
+});
+
+test("订阅增删保留 JSON 请求与返回值，麻将参数仍编码", async () => {
+  const { api, calls } = client("lib/subscriptions.ts", () => Response.json({ deleted: true }));
+  await api.updateSubscription(7, { service_name: "test" });
+  assert.equal(calls[0].init.method, "PUT");
+  assert.equal(JSON.parse(calls[0].init.body).service_name, "test");
+  assert.equal((await api.deleteSubscription(7)).deleted, true);
+  const mahjong = client("lib/mahjong.ts", () => Response.json({}));
+  await mahjong.api.fetchMahjongReport("9&x=1");
+  assert.equal(mahjong.calls[0].url, "/api/v1/mahjong/report?table_fee=9%26x%3D1");
+});

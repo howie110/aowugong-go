@@ -287,3 +287,11 @@ func TestAnalysisPromptTemplateKeepsFinalV9Rules(t *testing.T) {
 		t.Error("prompt still uses the shortened risks example")
 	}
 }
+
+// buildSignalStats 按概念组把推荐和风险合并为每个标的一行。
+// 输入：rows 是目标天数内分析行，groups 是已持久化的概念组和别名。
+// 输出：按总次数和最近出现时间倒序返回信号榜。
+// 副作用：无。
+func buildSignalStats(rows []analysisRow, groups []SignalGroup) []SignalStat {
+	return buildSignalStatsForDateRange(rows, groups, "", "")
+}

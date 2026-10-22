@@ -1,4 +1,4 @@
-import { authorizedFetch } from "@/lib/auth";
+import { requestJSON } from "@/lib/request";
 
 export type SubscriptionRecord = {
   id: number;
@@ -27,47 +27,27 @@ export type SubscriptionRecordPayload = {
 };
 
 export async function fetchSubscriptions() {
-  const response = await authorizedFetch("/api/v1/subscriptions/records");
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(data?.detail || "读取订阅记录失败");
-  }
-  return (await response.json()) as SubscriptionRecord[];
+  return requestJSON<SubscriptionRecord[]>("/api/v1/subscriptions/records", {}, "读取订阅记录失败");
 }
 
 export async function createSubscription(payload: SubscriptionRecordPayload) {
-  const response = await authorizedFetch("/api/v1/subscriptions/records", {
+  return requestJSON<SubscriptionRecord>("/api/v1/subscriptions/records", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(data?.detail || "新增订阅记录失败");
-  }
-  return (await response.json()) as SubscriptionRecord;
+  }, "新增订阅记录失败");
 }
 
 export async function updateSubscription(recordId: number, payload: SubscriptionRecordPayload) {
-  const response = await authorizedFetch(`/api/v1/subscriptions/records/${recordId}`, {
+  return requestJSON<SubscriptionRecord>(`/api/v1/subscriptions/records/${recordId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(data?.detail || "更新订阅记录失败");
-  }
-  return (await response.json()) as SubscriptionRecord;
+  }, "更新订阅记录失败");
 }
 
 export async function deleteSubscription(recordId: number) {
-  const response = await authorizedFetch(`/api/v1/subscriptions/records/${recordId}`, {
+  return requestJSON<{ deleted: boolean }>(`/api/v1/subscriptions/records/${recordId}`, {
     method: "DELETE",
-  });
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(data?.detail || "删除订阅记录失败");
-  }
-  return (await response.json()) as { deleted: boolean };
+  }, "删除订阅记录失败");
 }

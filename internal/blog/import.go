@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/howiedata/aowugong-go/internal/timezone"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
@@ -20,10 +21,7 @@ func ParseLegacyStatuses(source []byte) ([]StatusInput, error) {
 	if err != nil {
 		return nil, err
 	}
-	location, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		return nil, err
-	}
+	location := timezone.Shanghai
 	result := []StatusInput{}
 	buffer := []string{}
 	seen := map[string]bool{}

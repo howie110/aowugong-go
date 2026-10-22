@@ -49,11 +49,9 @@ type analysisModelRuntime struct {
 
 // ServiceOptions 描述投资文章服务的当前进程文章来源和模型配置。
 type ServiceOptions struct {
-	Model                  string
 	FeedURL                string
 	Articles               ArticleGateway
 	WeRead                 *WeReadSource
-	Analyzer               AnalysisGateway
 	AnalysisModels         []AnalysisModelConfig
 	DefaultAnalysisModelID string
 	Now                    func() time.Time
@@ -73,18 +71,9 @@ type Service struct {
 // 输出：返回文章服务。
 // 副作用：无。
 func NewService(repository *Repository, options ServiceOptions) *Service {
-	// 1. 兼容只传旧 Analyzer 的测试和调用方，并构造稳定模型目录。
-	if options.Model == "" {
-		options.Model = "deepseek-v4-pro"
-	}
+	// 1. 所有调用方统一使用显式模型目录。
 	options.FeedURL = strings.TrimSpace(options.FeedURL)
-	models := append([]AnalysisModelConfig(nil), options.AnalysisModels...)
-	if len(models) == 0 && options.Analyzer != nil {
-		models = append(models, AnalysisModelConfig{
-			ID: "legacy:" + options.Model, Provider: "deepseek", Model: options.Model,
-			Label: options.Model, Analyzer: options.Analyzer,
-		})
-	}
+	models := options.AnalysisModels
 	runtimes := make(map[string]analysisModelRuntime, len(models))
 	order := make([]string, 0, len(models))
 	for _, model := range models {

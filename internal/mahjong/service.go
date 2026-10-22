@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/howiedata/aowugong-go/internal/money"
+	"github.com/howiedata/aowugong-go/internal/timezone"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -251,7 +252,7 @@ func parseExcelDate(value string) (string, error) {
 	// 1. 尝试常见日期文本格式。
 	value = strings.TrimSpace(strings.ReplaceAll(value, "/", "-"))
 	for _, layout := range []string{"2006-01-02", "2006-1-2", "2006-01-02 15:04:05"} {
-		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+		if parsed, err := time.ParseInLocation(layout, value, timezone.Shanghai); err == nil {
 			return parsed.Format(dateLayout), nil
 		}
 	}

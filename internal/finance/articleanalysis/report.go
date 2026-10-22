@@ -149,14 +149,6 @@ type aggregatedSignal struct {
 	LatestAt string
 }
 
-// buildSignalStats 按概念组把推荐和风险合并为每个标的一行。
-// 输入：rows 是目标天数内分析行，groups 是已持久化的概念组和别名。
-// 输出：按总次数和最近出现时间倒序返回信号榜。
-// 副作用：无。
-func buildSignalStats(rows []analysisRow, groups []SignalGroup) []SignalStat {
-	return buildSignalStatsForDateRange(rows, groups, "", "")
-}
-
 // buildSignalStatsForDateRange 按概念组聚合信号，并可固定每日趋势的起止日期。
 // 输入：rows 和 groups 构成排行榜，historyStart 与 historyEnd 为空时使用数据自身边界。
 // 输出：返回带连续每日净数曲线的信号榜。

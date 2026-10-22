@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/howiedata/aowugong-go/internal/timezone"
 )
 
 var (
@@ -47,7 +49,7 @@ func buildArticleKey(sourceID int64, identities ...string) string {
 func parseFeedTime(value string) string {
 	// 1. 按常见格式顺序尝试解析。
 	value = strings.TrimSpace(value)
-	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	location := timezone.Beijing
 	for _, layout := range []string{time.RFC1123Z, time.RFC1123, time.RFC822Z, time.RFC822, time.RFC3339} {
 		parsed, err := time.Parse(layout, value)
 		if err == nil {

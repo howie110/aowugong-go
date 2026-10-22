@@ -164,7 +164,7 @@ func TestRegroupSignalSourcesRetriesWhenResultStillHasTooManyGroups(t *testing.T
 	gateway := &sequenceSignalRegroupingGateway{responses: []string{string(tooManyJSON), string(mergedJSON)}}
 
 	// 2. 首次组数超限必须触发带原因的第二次请求。
-	service := NewService(nil, ServiceOptions{Analyzer: gateway})
+	service := NewService(nil, ServiceOptions{AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: gateway}}})
 	model := service.analysisModels[service.analysisModelOrder[0]]
 	result, err := service.regroupSignalSources(context.Background(), sources, model)
 	if err != nil {
@@ -200,7 +200,7 @@ func TestRegroupSignalSourcesRetriesWhenSingletonGroupsDominate(t *testing.T) {
 	gateway := &sequenceSignalRegroupingGateway{responses: []string{string(overfineJSON), string(mergedJSON)}}
 
 	// 2. 组数虽低于四十，但单别名占比过高仍必须重试。
-	service := NewService(nil, ServiceOptions{Analyzer: gateway})
+	service := NewService(nil, ServiceOptions{AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: gateway}}})
 	model := service.analysisModels[service.analysisModelOrder[0]]
 	result, err := service.regroupSignalSources(context.Background(), sources, model)
 	if err != nil {
@@ -237,7 +237,7 @@ func TestServiceRebuildSignalGroupsDryRunDoesNotWriteDatabase(t *testing.T) {
 		`{"canonical_name":"贵金属","type":"commodity","sources":[{"source_id":"alias:0","confidence":0.95}]}],"pending":[]}`}
 
 	// 2. 只读预演应返回可审查摘要，并在提示词中明确全局收敛目标。
-	service := NewService(NewRepository(db), ServiceOptions{Model: "test-model", Analyzer: gateway})
+	service := NewService(NewRepository(db), ServiceOptions{AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: gateway}}})
 	result, err := service.RebuildSignalGroups(context.Background(), 60, false)
 	if err != nil {
 		t.Fatalf("RebuildSignalGroups() error = %v", err)

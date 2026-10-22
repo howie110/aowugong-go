@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="${APP_ROOT:-/opt/aowugong-go}"
 RUN_USER="${RUN_USER:-aowugong}"
 RUN_GROUP="${RUN_GROUP:-aowugong}"
+SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 SERVICE_NAME="aowugong-go"
 
 require_root
@@ -33,7 +34,7 @@ render_service() {
   local release_path="$1"
   sed -e "s|@APP_ROOT@|$APP_ROOT|g" -e "s|@RUN_USER@|$RUN_USER|g" -e "s|@RUN_GROUP@|$RUN_GROUP|g" \
     "$release_path/init/systemd/aowugong-go.service" > "$temporary_service"
-  install -m 0644 "$temporary_service" "/etc/systemd/system/${SERVICE_NAME}.service"
+  install -m 0644 "$temporary_service" "$SYSTEMD_UNIT_DIR/${SERVICE_NAME}.service"
 }
 
 # restore_current 在回滚失败时恢复操作前版本。

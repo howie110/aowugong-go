@@ -61,15 +61,6 @@ func NewGitStore(token string) *GitStore {
 	return &GitStore{token: strings.TrimSpace(token), runner: execRunner{}}
 }
 
-// newGitStore 创建可替换命令执行器的存储器。
-// 输入：token 是测试令牌，runner 执行 Git 命令。
-// 输出：返回可测试存储器。
-// 副作用：无。
-func newGitStore(token string, runner commandRunner) *GitStore {
-	// 1. 保存显式依赖供隔离测试使用。
-	return &GitStore{token: strings.TrimSpace(token), runner: runner}
-}
-
 // Create 首次克隆一个 GitHub 裸仓库。
 // 输入：ctx 控制网络操作，repository 是白名单仓库，target 是最终目录。
 // 输出：克隆并原子放置成功返回 nil。

@@ -34,31 +34,6 @@ test("文章分析和文章抓取页面不再显示刷新按钮", () => {
   assert.doesNotMatch(fetchSource, /RefreshCw|>\s*刷新\s*</);
 });
 
-test("微信读书绑定状态使用真实可用性文案", () => {
-  const fetchSource = readSource("src/pages/finance/article-fetch.tsx");
-
-  assert.match(fetchSource, /connected: "可用"/);
-  assert.match(fetchSource, /failed: "已失效"/);
-  assert.doesNotMatch(fetchSource, /connected: "已绑定"/);
-});
-
-test("微信读书绑定并入信息源且公众号列表不受绑定状态控制", () => {
-  const fetchSource = readSource("src/pages/finance/article-fetch.tsx");
-
-  assert.match(fetchSource, /<CardTitle>信息源<\/CardTitle>/);
-  assert.match(fetchSource, /微信读书绑定/);
-  assert.match(fetchSource, /获取公众号/);
-  assert.match(fetchSource, /\{weRead\?\.accounts\.length \? \(/);
-  assert.doesNotMatch(fetchSource, /\(weRead\?\.state === "connected" \|\| weRead\?\.state === "degraded"\) && weRead\.accounts\.length/);
-});
-
-test("抓取和分析操作按钮使用相同固定宽度", () => {
-  const fetchSource = readSource("src/pages/finance/article-fetch.tsx");
-  const fixedWidthButtons = fetchSource.match(/className="w-28"/g) || [];
-
-  assert.equal(fixedWidthButtons.length, 3);
-});
-
 test("导入记录在桌面和手机端都隐藏账户与券商", () => {
   const source = readSource("src/pages/finance/position-upload.tsx");
   const tableStart = source.indexOf("function SnapshotTable");

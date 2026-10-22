@@ -1,4 +1,4 @@
-import { authorizedFetch } from "@/lib/auth";
+import { requestJSON } from "@/lib/request";
 
 export type MahjongRecord = {
   id: number;
@@ -98,16 +98,11 @@ export type MahjongRecordWriteResponse = {
 };
 
 export async function fetchMahjongReport(tableFee = "9") {
-  const response = await authorizedFetch(`/api/v1/mahjong/report?table_fee=${encodeURIComponent(tableFee)}`);
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(data?.detail || "读取麻将战绩失败");
-  }
-  return (await response.json()) as MahjongReport;
+  return requestJSON<MahjongReport>(`/api/v1/mahjong/report?table_fee=${encodeURIComponent(tableFee)}`, {}, "读取麻将战绩失败");
 }
 
 export async function saveMahjongRecord(playedDate: string, resultAmount: string) {
-  const response = await authorizedFetch("/api/v1/mahjong/records/save", {
+  return requestJSON<MahjongRecordWriteResponse>("/api/v1/mahjong/records/save", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -116,10 +111,5 @@ export async function saveMahjongRecord(playedDate: string, resultAmount: string
       played_date: playedDate,
       result_amount: resultAmount,
     }),
-  });
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(data?.detail || "保存麻将战绩失败");
-  }
-  return (await response.json()) as MahjongRecordWriteResponse;
+  }, "保存麻将战绩失败");
 }

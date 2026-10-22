@@ -1,4 +1,4 @@
-import { authorizedFetch } from "@/lib/auth";
+import { requestJSON } from "@/lib/request";
 
 export type WeReadMetric = {
   label: string;
@@ -75,25 +75,14 @@ export type WeReadHeatmapData = {
   heatmap: WeReadHeatmap;
 };
 
-async function fetchWeReadApi<T>(url: string, fallbackMessage: string): Promise<T> {
-  const response = await authorizedFetch(url);
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(data?.detail || fallbackMessage);
-  }
-
-  return (await response.json()) as T;
-}
-
 export function fetchWeReadSummary(): Promise<WeReadSummaryData> {
-  return fetchWeReadApi<WeReadSummaryData>("/api/v1/weread/summary", "获取微信读书指标失败");
+  return requestJSON<WeReadSummaryData>("/api/v1/weread/summary", {}, "获取微信读书指标失败");
 }
 
 export function fetchWeReadProgress(): Promise<WeReadProgressData> {
-  return fetchWeReadApi<WeReadProgressData>("/api/v1/weread/progress", "获取微信读书进度失败");
+  return requestJSON<WeReadProgressData>("/api/v1/weread/progress", {}, "获取微信读书进度失败");
 }
 
 export function fetchWeReadHeatmap(): Promise<WeReadHeatmapData> {
-  return fetchWeReadApi<WeReadHeatmapData>("/api/v1/weread/heatmap", "获取微信读书热力图失败");
+  return requestJSON<WeReadHeatmapData>("/api/v1/weread/heatmap", {}, "获取微信读书热力图失败");
 }
