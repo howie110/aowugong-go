@@ -122,6 +122,12 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.Auth != nil && deps.RBAC != nil && deps.Finance != nil {
 		registerFinanceRoutes(api, deps.Auth, deps.RBAC, deps.Finance)
 	}
+	if deps.Auth != nil && deps.RBAC != nil && deps.Notification != nil {
+		registerNotificationHistoryRoutes(api, deps.Auth, deps.RBAC, deps.Notification)
+	}
+	if deps.Auth != nil && deps.RBAC != nil {
+		registerNotificationExternalRoutes(api, deps.Auth, deps.RBAC, deps.NotificationTokens)
+	}
 	if deps.Auth != nil && deps.RBAC != nil && deps.Position != nil {
 		registerPositionRoutes(api, deps.Auth, deps.RBAC, deps.Position)
 	}

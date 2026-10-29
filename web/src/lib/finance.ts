@@ -248,3 +248,68 @@ export { ApiError } from "@/lib/request";
 export async function fetchFinancePage(pageKey: FinancePageKey): Promise<FinancePageData> {
   return requestJSON<FinancePageData>(pageEndpointMap[pageKey], {}, "获取页面数据失败");
 }
+
+export type NotificationLogEntry = {
+  id: number;
+  channel: string;
+  title: string;
+  message: string;
+  status: string;
+  error_message: string;
+  sent_at: string;
+  source: string;
+  request_id: string;
+};
+
+export type NotificationLogPage = {
+  items: NotificationLogEntry[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type NotificationLogFilters = {
+  q?: string;
+  status?: string;
+  category?: string;
+  page?: number;
+  pageSize?: number;
+};
+
+/** fetchNotificationLogs 读取微信发送历史的分页和筛选结果。 */
+export function fetchNotificationLogs(filters: NotificationLogFilters = {}) {
+  // 1. 只把非空筛选拼入查询，分页参数始终显式传递。
+  const query = new URLSearchParams();
+  if (filters.q?.trim()) {
+    query.set("q", filters.q.trim());
+  }
+  if (filters.status) {
+    query.set("status", filters.status);
+  }
+  if (filters.category) {
+    query.set("category", filters.category);
+  }
+  query.set("page", String(filters.page ?? 1));
+  query.set("page_size", String(filters.pageSize ?? 20));
+  return requestJSON<NotificationLogPage>(
+    `/api/v1/finance/notifications/logs?${query.toString()}`, {}, "读取通知历史失败",
+  );
+}
+
+export type NotificationExternalConfig = {
+  endpoint: string;
+  project: string;
+  configured: boolean;
+  token: string;
+  max_message_bytes: number;
+  max_request_bytes: number;
+  rate_limit_per_minute: number;
+};
+
+/** fetchNotificationExternalConfig 读取外部服务调用通知 API 的固定配置。 */
+export function fetchNotificationExternalConfig() {
+  // 1. 该接口只对通知页权限开放，返回 external 项目 Token 和限制。
+  return requestJSON<NotificationExternalConfig>(
+    "/api/v1/finance/notifications/external", {}, "读取外部调用配置失败",
+  );
+}

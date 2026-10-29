@@ -22,12 +22,19 @@ type Result struct {
 	CheckedAt    *string `json:"checked_at"`
 }
 
+// Transition 描述一个目标相对上一轮的状态变化。
+type Transition struct {
+	Result         Result
+	PreviousStatus string
+}
+
 // CheckResult 描述一轮全部目标探测汇总。
 type CheckResult struct {
-	CheckedCount int      `json:"checked_count"`
-	UpCount      int      `json:"up_count"`
-	DownCount    int      `json:"down_count"`
-	Results      []Result `json:"results"`
+	CheckedCount int          `json:"checked_count"`
+	UpCount      int          `json:"up_count"`
+	DownCount    int          `json:"down_count"`
+	Results      []Result     `json:"results"`
+	Transitions  []Transition `json:"-"`
 }
 
 // Summary 描述服务监控页面数据。

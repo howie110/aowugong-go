@@ -38,19 +38,33 @@ func NewService(repository *Repository, monitorClient *client.MonitoringClient, 
 // 输出：返回正常、异常和总目标数量。
 // 副作用：调用外部 HTTP/API，并写入应用 PostgreSQL。
 func (s *Service) CheckAll(ctx context.Context) (CheckResult, error) {
-	// 1. 顺序探测小型目标清单，避免同时给外部服务制造突发请求。
+	// 1. 探测前读取上一轮状态，用于判断故障和恢复。
 	targets := BuildTargets(s.config)
+	codes := make([]string, 0, len(targets))
+	for _, target := range targets {
+		codes = append(codes, target.Code)
+	}
+	previous, err := s.repository.Latest(ctx, codes)
+	if err != nil {
+		return CheckResult{}, fmt.Errorf("读取上次监控结果: %w", err)
+	}
+
+	// 2. 顺序探测小型目标清单，避免同时给外部服务制造突发请求。
 	results := make([]Result, 0, len(targets))
+	transitions := make([]Transition, 0)
 	for _, target := range targets {
 		result := s.checkTarget(ctx, target)
 		if err := s.repository.Insert(ctx, result); err != nil {
 			return CheckResult{}, fmt.Errorf("保存监控结果: %w", err)
 		}
+		if transition, changed := buildTransition(previous[target.Code], result); changed {
+			transitions = append(transitions, transition)
+		}
 		results = append(results, result)
 	}
 
-	// 2. 汇总 up/down 数量并返回同一批结果。
-	response := CheckResult{CheckedCount: len(results), Results: results}
+	// 3. 汇总 up/down 数量并返回同一批结果。
+	response := CheckResult{CheckedCount: len(results), Results: results, Transitions: transitions}
 	for _, result := range results {
 		if result.Status == "up" {
 			response.UpCount++
@@ -59,6 +73,22 @@ func (s *Service) CheckAll(ctx context.Context) (CheckResult, error) {
 		}
 	}
 	return response, nil
+}
+
+// buildTransition 判断本轮结果相对上一轮是否形成故障或恢复事件。
+// 输入：previous 是上一轮结果，current 是刚刚完成的结果。
+// 输出：状态变化时返回事件，连续相同状态返回 false。
+// 副作用：无。
+func buildTransition(previous Result, current Result) (Transition, bool) {
+	// 1. 首次发现或从正常变为异常时产生故障事件。
+	if current.Status == "down" && previous.Status != "down" {
+		return Transition{Result: current, PreviousStatus: previous.Status}, true
+	}
+	// 2. 从异常恢复为正常时产生恢复事件。
+	if current.Status == "up" && previous.Status == "down" {
+		return Transition{Result: current, PreviousStatus: previous.Status}, true
+	}
+	return Transition{}, false
 }
 
 // Summary 构建当前目标及最近一次结果的页面摘要。

@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { FinanceItem, FinanceMetric, FinancePageData } from "@/lib/finance";
+import { NotificationExternal } from "./notification-external";
+import { NotificationHistory } from "./notification-history";
 
 const metricIconMap = [Server, CalendarClock, ShieldCheck, Activity];
 
@@ -62,10 +64,14 @@ export function TradingContent({ pageData }: { pageData: FinancePageData }) {
 
 export function NotificationsContent({ pageData }: { pageData: FinancePageData }) {
   return (
-    <>
-      <InfoCard title="微信通知" value={pageData.receiver_count ? "已启用" : "未启用"} description="这里只显示状态，不在页面暴露 token。" />
-      <ItemListCard title="通知渠道" description="失败提醒和后续业务消息推送。" items={pageData.channels || []} icon="file" />
-    </>
+    <div className="space-y-4">
+      <div className="grid gap-4 xl:grid-cols-2">
+        <InfoCard title="微信通知" value={pageData.receiver_count ? "已启用" : "未启用"} description="这里只显示状态，不在页面暴露 token。" />
+        <ItemListCard title="通知渠道" description="失败提醒和后续业务消息推送。" items={pageData.channels || []} icon="file" />
+      </div>
+      <NotificationHistory />
+      <NotificationExternal />
+    </div>
   );
 }
 

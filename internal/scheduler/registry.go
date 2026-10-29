@@ -379,8 +379,23 @@ func (r *Registry) notifyFailure(name string, executionID int64, failedAt time.T
 		name, failedAt.Format("2006-01-02 15:04:05"), runErr.Error())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := r.notifier.Text(ctx, []string{"AOWUGONG", "JOB", "ERROR", name}, body); err != nil {
+	if err := r.notifier.Text(ctx, failureTitleParts(name), body); err != nil {
 		r.logger.Error("发送任务失败通知失败", "job", name, "error", err)
+	}
+}
+
+// failureTitleParts 按任务类型生成微信标题分类。
+// 输入：name 是任务名称。
+// 输出：返回“分类 / 对象”形式的标题层级。
+// 副作用：无。
+func failureTitleParts(name string) []string {
+	switch name {
+	case "check_service_monitors":
+		return []string{"监控", "服务异常"}
+	case "backup_postgres", "backup_github_code", "email_vaultwarden_backup":
+		return []string{"备份", name}
+	default:
+		return []string{"任务", name}
 	}
 }
 

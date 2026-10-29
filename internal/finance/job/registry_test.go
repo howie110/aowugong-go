@@ -71,15 +71,18 @@ func TestSyncInvestmentArticlesSkipsClassificationForManualRun(t *testing.T) {
 	}
 }
 
-type fakeMonitor struct{}
+type fakeMonitor struct {
+	result monitoring.CheckResult
+	err    error
+}
 
-// CheckAll 返回空监控摘要。
+// CheckAll 返回测试指定的监控摘要。
 // 输入：上下文。
-// 输出：返回零值成功摘要。
+// 输出：返回构造时指定的结果和错误。
 // 副作用：无。
-func (fakeMonitor) CheckAll(context.Context) (monitoring.CheckResult, error) {
-	// 1. 返回无异常的测试结果。
-	return monitoring.CheckResult{}, nil
+func (m fakeMonitor) CheckAll(context.Context) (monitoring.CheckResult, error) {
+	// 1. 返回测试配置的监控结果。
+	return m.result, m.err
 }
 
 type fakeSubscription struct {
@@ -131,15 +134,17 @@ func (b fakeGitHubBackuper) Backup(context.Context) (githubbackup.Result, error)
 }
 
 type captureNotification struct {
-	body string
+	body   string
+	titles [][]string
 }
 
-// Text 记录 GitHub 代码备份成功通知正文。
-// 输入：上下文、标题、正文和接收人。
+// Text 记录通知标题和正文。
+// 输入：上下文、标题层级、正文。
 // 输出：始终返回 nil。
-// 副作用：覆盖测试替身保存的正文。
-func (n *captureNotification) Text(_ context.Context, _ []string, body string) error {
-	// 1. 保存正文供断言。
+// 副作用：覆盖测试替身保存的正文并追加标题。
+func (n *captureNotification) Text(_ context.Context, title []string, body string) error {
+	// 1. 保存标题和正文供断言。
+	n.titles = append(n.titles, append([]string(nil), title...))
 	n.body = body
 	return nil
 }
@@ -344,6 +349,82 @@ func TestBackupGitHubCodeSendsSuccessSummary(t *testing.T) {
 	for _, fragment := range []string{"任务：backup_github_code", "时间：2026-08-09 04:00:00", "状态：执行成功", "信息：" + message} {
 		if !strings.Contains(notification.body, fragment) {
 			t.Errorf("notification = %q, missing %q", notification.body, fragment)
+		}
+	}
+}
+
+// TestCheckServiceMonitorsReportsDownTargets 验证异常服务会带回具体目标和原因，且不额外发送恢复消息。
+// 输入：一个从正常变为异常的监控结果。
+// 输出：任务返回包含服务名和原因的 error，不发送恢复通知。
+// 副作用：写入通知测试替身。
+func TestCheckServiceMonitorsReportsDownTargets(t *testing.T) {
+	reason := "HTTP 503"
+	down := monitoring.Result{
+		TargetCode: "vaultwarden", TargetName: "Vaultwarden",
+		TargetURL: "https://vault.aowugong.top/", Status: "down", ErrorMessage: &reason,
+	}
+	notification := &captureNotification{}
+	taskSet := &tasks{dependencies: Dependencies{
+		Monitoring: fakeMonitor{result: monitoring.CheckResult{
+			CheckedCount: 1, DownCount: 1, Results: []monitoring.Result{down},
+			Transitions: []monitoring.Transition{{Result: down, PreviousStatus: "up"}},
+		}},
+		Notification: notification,
+		Now:          func() time.Time { return time.Date(2026, 10, 29, 22, 0, 0, 0, time.Local) },
+	}}
+
+	message, err := taskSet.checkServiceMonitors(context.Background())
+	if err == nil {
+		t.Fatal("checkServiceMonitors() error = nil, want error")
+	}
+	if message != "检查=1，正常=0，异常=1" {
+		t.Errorf("message = %q", message)
+	}
+	for _, fragment := range []string{"发现 1 个服务异常", "Vaultwarden（vaultwarden）", "HTTP 503"} {
+		if !strings.Contains(err.Error(), fragment) {
+			t.Errorf("error = %q, missing %q", err.Error(), fragment)
+		}
+	}
+	if len(notification.titles) != 0 {
+		t.Fatalf("unexpected notifications: %v", notification.titles)
+	}
+}
+
+// TestCheckServiceMonitorsSendsRecovery 验证恢复时发送一条合并恢复通知。
+// 输入：一个从异常恢复为正常的监控结果。
+// 输出：任务成功，并发送“监控 / 服务恢复”标题和恢复正文。
+// 副作用：写入通知测试替身。
+func TestCheckServiceMonitorsSendsRecovery(t *testing.T) {
+	up := monitoring.Result{
+		TargetCode: "vaultwarden", TargetName: "Vaultwarden",
+		TargetURL: "https://vault.aowugong.top/", Status: "up",
+	}
+	notification := &captureNotification{}
+	taskSet := &tasks{dependencies: Dependencies{
+		Monitoring: fakeMonitor{result: monitoring.CheckResult{
+			CheckedCount: 1, UpCount: 1, Results: []monitoring.Result{up},
+			Transitions: []monitoring.Transition{{Result: up, PreviousStatus: "down"}},
+		}},
+		Notification: notification,
+		Now:          func() time.Time { return time.Date(2026, 10, 29, 22, 10, 0, 0, time.Local) },
+	}}
+
+	message, err := taskSet.checkServiceMonitors(context.Background())
+	if err != nil {
+		t.Fatalf("checkServiceMonitors() error = %v", err)
+	}
+	if message != "检查=1，正常=1，异常=0" {
+		t.Errorf("message = %q", message)
+	}
+	if len(notification.titles) != 1 {
+		t.Fatalf("notifications = %v, want 1", notification.titles)
+	}
+	if got := strings.Join(notification.titles[0], "/"); got != "监控/服务恢复" {
+		t.Errorf("title = %q", got)
+	}
+	for _, fragment := range []string{"时间：2026-10-29 22:10:00", "Vaultwarden（vaultwarden）已恢复"} {
+		if !strings.Contains(notification.body, fragment) {
+			t.Errorf("body = %q, missing %q", notification.body, fragment)
 		}
 	}
 }

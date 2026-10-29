@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -198,10 +199,85 @@ func (t *tasks) checkServiceMonitors(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("检查服务监控: %w", err)
 	}
 	message := fmt.Sprintf("检查=%d，正常=%d，异常=%d", result.CheckedCount, result.UpCount, result.DownCount)
+	t.notifyMonitorRecoveries(ctx, result.Transitions)
 	if result.DownCount > 0 {
-		return message, fmt.Errorf("发现 %d 个服务异常", result.DownCount)
+		return message, fmt.Errorf("发现 %d 个服务异常：\n%s", result.DownCount, buildMonitorDownDetail(result.Results))
 	}
 	return message, nil
+}
+
+// notifyMonitorRecoveries 发送本轮服务恢复通知。
+// 输入：ctx 是任务上下文，transitions 是本轮状态变化。
+// 输出：无；通知失败只写日志，不改变任务结果。
+// 副作用：调用统一通知服务发送一条合并恢复消息。
+func (t *tasks) notifyMonitorRecoveries(ctx context.Context, transitions []monitoring.Transition) {
+	// 1. 未配置通知或没有恢复事件时直接结束。
+	if t.dependencies.Notification == nil || len(transitions) == 0 {
+		return
+	}
+	recovered := make([]monitoring.Transition, 0, len(transitions))
+	for _, transition := range transitions {
+		if transition.Result.Status == "up" && transition.PreviousStatus == "down" {
+			recovered = append(recovered, transition)
+		}
+	}
+	if len(recovered) == 0 {
+		return
+	}
+
+	// 2. 合并成一条恢复消息，避免逐个服务刷屏。
+	body := buildMonitorRecoveryBody(recovered, t.dependencies.Now())
+	if err := t.dependencies.Notification.Text(ctx, []string{"监控", "服务恢复"}, body); err != nil {
+		slog.Error("发送服务恢复通知失败", "error", err)
+	}
+}
+
+// buildMonitorDownDetail 把异常服务整理成简洁的多行正文。
+// 输入：results 是本轮全部监控结果。
+// 输出：每个异常服务一行，包含名称、编码和原因。
+// 副作用：无。
+func buildMonitorDownDetail(results []monitoring.Result) string {
+	var builder strings.Builder
+	for _, result := range results {
+		if result.Status != "down" {
+			continue
+		}
+		reason := "不可用"
+		if result.ErrorMessage != nil && strings.TrimSpace(*result.ErrorMessage) != "" {
+			reason = strings.TrimSpace(*result.ErrorMessage)
+		} else if result.HTTPStatus != nil {
+			reason = fmt.Sprintf("HTTP %d", *result.HTTPStatus)
+		}
+		fmt.Fprintf(&builder, "- %s（%s）：%s\n",
+			result.TargetName, result.TargetCode, truncateNotificationText(reason, 200))
+	}
+	return strings.TrimRight(builder.String(), "\n")
+}
+
+// buildMonitorRecoveryBody 生成恢复通知正文。
+// 输入：transitions 是恢复事件，now 是当前时间。
+// 输出：包含时间和恢复服务列表的文本。
+// 副作用：无。
+func buildMonitorRecoveryBody(transitions []monitoring.Transition, now time.Time) string {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "- 时间：%s\n", now.Format("2006-01-02 15:04:05"))
+	for _, transition := range transitions {
+		fmt.Fprintf(&builder, "- 服务：%s（%s）已恢复\n",
+			transition.Result.TargetName, transition.Result.TargetCode)
+	}
+	return strings.TrimRight(builder.String(), "\n")
+}
+
+// truncateNotificationText 按字符数截断通知文本。
+// 输入：value 是原始文本，limit 是最大字符数。
+// 输出：超长时截断并追加省略号。
+// 副作用：无。
+func truncateNotificationText(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit]) + "…"
 }
 
 // checkSubscriptionExpiryNotify 汇总所有当前有效订阅并发送微信月报。
@@ -220,7 +296,7 @@ func (t *tasks) checkSubscriptionExpiryNotify(ctx context.Context) (string, erro
 
 	// 2. 使用统一通知服务发送一条合并提醒。
 	body := buildSubscriptionBody(records, t.dependencies.Now(), t.dependencies.SubscriptionURL)
-	if err := t.dependencies.Notification.Text(ctx, []string{"AOWUGONG", "SUBSCRIPTION", "EXPIRY"}, body); err != nil {
+	if err := t.dependencies.Notification.Text(ctx, []string{"订阅", "到期月报"}, body); err != nil {
 		return "", fmt.Errorf("发送订阅到期提醒: %w", err)
 	}
 	return fmt.Sprintf("已发送有效订阅月报，共 %d 个", len(records)), nil
@@ -262,7 +338,7 @@ func (t *tasks) backupGitHubCode(ctx context.Context) (string, error) {
 		"- 信息：" + message,
 	}, "\n")
 	if err := t.dependencies.Notification.Text(ctx,
-		[]string{"AOWUGONG", "GITHUB", "BACKUP"}, body); err != nil {
+		[]string{"备份", "GitHub 周报"}, body); err != nil {
 		return message, fmt.Errorf("发送 GitHub 代码备份成功通知: %w", err)
 	}
 	return message, nil

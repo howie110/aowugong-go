@@ -76,6 +76,38 @@ func TestCheckTargetRetriesTransientFailure(t *testing.T) {
 	}
 }
 
+// TestBuildTransition 验证故障、恢复和连续相同状态的判断。
+// 输入：上一轮和当前的结果组合。
+// 输出：只在 up→down、首次 down、down→up 时产生事件，连续相同状态不产生。
+// 副作用：无。
+func TestBuildTransition(t *testing.T) {
+	tests := []struct {
+		name         string
+		previous     Result
+		current      Result
+		wantChanged  bool
+		wantPrevious string
+	}{
+		{name: "首次异常", previous: Result{}, current: Result{Status: "down"}, wantChanged: true},
+		{name: "正常转异常", previous: Result{Status: "up"}, current: Result{Status: "down"}, wantChanged: true, wantPrevious: "up"},
+		{name: "持续异常", previous: Result{Status: "down"}, current: Result{Status: "down"}, wantChanged: false},
+		{name: "异常恢复", previous: Result{Status: "down"}, current: Result{Status: "up"}, wantChanged: true, wantPrevious: "down"},
+		{name: "持续正常", previous: Result{Status: "up"}, current: Result{Status: "up"}, wantChanged: false},
+		{name: "首次正常", previous: Result{}, current: Result{Status: "up"}, wantChanged: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			transition, changed := buildTransition(test.previous, test.current)
+			if changed != test.wantChanged {
+				t.Fatalf("changed = %v, want %v", changed, test.wantChanged)
+			}
+			if changed && transition.PreviousStatus != test.wantPrevious {
+				t.Fatalf("previous status = %q, want %q", transition.PreviousStatus, test.wantPrevious)
+			}
+		})
+	}
+}
+
 // TestCheckTargetKeepsSecondFailure 验证普通服务连续失败时仍会告警。
 // 输入：始终返回 503 的本地 HTTP 服务。
 // 输出：最终监控状态为异常，并保留第二次 HTTP 状态。

@@ -58,6 +58,15 @@ func (s *Service) Text(ctx context.Context, titleParts []string, body string) er
 	return nil
 }
 
+// List 查询通知发送历史。
+// 输入：ctx 控制查询，filter 提供关键字、状态、分类和分页。
+// 输出：返回当前页、总数和分页信息。
+// 副作用：只读 PostgreSQL notification_log。
+func (s *Service) List(ctx context.Context, filter LogFilter) (LogPage, error) {
+	// 1. 复用通知仓储的唯一历史查询入口。
+	return s.repository.List(ctx, filter)
+}
+
 // buildTitle 清理标题层级并提供稳定默认标题。
 // 输入：parts 是可能包含空值的标题层级。
 // 输出：返回使用斜杠连接的非空标题。

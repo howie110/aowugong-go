@@ -629,6 +629,39 @@ Content-Type: application/json
 
 开发测试使用模拟发送器和隔离数据库，不读取真实通知凭证。部署只启用接口不代表授权发送测试消息；实际发消息验收仍需用户当次明确授权。
 
+### 9.2 微信通知分类与降噪
+
+通知只发需要处理的问题和恢复，不发周期性“一切正常”。标题统一为“分类 / 对象”，正文保留时间、对象、状态/影响和处理建议；企业微信仍限制 2048 UTF-8 字节。
+
+| 分类 | 触发 | 说明 |
+|---|---|---|
+| 任务 | 定时或手动任务失败 | 连续相同错误由 scheduler 去重 |
+| 备份 | PostgreSQL、GitHub、Vaultwarden 备份失败 | GitHub 周报在成功时仍发送 |
+| 监控 | 服务异常和恢复 | 异常正文列出具体目标和原因；恢复合并成一条；相同异常集合不重复 |
+| 订阅 | 每月有效订阅月报 | 低频、可操作 |
+| 项目 | 跨项目通知 API | `receipt-split` 等 |
+
+监控任务 `check_service_monitors` 在每轮探测前读取上一轮状态，只在 `up→down`、首次 `down`、`down→up` 时产生事件。异常由 scheduler 发一条带明细的失败通知；恢复由任务发一条合并恢复通知。同一组异常不会按调度频率重复发送。
+
+Vaultwarden 03:45 systemd 备份：
+
+- 失败通过现有跨项目微信 API 发送 `【server-alerts / Vaultwarden 备份失败】`，恢复发送 `【server-alerts / Vaultwarden 备份恢复】`。
+- `AOWUGONG_NOTIFICATION_TOKENS` 需要包含 `server-alerts` 项目 Token；修改后重启 aowugong-go 生效。
+- 告警脚本为 `/usr/local/sbin/vaultwarden-backup-notify`，配置为 `/etc/aowugong-alert.env`（0600），由 `scripts/install-vaultwarden-alert.sh` 安装。
+- 手动检查 payload：`/usr/local/sbin/vaultwarden-backup-notify dry-run`。
+- 状态文件位于 `/var/lib/aowugong-alert`；失败只发一次，恢复成功后清除。
+
+通知页同时提供发送历史：`GET /api/v1/finance/notifications/logs?q=&status=&category=&page=&page_size=`，数据来自 `notification_log`，支持关键字、状态（`success`/`failed`/`unknown`）、分类（任务、备份、监控、订阅、项目、其他）和分页；点击记录可查看完整正文。权限与通知页一致（`page:finance:notifications`）。所有发送尝试都会入库，包括发送失败的记录。
+
+外部服务调用复用现有 `POST /api/v1/notifications/wechat`，固定使用 `AOWUGONG_NOTIFICATION_TOKENS` 中的 `external` 项目 Token：
+
+- 请求体只接受 `request_id`、`title`、`content`，不支持文件或附件。
+- 限制与 9.1 相同：正文最多 2048 UTF-8 字节、请求最多 16 KiB、每分钟最多 10 次新发送。
+- 所有外部调用共用 `external` 来源，`request_id` 建议带服务名前缀，避免跨服务冲突。
+- 配置 `external` Token 并重启后，通知页的“外部调用 / MCP”卡片会显示请求地址、固定 Key、curl 示例和可复制的 MCP 工具描述；Key 等同于发送权限，只在管理员页面展示，不要发到公开渠道。
+
+本版本不引入 Gotify、邮件通知或其他推送服务。
+
 ## 10. 构建、部署和回滚
 
 ### 10.1 发布前验证

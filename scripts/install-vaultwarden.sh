@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VAULTWARDEN_VERSION="${VAULTWARDEN_VERSION:-1.37.2}"
 CADDY_VERSION="${CADDY_VERSION:-2.11.4-alpine}"
 VAULTWARDEN_HOST="${VAULTWARDEN_HOST:-vault.aowugong.top}"
@@ -244,6 +245,9 @@ EOF
     # 4. 重载 systemd 并只启用备份定时器。
     systemctl daemon-reload
     systemctl enable --now vaultwarden-backup.timer
+
+    # 5. 安装备份失败/恢复微信告警；配置缺失时只提示，不阻断安装。
+    "${SCRIPT_DIR}/install-vaultwarden-alert.sh"
 }
 
 # main 部署 Vaultwarden、域名 HTTPS 和自动备份任务。
