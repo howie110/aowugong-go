@@ -1,3 +1,5 @@
+import type { UserProfile } from "@/lib/auth";
+import { pagePermissionMap, type FinancePageKey } from "@/lib/finance";
 import { requestJSON } from "@/lib/request";
 
 export type RoleRead = {
@@ -36,4 +38,24 @@ export function addRoleToUser(userId: number, roleCode: string) {
     method: "POST",
     body: JSON.stringify({ role_code: roleCode }),
   });
+}
+
+// 只允许管理员访问的页面，dashboard 与侧栏共用同一份策略。
+export const adminOnlyPages = new Set<FinancePageKey>([
+  "trajectory",
+  "chatArchive",
+  "analytics",
+  "receiptSplit",
+]);
+
+/** canAccessPage 判断用户是否可以访问指定工作台页面。 */
+export function canAccessPage(user: UserProfile | null, pageKey: FinancePageKey): boolean {
+  const roles = user?.roles ?? [];
+  if (adminOnlyPages.has(pageKey)) {
+    return roles.includes("admin");
+  }
+  if (roles.includes("admin")) {
+    return true;
+  }
+  return (user?.permissions ?? []).includes(pagePermissionMap[pageKey]);
 }

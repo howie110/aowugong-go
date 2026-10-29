@@ -10,8 +10,17 @@ import (
 	"unicode/utf8"
 )
 
+const (
+	// MaxMessageBytes 是通知接口允许的完整消息最大 UTF-8 字节数。
+	MaxMessageBytes = 2048
+	// MaxRequestBodyBytes 是通知接口 JSON 请求体上限。
+	MaxRequestBodyBytes = 16 * 1024
+	// RateLimitPerMinute 是通知接口每分钟新发送上限。
+	RateLimitPerMinute = 10
+)
+
 var (
-	ErrInvalid             = errors.New("通知参数无效，完整消息不得超过 2048 UTF-8 字节")
+	ErrInvalid             = fmt.Errorf("通知参数无效，完整消息不得超过 %d UTF-8 字节", MaxMessageBytes)
 	ErrConflict            = errors.New("通知编号已用于不同内容")
 	ErrRateLimited         = errors.New("通知接口发送过于频繁")
 	ErrStorage             = errors.New("通知记录暂时不可用，请使用同一编号重试")
@@ -39,7 +48,7 @@ func (s *Service) Dispatch(ctx context.Context, in DispatchInput) (DispatchResul
 	title := buildTitle([]string{in.Source, in.Title})
 	message := fmt.Sprintf("【%s】\n\n%s", title, in.Content)
 	if !notificationIdentifier.MatchString(in.Source) || !notificationIdentifier.MatchString(in.RequestID) ||
-		in.Title == "" || in.Content == "" || strings.ContainsAny(in.Title, "\r\n") || strings.ContainsRune(message, '\x00') || !utf8.ValidString(message) || len(message) > 2048 {
+		in.Title == "" || in.Content == "" || strings.ContainsAny(in.Title, "\r\n") || strings.ContainsRune(message, '\x00') || !utf8.ValidString(message) || len(message) > MaxMessageBytes {
 		return DispatchResult{}, ErrInvalid
 	}
 	result, err := s.reserveDispatch(ctx, in, title, message)
@@ -83,7 +92,7 @@ func (s *Service) reserveDispatch(ctx context.Context, in DispatchInput, title, 
 		s.windowStart = now
 		s.windowCount = 0
 	}
-	if s.windowCount >= 10 {
+	if s.windowCount >= RateLimitPerMinute {
 		return DispatchResult{}, ErrRateLimited
 	}
 	result, err := s.repository.claimDispatch(ctx, in.Source, in.RequestID, title, message)

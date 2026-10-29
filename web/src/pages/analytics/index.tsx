@@ -1,3 +1,4 @@
+import { formatBeijingInputDateTime } from "@/lib/beijing-time";
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,8 +14,7 @@ import { Trend, Heatmap, WorldMap, number, timeLabel } from "./charts";
 import { RankCard, displayName, labels } from "./rank-card";
 
 const selectClass = "h-9 rounded-md border bg-background px-3 text-sm";
-const localInput = (date: Date) =>
-  new Date(date.getTime() + 8 * 3600000).toISOString().slice(0, 16);
+const localInput = (date: Date) => formatBeijingInputDateTime(date);
 const metricLabels: Record<keyof Metrics, string> = {
   visitors: "访客",
   visits: "访问次数",

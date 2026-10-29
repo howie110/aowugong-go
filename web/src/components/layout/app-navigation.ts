@@ -23,13 +23,12 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { type FinancePageKey, pagePermissionMap } from "@/lib/finance";
+import type { FinancePageKey } from "@/lib/finance";
 
 export type NavItem = {
   key: FinancePageKey;
   label: string;
   icon: LucideIcon;
-  permission: string;
 };
 
 export type NavGroup = {
@@ -47,8 +46,8 @@ export const navGroups: NavGroup[] = [
     label: "总览入口",
     icon: BarChart3,
     items: [
-      { key: "overview", label: "控制台", icon: BarChart3, permission: pagePermissionMap.overview },
-      { key: "work", label: "工作导航", icon: Compass, permission: pagePermissionMap.work },
+      { key: "overview", label: "控制台", icon: BarChart3 },
+      { key: "work", label: "工作导航", icon: Compass },
     ],
   },
   {
@@ -56,10 +55,10 @@ export const navGroups: NavGroup[] = [
     label: "投资研究",
     icon: TrendingUp,
     items: [
-      { key: "articleAnalysis", label: "投资文章分析", icon: Newspaper, permission: pagePermissionMap.articleAnalysis },
-      { key: "articleFetch", label: "投资文章抓取", icon: Rss, permission: pagePermissionMap.articleFetch },
-      { key: "stockAnalysis", label: "股票仓位分析", icon: TrendingUp, permission: pagePermissionMap.stockAnalysis },
-      { key: "positions", label: "股票仓位导入", icon: WalletCards, permission: pagePermissionMap.positions },
+      { key: "articleAnalysis", label: "投资文章分析", icon: Newspaper },
+      { key: "articleFetch", label: "投资文章抓取", icon: Rss },
+      { key: "stockAnalysis", label: "股票仓位分析", icon: TrendingUp },
+      { key: "positions", label: "股票仓位导入", icon: WalletCards },
     ],
   },
   {
@@ -67,9 +66,9 @@ export const navGroups: NavGroup[] = [
     label: "量化工具",
     icon: LineChart,
     items: [
-      { key: "backtest", label: "回测", icon: LineChart, permission: pagePermissionMap.backtest },
-      { key: "data", label: "数据", icon: Database, permission: pagePermissionMap.data },
-      { key: "trading", label: "交易", icon: PlayCircle, permission: pagePermissionMap.trading },
+      { key: "backtest", label: "回测", icon: LineChart },
+      { key: "data", label: "数据", icon: Database },
+      { key: "trading", label: "交易", icon: PlayCircle },
     ],
   },
   {
@@ -77,11 +76,11 @@ export const navGroups: NavGroup[] = [
     label: "内容服务",
     icon: BookOpen,
     items: [
-      { key: "blogStatus", label: "记录此刻", icon: Newspaper, permission: pagePermissionMap.blogStatus },
-      { key: "weread", label: "微信读书", icon: BookOpen, permission: pagePermissionMap.weread },
-      { key: "mahjong", label: "麻将战绩", icon: Trophy, permission: pagePermissionMap.mahjong },
-      { key: "subscriptions", label: "订阅管理", icon: CreditCard, permission: pagePermissionMap.subscriptions },
-      { key: "chatArchive", label: "聊天归档", icon: BookOpen, permission: pagePermissionMap.chatArchive },
+      { key: "blogStatus", label: "记录此刻", icon: Newspaper },
+      { key: "weread", label: "微信读书", icon: BookOpen },
+      { key: "mahjong", label: "麻将战绩", icon: Trophy },
+      { key: "subscriptions", label: "订阅管理", icon: CreditCard },
+      { key: "chatArchive", label: "聊天归档", icon: BookOpen },
     ],
   },
   {
@@ -89,32 +88,32 @@ export const navGroups: NavGroup[] = [
     label: "资源分享",
     icon: Share2,
     items: [
-      { key: "vpnDistribution", label: "VPN 分配", icon: UserCog, permission: pagePermissionMap.vpnDistribution },
-      { key: "vpnResources", label: "VPN 资源", icon: Wifi, permission: pagePermissionMap.vpnResources },
+      { key: "vpnDistribution", label: "VPN 分配", icon: UserCog },
+      { key: "vpnResources", label: "VPN 资源", icon: Wifi },
     ],
   },
   {
     id: "personal",
     label: "个人工具",
     icon: MapPin,
-    items: [{key:"trajectory",label:"我的轨迹",icon:MapPin,permission:pagePermissionMap.trajectory}],
+    items: [{key:"trajectory",label:"我的轨迹",icon:MapPin}],
   },
   {
     id: "website",
     label: "网站运维",
     icon: BarChart3,
-    items: [{ key: "analytics", label: "访问统计", icon: BarChart3, permission: pagePermissionMap.analytics }, { key:"receiptSplit",label:"小票分账",icon:TableProperties,permission:pagePermissionMap.receiptSplit }],
+    items: [{ key: "analytics", label: "访问统计", icon: BarChart3 }, { key:"receiptSplit",label:"小票分账",icon:TableProperties }],
   },
   {
     id: "system",
     label: "系统运维",
     icon: ShieldCheck,
     items: [
-      { key: "monitoring", label: "监控管理", icon: Radar, permission: pagePermissionMap.monitoring },
-      { key: "jobs", label: "定时任务", icon: CalendarClock, permission: pagePermissionMap.jobs },
-      { key: "notifications", label: "通知", icon: Bell, permission: pagePermissionMap.notifications },
-      { key: "database", label: "数据库", icon: TableProperties, permission: pagePermissionMap.database },
-      { key: "permissions", label: "权限管理", icon: UserCog, permission: pagePermissionMap.permissions },
+      { key: "monitoring", label: "监控管理", icon: Radar },
+      { key: "jobs", label: "定时任务", icon: CalendarClock },
+      { key: "notifications", label: "通知", icon: Bell },
+      { key: "database", label: "数据库", icon: TableProperties },
+      { key: "permissions", label: "权限管理", icon: UserCog },
     ],
   },
 ];

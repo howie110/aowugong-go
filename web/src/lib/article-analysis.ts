@@ -160,12 +160,6 @@ export async function fetchArticleSources() {
   return requestJson<ArticleSource[]>("/api/v1/finance/article-analysis/sources");
 }
 
-export async function fetchArticleFetchSummary() {
-  return requestJson<{ title: string; description: string; metrics: Array<{ label: string; value: string; detail: string }> }>(
-    "/api/v1/finance/article-analysis/fetch-summary",
-  );
-}
-
 export async function fetchArticleAnalysisModelSettings() {
   return requestJson<ArticleAnalysisModelSettings>("/api/v1/finance/article-analysis/model-settings");
 }
@@ -197,14 +191,10 @@ export async function fetchWeReadArticleQR() {
   return response.blob();
 }
 
-export async function refreshWeReadArticleAccounts() {
-  return requestJson<WeReadArticleAccount[]>("/api/v1/finance/article-analysis/weread/accounts/refresh", { method: "POST" });
-}
-
-export async function saveWeReadArticleAccountSettings(accountId: string, fetchIntervalMinutes: number, fetchLimit: number) {
+export async function saveWeReadArticleAccountSettings(accountId: string, fetchIntervalMinutes: number, fetchLimit: number, enabled: boolean) {
   return requestJson<{ status: string }>(`/api/v1/finance/article-analysis/weread/accounts/${encodeURIComponent(accountId)}`, {
     method: "PATCH",
-    body: JSON.stringify({ fetch_interval_minutes: fetchIntervalMinutes, fetch_limit: fetchLimit }),
+    body: JSON.stringify({ fetch_interval_minutes: fetchIntervalMinutes, fetch_limit: fetchLimit, enabled }),
   });
 }
 

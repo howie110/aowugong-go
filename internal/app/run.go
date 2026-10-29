@@ -142,8 +142,8 @@ func buildRuntime(ctx context.Context, cfg config.Config) (*appRuntime, error) {
 	}
 
 	// 2. 图片域名使用私有 OSS 只读身份，不影响工作台主站启动路径。
-	if len(cfg.NotificationTokens) > 0 && !client.NewWeComBotClient(cfg.Clients.WeComBot, nil).Configured() {
-		return nil, fmt.Errorf("启用通知接口必须配置有效的 WECOM_BOT_WEBHOOK_URL")
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 	pictureHandler, err := newPictureHandler(cfg)
 	if err != nil {
@@ -392,10 +392,10 @@ func newJobRegistry(cfg config.Config, db *sql.DB, services taskServices) (*sche
 	// 1. 对未经过 Config.Load 的测试配置补齐备份默认值。
 	backupDir, backupRetention := cfg.Storage.BackupDir, cfg.Storage.BackupRetention
 	if backupDir == "" {
-		backupDir = "storage/backup"
+		backupDir = config.DefaultBackupDir
 	}
 	if backupRetention < 1 {
-		backupRetention = 7
+		backupRetention = config.DefaultBackupRetention
 	}
 
 	// 2. 把唯一业务服务交给任务定义，Registry 统一负责锁、记录和失败通知。

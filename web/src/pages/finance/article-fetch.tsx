@@ -1,3 +1,4 @@
+import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { ArrowDownRight, BookOpenCheck, BrainCircuit, ChevronDown, FileSearch, QrCode, Rss, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -5,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Dialog,
@@ -23,6 +25,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import {
   ArticleAnalysisModelSettings,
   ArticleSource,
+  WeReadArticleAccount,
   WeReadArticleBinding,
   WeReadLoginStatus,
   analyzePendingArticles,
@@ -34,6 +37,7 @@ import {
   parsePendingArticles,
   pollWeReadArticleLogin,
   saveArticleAnalysisModel,
+  saveWeReadArticleAccountSettings,
   startWeReadArticleLogin,
   syncArticles,
 } from "@/lib/article-analysis";
@@ -50,6 +54,7 @@ export function ArticleFetchPage() {
   const [isWorking, setIsWorking] = useState(false);
   const [isBindingWorking, setIsBindingWorking] = useState(false);
   const [isModelWorking, setIsModelWorking] = useState(false);
+  const [savingAccount, setSavingAccount] = useState("");
   const [qrOpen, setQROpen] = useState(false);
   const [qrURL, setQRURL] = useState("");
   const [loginStatus, setLoginStatus] = useState<WeReadLoginStatus | null>(null);
@@ -213,6 +218,28 @@ export function ArticleFetchPage() {
       notify.errorFrom(error, "切换文章分析模型失败");
     } finally {
       setIsModelWorking(false);
+    }
+  }
+
+  /** toggleWeReadAccount 切换公众号是否参与文章抓取。 */
+  async function toggleWeReadAccount(account: WeReadArticleAccount, enabled: boolean) {
+    // 1. 保存开关并保留当前抓取频率和数量。
+    setSavingAccount(account.account_id);
+    try {
+      await saveWeReadArticleAccountSettings(
+        account.account_id, account.fetch_interval_minutes, account.fetch_limit, enabled,
+      );
+      setWeRead((current) => current ? {
+        ...current,
+        accounts: current.accounts.map((item) => (
+          item.account_id === account.account_id ? { ...item, enabled } : item
+        )),
+      } : current);
+      notify.success(enabled ? "公众号已启用" : "公众号已停用", account.title);
+    } catch (error) {
+      notify.errorFrom(error, "更新公众号抓取开关失败");
+    } finally {
+      setSavingAccount("");
     }
   }
 
@@ -384,6 +411,7 @@ export function ArticleFetchPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="min-w-40">公众号</TableHead>
+                    <TableHead className="w-20">抓取</TableHead>
                     <TableHead className="w-24 text-right">现有文章</TableHead>
                     <TableHead className="w-24 text-right">今天新增</TableHead>
                     <TableHead className="w-24 text-right">未解析</TableHead>
@@ -395,6 +423,14 @@ export function ArticleFetchPage() {
                   {weRead.accounts.map((account) => (
                     <TableRow key={account.account_id}>
                       <TableCell className="font-medium">{account.title}</TableCell>
+                      <TableCell>
+                        <Checkbox
+                          checked={account.enabled}
+                          disabled={savingAccount === account.account_id}
+                          onCheckedChange={(value) => void toggleWeReadAccount(account, value === true)}
+                          aria-label={`${account.title} 抓取开关`}
+                        />
+                      </TableCell>
                       <TableCell className="text-right tabular-nums">{account.article_count}</TableCell>
                       <TableCell className="text-right tabular-nums">{account.today_inserted_count}</TableCell>
                       <TableCell className="text-right tabular-nums">{account.unparsed_count}</TableCell>
@@ -487,10 +523,7 @@ function weReadStateLabel(value?: WeReadArticleBinding["state"]) {
 
 /** formatDate 将时间格式化为页面使用的月日时分。 */
 function formatDate(value?: string | null) {
-  if (!value) {
-    return "暂无";
-  }
-  return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return formatBeijingDateTime(value, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }, "暂无");
 }
 
 /** providerLabel 将模型 Provider 转换为页面短标签。 */

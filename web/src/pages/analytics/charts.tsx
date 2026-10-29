@@ -1,17 +1,11 @@
+import { formatBeijingDateTime } from "@/lib/beijing-time";
 import type { AnalyticsReport } from "@/lib/analytics";
 import world from "./world.json";
 
 export const number = (n: number) =>
   n.toLocaleString("zh-CN", { maximumFractionDigits: 1 });
 export const timeLabel = (s: string) =>
-  new Date(s).toLocaleString("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  formatBeijingDateTime(s, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }, s);
 export function Trend({ data }: { data: AnalyticsReport["trend"] }) {
   const max = Math.max(1, ...data.map((p) => p.views));
   const point = (v: number, i: number) =>

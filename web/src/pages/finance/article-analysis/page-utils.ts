@@ -1,3 +1,4 @@
+import { formatBeijingDateTime } from "@/lib/beijing-time";
 import type { ArticleItem, DistributionItem, SignalNetPoint, TargetSignalStat } from "@/lib/article-analysis";
 
 export type SignalSortField = "net" | "total";
@@ -27,7 +28,7 @@ export function formatShortDate(value?: string | null) {
   if (!value) {
     return "未知";
   }
-  return new Date(value).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+  return formatBeijingDateTime(value, { month: "2-digit", day: "2-digit" }, "未知");
 }
 
 /** filterArticlesBySignal 按概念组或具体标的筛选文章；输入文章、可选信号和成员名，输出匹配列表，无副作用。 */

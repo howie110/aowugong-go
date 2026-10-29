@@ -283,9 +283,6 @@ func strictSyncJSON(d *json.Decoder, depth int) (any, error) {
 		return nil, chatarchive.ErrInvalidIngest
 	}
 }
-func syncJSONShape(v any, t reflect.Type) bool {
-	return syncJSONShapeIssues(v, t) == ""
-}
 
 // 只输出 Go 类型声明中的字段名、数组下标和固定错误类别，最多32项。
 // 客户端额外键名和值都不进入日志或响应。

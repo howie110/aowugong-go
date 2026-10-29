@@ -16,6 +16,49 @@ func nullable(value string) any {
 	return value
 }
 
+// TestSaveFormatsSentAt 验证新写入的发送时间统一为到秒的文本。
+// 输入：一条普通通知记录。
+// 输出：sent_at 能被固定格式解析且不含单调时钟后缀。
+// 副作用：创建并写入隔离测试数据库。
+func TestSaveFormatsSentAt(t *testing.T) {
+	db := testdatabase.Open(t)
+	repository := NewRepository(db)
+	if err := repository.Save(context.Background(), Record{
+		Channel: "wecom_bot", Title: "test", Message: "body", Status: "success",
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	var sentAt string
+	if err := db.QueryRow("SELECT sent_at FROM notification_log ORDER BY id DESC LIMIT 1").Scan(&sentAt); err != nil {
+		t.Fatalf("query sent_at: %v", err)
+	}
+	if _, err := time.Parse("2006-01-02 15:04:05", sentAt); err != nil {
+		t.Fatalf("sent_at = %q, want format 2006-01-02 15:04:05", sentAt)
+	}
+}
+
+// TestListTrimsLegacySentAtSuffix 验证查询兼容旧数据里的单调时钟后缀。
+// 输入：一条带后缀的历史 sent_at。
+// 输出：List 返回截取到秒的时间。
+// 副作用：创建并写入隔离测试数据库。
+func TestListTrimsLegacySentAtSuffix(t *testing.T) {
+	db := testdatabase.Open(t)
+	repository := NewRepository(db)
+	if _, err := db.Exec(`INSERT INTO notification_log(
+		channel,title,message,status,error_message,sent_at
+	) VALUES(?,?,?,?,?,?)`, "wecom_bot", "legacy", "body", "success", nil,
+		"2026-10-29 15:24:25.123456789 +0800 CST m=+1"); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+	page, err := repository.List(context.Background(), LogFilter{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].SentAt != "2026-10-29 15:24:25" {
+		t.Fatalf("items = %#v", page.Items)
+	}
+}
+
 // TestListNotificationHistoryFiltersAndPagination 验证通知历史的关键字、状态、分类和分页。
 // 输入：包含任务、监控、备份、项目和旧格式的记录。
 // 输出：各筛选返回正确总数和记录。
@@ -36,7 +79,7 @@ func TestListNotificationHistoryFiltersAndPagination(t *testing.T) {
 		{"监控 / 服务异常", "Vaultwarden 不可用", "failed", "", ""},
 		{"备份 / backup_postgres", "PostgreSQL 备份失败", "failed", "", ""},
 		{"receipt-split / 小票识别失败", "账单识别失败", "success", "receipt-split", "req-1"},
-		{"server-alerts / Vaultwarden 备份失败", "备份失败", "success", "server-alerts", "req-2"},
+		{"server-alerts / 自定义备份标题", "Vaultwarden 备份失败", "success", "server-alerts", "req-2"},
 		{"AOWUGONG / JOB / ERROR / legacy", "旧格式失败", "failed", "", ""},
 	}
 	for _, row := range rows {

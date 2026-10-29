@@ -65,19 +65,6 @@ runtime_env_backup="$temporary_directory/runtime.env.before"
 unit_backup="$temporary_directory/unit.before"
 changed=0
 
-# render_service 按发布模式安装 systemd unit。
-# 输入：release_path 是发布目录。
-# 输出：无。
-# 副作用：覆盖目标 systemd unit。
-render_service() {
-  local release_path="$1"
-  local template="$release_path/init/systemd/${SERVICE_NAME}.service"
-  local rendered="$temporary_directory/${SERVICE_NAME}.service"
-  sed -e "s|@APP_ROOT@|$APP_ROOT|g" -e "s|@RUN_USER@|$RUN_USER|g" -e "s|@RUN_GROUP@|$RUN_GROUP|g" \
-    "$template" > "$rendered"
-  install -m 0644 "$rendered" "$SYSTEMD_UNIT_DIR/${SERVICE_NAME}.service"
-}
-
 # configure_runtime_env 写入 PostgreSQL 运行路径和当前发布参数。
 # 输入：file 是环境文件，release_link 是发布软链接。
 # 输出：无。
@@ -176,7 +163,7 @@ fi
   tar -xzf "$archive"
 )
 source_release="$temporary_directory/$package"
-for required_path in aowugong aowugong-migrate web/dist/index.html migrations/postgres \
+for required_path in aowugong web/dist/index.html migrations/postgres \
   "init/systemd/${SERVICE_NAME}.service"; do
   [ -e "$source_release/$required_path" ] || die "发布包缺少: $required_path"
 done
@@ -185,7 +172,7 @@ done
 [ ! -e "$release_directory" ] || die "版本目录已存在，请使用新版本号: $VERSION"
 mv "$source_release" "$release_directory"
 chown -R root:root "$release_directory"
-chmod 0755 "$release_directory/aowugong" "$release_directory/aowugong-migrate" "$release_directory/scripts/"*.sh
+chmod 0755 "$release_directory/aowugong" "$release_directory/scripts/"*.sh
 
 # 3. 原子切换软链接并启动目标服务。
 save_service_state "$SERVICE_NAME" "$service_state"
@@ -209,7 +196,7 @@ if [ "$DEPLOY_MODE" = "main" ] && [ -n "$old_release_target" ]; then
   point_symlink "$APP_ROOT/previous" "$old_release_target"
 fi
 point_symlink "$RELEASE_LINK" "$release_directory"
-render_service "$release_directory"
+render_service "$release_directory" "$SERVICE_NAME" "$SYSTEMD_UNIT_DIR" "$APP_ROOT" "$RUN_USER" "$RUN_GROUP" "$temporary_directory/${SERVICE_NAME}.service"
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME" >/dev/null
 systemctl restart "$SERVICE_NAME"

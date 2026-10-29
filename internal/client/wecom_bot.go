@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -36,13 +35,13 @@ func NewWeComBotClient(cfg config.WeComBot, httpClient *http.Client) *WeComBotCl
 
 // Configured 返回官方 Webhook 地址是否已经配置。
 func (c *WeComBotClient) Configured() bool {
-	return validateWeComBotWebhook(c.config.WebhookURL) == nil
+	return c.config.Configured()
 }
 
 // SendText 发送企业微信群机器人 text 消息。
 func (c *WeComBotClient) SendText(ctx context.Context, content string) error {
 	address := strings.TrimSpace(c.config.WebhookURL)
-	if err := validateWeComBotWebhook(address); err != nil {
+	if err := config.ValidateWeComBotWebhook(address); err != nil {
 		return err
 	}
 	content = truncateUTF8Bytes(strings.TrimSpace(content), weComTextLimit)
@@ -92,19 +91,6 @@ func (c *WeComBotClient) SendText(ctx context.Context, content string) error {
 	}
 	if *result.ErrorCode != 0 {
 		return fmt.Errorf("企业微信接口返回错误 %d: %s", *result.ErrorCode, result.Message)
-	}
-	return nil
-}
-
-func validateWeComBotWebhook(address string) error {
-	parsed, err := url.Parse(strings.TrimSpace(address))
-	if err != nil || parsed.Scheme != "https" || parsed.Hostname() != "qyapi.weixin.qq.com" || parsed.Port() != "" ||
-		parsed.User != nil || parsed.Fragment != "" || parsed.Path != "/cgi-bin/webhook/send" {
-		return fmt.Errorf("WECOM_BOT_WEBHOOK_URL 必须是企业微信官方 HTTPS Webhook")
-	}
-	query := parsed.Query()
-	if len(query) != 1 || len(query["key"]) != 1 || strings.TrimSpace(query.Get("key")) == "" {
-		return fmt.Errorf("WECOM_BOT_WEBHOOK_URL 缺少有效 key")
 	}
 	return nil
 }

@@ -9,18 +9,11 @@ import (
 	"time"
 
 	appdatabase "github.com/howiedata/aowugong-go/internal/database"
-
-	"github.com/howiedata/aowugong-go/internal/timezone"
 )
 
 // Repository 负责投资文章、来源和分析结果的 PostgreSQL 读写。
 type Repository struct {
 	db *sql.DB
-}
-
-type sourceRecord struct {
-	Source
-	FeedURL string
 }
 
 type pendingArticle struct {
@@ -50,7 +43,6 @@ type analysisRow struct {
 }
 
 type summaryCounts struct {
-	SourceCount   int
 	ArticleCount  int
 	AnalyzedCount int
 	PendingCount  int
@@ -298,57 +290,6 @@ func (r *Repository) ReplaceSignalGroups(ctx context.Context, groups []signalGro
 	return inserted, nil
 }
 
-// SyncDefaultSource 初始化当前唯一的 Miniflux 投资文章来源。
-// 输入：ctx 控制数据库操作，feedURL 是 Miniflux 根地址。
-// 输出：成功返回 nil，失败返回错误。
-// 副作用：写入 investment_article_source；启用时会把旧 WeChatRSS 元数据切换为 Miniflux。
-func (r *Repository) SyncDefaultSource(ctx context.Context, feedURL string) error {
-	// 1. 根据 Miniflux 地址决定默认来源是否启用。
-	feedURL = strings.TrimSpace(feedURL)
-	active := 0
-	status := "missing_url"
-	message := "未配置 MINIFLUX_API_TOKEN"
-	if feedURL != "" {
-		active = 1
-		status = "ready"
-		message = ""
-	}
-
-	// 2. 空地址只补建缺失来源，避免覆盖线上已经可用的地址。
-	if feedURL == "" {
-		_, err := r.db.ExecContext(ctx, `
-			INSERT INTO investment_article_source (
-				source_code, source_name, source_type, feed_url, is_active,
-				description, last_fetch_status, last_fetch_message
-			) VALUES ('wechat_aggregate', 'Miniflux 投资文章', 'miniflux', ?, ?, 'Miniflux 投资文章分类。', ?, ?)
-			ON CONFLICT(source_code) DO NOTHING
-		`, feedURL, active, status, nullableArticleText(message))
-		if err != nil {
-			return fmt.Errorf("补建默认文章来源: %w", err)
-		}
-		return nil
-	}
-
-	// 3. 有效地址覆盖旧抓取端点，但复用原来源代码和主键保留文章关联。
-	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO investment_article_source (
-			source_code, source_name, source_type, feed_url, is_active,
-			description, last_fetch_status, last_fetch_message
-		) VALUES ('wechat_aggregate', 'Miniflux 投资文章', 'miniflux', ?, ?, 'Miniflux 投资文章分类。', ?, ?)
-		ON CONFLICT(source_code) DO UPDATE SET
-			source_name = 'Miniflux 投资文章',
-			source_type = 'miniflux',
-			feed_url = excluded.feed_url,
-			is_active = excluded.is_active,
-			description = 'Miniflux 投资文章分类。',
-			updated_at = ?
-	`, feedURL, active, status, nullableArticleText(message), appdatabase.TimestampText(time.Now()))
-	if err != nil {
-		return fmt.Errorf("同步默认文章来源: %w", err)
-	}
-	return nil
-}
-
 // Sources 列出文章来源。
 // 输入：ctx 控制查询，activeOnly 控制是否只返回启用且有地址的来源。
 // 输出：按主键正序返回来源；失败时返回错误。
@@ -388,23 +329,6 @@ func (r *Repository) Sources(ctx context.Context, activeOnly bool) ([]Source, er
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("遍历文章来源: %w", err)
-	}
-	return results, nil
-}
-
-// sourceRecords 返回同步任务需要的启用来源及其内部地址。
-// 输入：ctx 控制查询。
-// 输出：返回内部来源记录；失败时返回错误。
-// 副作用：只读 PostgreSQL。
-func (r *Repository) sourceRecords(ctx context.Context) ([]sourceRecord, error) {
-	// 1. 复用来源查询并保留模型中的内部 FeedURL 字段。
-	sources, err := r.Sources(ctx, true)
-	if err != nil {
-		return nil, err
-	}
-	results := make([]sourceRecord, 0, len(sources))
-	for _, source := range sources {
-		results = append(results, sourceRecord{Source: source, FeedURL: source.FeedURL})
 	}
 	return results, nil
 }
@@ -552,7 +476,7 @@ func (r *Repository) UpdateSourceStatus(ctx context.Context, sourceID int64, sta
 		SET last_fetch_at = ?, last_fetch_status = ?, last_fetch_message = ?,
 		    updated_at = ?
 		WHERE id = ?
-	`, shanghaiNowText(), status, nullableArticleText(truncateRunes(message, 500)),
+	`, appdatabase.TimestampText(time.Now()), status, nullableArticleText(truncateRunes(message, 500)),
 		appdatabase.TimestampText(time.Now()), sourceID)
 	if err != nil {
 		return fmt.Errorf("更新文章来源抓取状态: %w", err)
@@ -575,7 +499,7 @@ func (r *Repository) Articles(ctx context.Context, days, limit int) ([]ArticleIt
 	if limit > 5000 {
 		limit = 5000
 	}
-	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Format("2006-01-02 15:04:05")
+	cutoff := appdatabase.TimestampText(time.Now().Add(-time.Duration(days) * 24 * time.Hour))
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT article.id, source.source_name, article.title, COALESCE(article.author, ''),
 		       COALESCE(article.published_at, ''), COALESCE(article.created_at, ''),
@@ -757,7 +681,7 @@ func (r *Repository) SaveAnalysis(ctx context.Context, articleID int64, status s
 	}
 	analyzedAt := any(nil)
 	if status == "success" {
-		analyzedAt = shanghaiNowText()
+		analyzedAt = appdatabase.TimestampText(time.Now())
 	}
 
 	// 2. 使用文章唯一键 upsert 全部结构化字段。
@@ -805,7 +729,7 @@ func (r *Repository) analysisRows(ctx context.Context, days int) ([]analysisRow,
 	if days < 1 {
 		days = 1
 	}
-	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Format("2006-01-02 15:04:05")
+	cutoff := appdatabase.TimestampText(time.Now().Add(-time.Duration(days) * 24 * time.Hour))
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT COALESCE(analysis.recommendations_json, '[]'), COALESCE(analysis.risks_json, '[]'),
 		       COALESCE(analysis.market_mood, 'unknown'), COALESCE(analysis.market_prediction, 'unknown'),
@@ -847,21 +771,20 @@ func (r *Repository) analysisRows(ctx context.Context, days int) ([]analysisRow,
 
 // counts 读取文章页面顶部使用的轻量计数。
 // 输入：ctx 控制查询。
-// 输出：返回来源、文章、已分析、待分析和最新日期；失败时返回错误。
+// 输出：返回文章、已分析、待分析和最新日期；失败时返回错误。
 // 副作用：只读 PostgreSQL。
 func (r *Repository) counts(ctx context.Context) (summaryCounts, error) {
 	// 1. 使用单条聚合查询读取全部计数。
 	var result summaryCounts
 	err := r.db.QueryRowContext(ctx, `
 		SELECT
-			(SELECT COUNT(*) FROM investment_article_source WHERE is_active = 1),
 			(SELECT COUNT(*) FROM investment_article),
 			(SELECT COUNT(*) FROM investment_article_analysis WHERE status = 'success'),
 			(SELECT COUNT(*) FROM investment_article article
 			 LEFT JOIN investment_article_analysis analysis ON analysis.article_id = article.id
 			 WHERE analysis.id IS NULL OR analysis.status != 'success'),
 			COALESCE((SELECT MAX(COALESCE(published_at, created_at)) FROM investment_article), '')
-	`).Scan(&result.SourceCount, &result.ArticleCount, &result.AnalyzedCount, &result.PendingCount, &result.LatestAt)
+	`).Scan(&result.ArticleCount, &result.AnalyzedCount, &result.PendingCount, &result.LatestAt)
 	if err != nil {
 		return summaryCounts{}, fmt.Errorf("查询文章摘要计数: %w", err)
 	}
@@ -973,14 +896,4 @@ func dateOnly(value string) string {
 		return value[:len("2006-01-02")]
 	}
 	return value
-}
-
-// shanghaiNowText 返回无时区歧义的上海本地时间文本。
-// 输入：无。
-// 输出：返回 YYYY-MM-DD HH:MM:SS。
-// 副作用：读取系统时钟。
-func shanghaiNowText() string {
-	// 1. 中国标准时间全年固定 UTC+8。
-	location := timezone.Beijing
-	return time.Now().In(location).Format("2006-01-02 15:04:05")
 }

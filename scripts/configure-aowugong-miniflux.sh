@@ -2,10 +2,8 @@
 set -euo pipefail
 
 ENV_FILE="${AOWUGONG_ENV_FILE:-/opt/aowugong-go/shared/.env}"
-TOKEN_FILE="${MINIFLUX_TOKEN_FILE:-/etc/miniflux/aowugong-api-token}"
 BASE_URL="${MINIFLUX_BASE_URL:-http://127.0.0.1:5000}"
 MONITOR_URL="${MINIFLUX_MONITOR_URL:-https://miniflux.aowugong.top/}"
-CATEGORY="${MINIFLUX_CATEGORY:-投资文章}"
 
 # require_file 校验服务器私有配置文件存在且不为空。
 # 输入：文件路径和用途名称。
@@ -21,20 +19,13 @@ require_file() {
     fi
 }
 
-# configure_env 原子更新 aowugong 正式环境中的 Miniflux 参数。
-# 输入：全局环境文件、Token 文件和连接参数。
-# 输出：成功时打印环境文件路径，不输出 Token。
-# 副作用：替换正式环境文件并删除旧 WeChatRSS 配置项。
+# configure_env 原子更新 aowugong 正式环境中的 Miniflux 地址参数。
+# 输入：全局环境文件和连接参数。
+# 输出：成功时打印环境文件路径。
+# 副作用：替换正式环境文件，并删除旧 WeChatRSS 与已废弃的 Token/分类配置项。
 configure_env() {
-    # 1. 校验文件并读取不含换行的 Token。
+    # 1. 校验环境文件存在且非空。
     require_file "${ENV_FILE}" "aowugong 环境文件"
-    require_file "${TOKEN_FILE}" "Miniflux API Token"
-    local token
-    token="$(tr -d '\r\n' <"${TOKEN_FILE}")"
-    if [[ -z "${token}" || "${token}" == *$'\n'* ]]; then
-        echo "Miniflux API Token 格式无效" >&2
-        exit 1
-    fi
 
     # 2. 在同目录生成新文件，保留原文件所有权和权限后原子替换。
     local directory temporary
@@ -45,15 +36,13 @@ configure_env() {
     {
         printf '\nMINIFLUX_BASE_URL=%s\n' "${BASE_URL}"
         printf 'MINIFLUX_MONITOR_URL=%s\n' "${MONITOR_URL}"
-        printf 'MINIFLUX_API_TOKEN=%s\n' "${token}"
-        printf 'MINIFLUX_CATEGORY=%s\n' "${CATEGORY}"
     } >>"${temporary}"
     chown --reference="${ENV_FILE}" "${temporary}"
     chmod --reference="${ENV_FILE}" "${temporary}"
     mv -f -- "${temporary}" "${ENV_FILE}"
     trap - EXIT
 
-    # 3. 只打印安全结果，不回显任何密钥。
+    # 3. 只打印安全结果，不回显配置值。
     echo "Miniflux 配置已写入：${ENV_FILE}"
 }
 

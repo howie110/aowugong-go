@@ -24,7 +24,6 @@ export function buildRelease(root, version, execute = run) {
   for (const args of [['ci'], ['test'], ['run', 'build']]) {
     invoke(npm, args, { cwd: path.join(root, 'web'), shell: process.platform === 'win32' });
   }
-  invoke('go', ['test', '-p', '1', './...']);
   invoke('go', ['test', '-race', '-p', '1', './...']);
   invoke('go', ['vet', './...']);
   const dist = path.join(root, 'dist');
@@ -41,7 +40,7 @@ export function buildRelease(root, version, execute = run) {
     invoke('tar', ['-xf', sources, '-C', packageDir]);
     invoke('bash', ['-c', 'for script in scripts/*.sh; do bash -n "$script" || exit; done']);
     const env = { ...process.env, CGO_ENABLED: '0', GOOS: 'linux', GOARCH: 'amd64' };
-    for (const [binary, entry] of [['aowugong', './cmd/aowugong'], ['aowugong-migrate', './cmd/migrate']]) {
+    for (const [binary, entry] of [['aowugong', './cmd/aowugong']]) {
       invoke('go', ['build', '-trimpath', '-ldflags=-s -w', '-o', path.join(packageDir, binary), entry], { env });
     }
     // tar 保留静态资源结构，并使用三平台已有的归档工具。

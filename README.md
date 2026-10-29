@@ -641,6 +641,8 @@ Content-Type: application/json
 | 订阅 | 每月有效订阅月报 | 低频、可操作 |
 | 项目 | 跨项目通知 API | `receipt-split` 等 |
 
+任务失败标题由任务定义中的 `Category` 和 `FailureTitle` 决定；未声明时回退为“任务 / 任务名”，scheduler 不再按任务名维护映射。
+
 监控任务 `check_service_monitors` 在每轮探测前读取上一轮状态，只在 `up→down`、首次 `down`、`down→up` 时产生事件。异常由 scheduler 发一条带明细的失败通知；恢复由任务发一条合并恢复通知。同一组异常不会按调度频率重复发送。
 
 Vaultwarden 03:45 systemd 备份：
@@ -651,12 +653,12 @@ Vaultwarden 03:45 systemd 备份：
 - 手动检查 payload：`/usr/local/sbin/vaultwarden-backup-notify dry-run`。
 - 状态文件位于 `/var/lib/aowugong-alert`；失败只发一次，恢复成功后清除。
 
-通知页同时提供发送历史：`GET /api/v1/finance/notifications/logs?q=&status=&category=&page=&page_size=`，数据来自 `notification_log`，支持关键字、状态（`success`/`failed`/`unknown`）、分类（任务、备份、监控、订阅、项目、其他）和分页；点击记录可查看完整正文。权限与通知页一致（`page:finance:notifications`）。所有发送尝试都会入库，包括发送失败的记录。
+通知页同时提供发送历史：`GET /api/v1/finance/notifications/logs?q=&status=&category=&page=&page_size=`，数据来自 `notification_log`，支持关键字、状态（`success`/`failed`/`unknown`）、分类（任务、备份、监控、订阅、项目、其他）和分页；点击记录可查看完整正文。权限与通知页一致（`page:finance:notifications`）。所有发送尝试都会入库，包括发送失败的记录。发送历史分类中，`server-alerts` 来源归入“备份”，其他带来源的跨项目通知归入“项目”，其余按标题前缀判断。
 
 外部服务调用复用现有 `POST /api/v1/notifications/wechat`，固定使用 `AOWUGONG_NOTIFICATION_TOKENS` 中的 `external` 项目 Token：
 
 - 请求体只接受 `request_id`、`title`、`content`，不支持文件或附件。
-- 限制与 9.1 相同：正文最多 2048 UTF-8 字节、请求最多 16 KiB、每分钟最多 10 次新发送。
+- 限制与 9.1 相同，具体数值以 9.1 和接口配置为准。
 - 所有外部调用共用 `external` 来源，`request_id` 建议带服务名前缀，避免跨服务冲突。
 - 配置 `external` Token 并重启后，通知页的“外部调用 / MCP”卡片会显示请求地址、固定 Key、curl 示例和可复制的 MCP 工具描述；Key 等同于发送权限，只在管理员页面展示，不要发到公开渠道。
 
@@ -668,7 +670,6 @@ Vaultwarden 03:45 systemd 备份：
 
 文档或代码变更完成后，按影响范围验证。完整验证命令：
 
-    GOTOOLCHAIN=auto go test ./...
     GOTOOLCHAIN=auto go test -race ./...
     GOTOOLCHAIN=auto go vet ./...
     cd web
@@ -760,8 +761,9 @@ Vaultwarden 03:45 systemd 备份：
     set -a
     . /opt/aowugong-go/shared/.env
     set +a
+    go build -o /tmp/aowugong-migrate ./cmd/migrate
     AOWUGONG_SQLITE_SOURCE_PATH=/安全路径/aowugong.db \
-      /opt/aowugong-go/current/aowugong-migrate --confirm
+      /tmp/aowugong-migrate --confirm
 
 迁移工具会执行：
 
@@ -807,6 +809,8 @@ Vaultwarden 03:45 systemd 备份：
 C10–C16 本地验证：全量 Go race 测试通过 420 个测试项（含子测试），其中 14 个 PostgreSQL 集成测试无跳过；Go vet、126 项前端测试、前端构建、14 项发布脚本测试、Shell/YAML 语法与 diff 检查通过。未配置独立小票临时服务、可用私有 VPN 资源的两项环境测试仍跳过；未访问生产资源，也未在 GitHub 执行新流水线。测试数据库验证后已停止。此处为优化完成时的验证记录；实际发布状态见后续部署记录。
 
 优化部署记录（2026-10-22）：C1–C16 代码提交 `ffad8d9aa6a39ae349b3bc627182c29be641e09c` 已推送 main，生产版本为 `/opt/aowugong-go/releases/v20261022-simplify-c1-c16`，上一版本 `v20261022-website-operations` 保留为 previous。统一发布入口完成前端 126 项测试/构建、Go 全量普通/race 测试和 vet，显式使用隔离 PostgreSQL；14 项发布脚本测试通过。16 个迁移文件与发布前生产完全一致，无新增 schema 变更。内外网健康、主页/网站运维/我的轨迹页面及入口资源一致性、四个敏感 API 匿名 401 检查通过，JWT/加密/数据库/小票统计凭据摘要前后一致。运行配置和服务文件备份在 `/opt/aowugong-go/deploy-simplify.SBtIbL/before`，仅 root 可访问。未发送外部通知，未修改其他服务；本地测试数据库已停止。此后如仅提交本段部署记录，线上 REVISION 仍对应上述代码提交。
+
+全项目扫描批次（2026-10-29，N1–N10，本地完成、未提交未部署）：Vaultwarden 恢复包补齐告警脚本；前端权限策略统一到 `lib/permissions.ts`，Dashboard 收口为 6 个数据页并删除 18 个死端点；微信读书新公众号默认关闭、人工开关接回 PATCH，删除无调用的凭据体检/保活；Miniflux 文章抓取客户端、配置和旧路径移除，Miniflux 继续作为独立 RSS 服务；时间文本统一使用上海时区，前端新增 `lib/beijing-time.ts`；回测摘要改为“未接入”，一次性迁移二进制不再进发布包、按需构建；清理无引用前端 API。复查后补充 R1–R3/N9：微信读书设置与人工开关改为单条 SQL 原子更新，避免部分写入；北京时间测试直接加载生产 `lib/beijing-time.ts`，覆盖解析、格式化、日期加减和跨 realm Date；删除 `canViewChatArchive` 与导航 `permission` 字段，页面权限统一由 `canAccessPage` 判断；通知 Token 与企业微信 Webhook 的组合校验收口到 `Config.Validate`；新增 `web/tests/admin-pages.test.cjs`，覆盖数据库页的首个非空表选择、敏感值/空值渲染、搜索防抖、分页与筛选导出，以及权限页的角色分配、失败恢复和无角色提示。本轮再复查补充 B1–B5：清理 Miniflux 应用配置脚本中已废弃的 Token/分类键和测试夹具；记录此刻页与文章日期改用北京时间 helper；删除微信读书旧设置/开关入口，只保留原子更新并区分 RowsAffected 错误；前端测试改为目录级发现；删除无调用的抓取摘要和公众号刷新接口；随后补充 C1–C3：删除来源包装层和死 helper，修正 Miniflux 配置注释。仍保留两项：开发 JWT 兜底、position/client 超时默认值保留，原因是安全兜底和显式传参；deploy 测试对 macOS 临时目录父路径的放行属于测试折中。行数（README 口径，扫描前 68,078 → 后 67,577，净减 501；生产 50,224 → 49,660，测试 15,738 → 15,814，脚本/CI 2,116 → 2,103）。本地验证：Go 全量测试、vet、前端构建、136 项前端测试、14 项发布脚本测试、Shell 语法与 diff 检查通过；未访问生产、未发送通知。
 
 - 日志与可观测性：系统复杂后，评估引入 Wide Event / Canonical Log Line，为请求、任务、消息、批量处理和人工覆盖统一记录上下文，让正常流程清晰、例外可追踪和可审计。当前只记录为优化方向，暂不实施具体架构。
 - 资料来源：[Logging Sucks](https://loggingsucks.com/)、[logging-best-practices skill](https://github.com/boristane/agent-skills/tree/main/skills/logging-best-practices)。

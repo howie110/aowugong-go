@@ -207,7 +207,7 @@ EOF
 # 副作用：写 systemd unit 并重载管理器。
 install_systemd_units() {
     # 1. 安装备份脚本到固定系统路径，避免发布目录切换影响任务。
-    install -m 0750 "$(dirname "$0")/backup-vaultwarden.sh" /usr/local/sbin/vaultwarden-backup
+    install -m 0750 "${SCRIPT_DIR}/backup-vaultwarden.sh" /usr/local/sbin/vaultwarden-backup
 
     # 2. 停用并移除旧的 IP 证书续期任务，保留证书文件便于回滚检查。
     systemctl disable --now vaultwarden-certificate-renew.timer >/dev/null 2>&1 || true

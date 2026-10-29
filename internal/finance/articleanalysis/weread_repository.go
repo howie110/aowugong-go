@@ -234,9 +234,9 @@ func (r *Repository) upsertWeReadAccounts(ctx context.Context, accounts []WeRead
 			INSERT INTO weread_article_account(
 				account_id, title, cover_url, is_enabled, fetch_interval_minutes, fetch_limit, discovered_at, updated_at
 			)
-			VALUES (?, ?, ?, TRUE, 720, 20, ?, ?)
+			VALUES (?, ?, ?, FALSE, 720, 20, ?, ?)
 			ON CONFLICT(account_id) DO UPDATE SET
-				title = excluded.title, cover_url = excluded.cover_url, is_enabled = TRUE, updated_at = excluded.updated_at
+				title = excluded.title, cover_url = excluded.cover_url, updated_at = excluded.updated_at
 		`, account.AccountID, account.Title, account.CoverURL, now, now); err != nil {
 			return fmt.Errorf("保存微信读书公众号 %s: %w", account.Title, err)
 		}
@@ -318,25 +318,6 @@ func (r *Repository) listWeReadAccounts(ctx context.Context, enabledOnly bool) (
 	return accounts, nil
 }
 
-// setWeReadAccountEnabled 更新一个书架公众号的抓取开关。
-// 输入：ctx 控制写入，accountID 是公众号，enabled 是目标状态。
-// 输出：不存在或更新失败时返回错误。
-// 副作用：写入 weread_article_account。
-func (r *Repository) setWeReadAccountEnabled(ctx context.Context, accountID string, enabled bool) error {
-	// 1. 只更新已由书架发现的公众号。
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE weread_article_account SET is_enabled = ?, updated_at = ? WHERE account_id = ?
-	`, enabled, appdatabase.TimestampText(time.Now()), accountID)
-	if err != nil {
-		return fmt.Errorf("更新微信读书公众号开关: %w", err)
-	}
-	rows, err := result.RowsAffected()
-	if err != nil || rows != 1 {
-		return fmt.Errorf("微信读书公众号不存在")
-	}
-	return nil
-}
-
 // existingWeReadExternalIDs 批量查找已经入库的 reviewId。
 // 输入：ctx 控制查询，sourceID 是聚合来源，externalIDs 是候选标识。
 // 输出：返回已存在标识集合。
@@ -391,28 +372,42 @@ func (r *Repository) bindWeReadExternalIDByLink(ctx context.Context, sourceID in
 	return rows > 0, nil
 }
 
-// updateWeReadAccountSettings 更新单个公众号的抓取频率和单次数量。
-// 输入：ctx 控制写入，accountID 是公众号，settings 是新的抓取节奏。
+// updateWeReadAccount 原子更新可选的抓取设置和启用状态。
+// 输入：ctx 控制写入，accountID 是公众号，settings 和 enabled 为空表示不修改对应字段。
 // 输出：不存在或更新失败时返回错误。
 // 副作用：写入 weread_article_account。
-func (r *Repository) updateWeReadAccountSettings(ctx context.Context, accountID string, settings WeReadAccountSettings) error {
-	// 1. 按已校验参数更新节奏，并保持账号参与抓取。
+func (r *Repository) updateWeReadAccount(ctx context.Context, accountID string, settings *WeReadAccountSettings, enabled *bool) error {
+	// 1. 使用可空参数保留未提供的字段，避免分两次写入造成部分更新。
+	var interval, limit sql.NullInt64
+	if settings != nil {
+		interval = sql.NullInt64{Int64: int64(settings.FetchIntervalMinutes), Valid: true}
+		limit = sql.NullInt64{Int64: int64(settings.FetchLimit), Valid: true}
+	}
+	var enabledValue sql.NullBool
+	if enabled != nil {
+		enabledValue = sql.NullBool{Bool: *enabled, Valid: true}
+	}
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE weread_article_account
-		SET is_enabled = TRUE, fetch_interval_minutes = ?, fetch_limit = ?, updated_at = ?
+		SET fetch_interval_minutes = COALESCE(?, fetch_interval_minutes),
+		    fetch_limit = COALESCE(?, fetch_limit),
+		    is_enabled = COALESCE(?, is_enabled),
+		    updated_at = ?
 		WHERE account_id = ?
-	`, settings.FetchIntervalMinutes, settings.FetchLimit, appdatabase.TimestampText(time.Now()), accountID)
+	`, interval, limit, enabledValue, appdatabase.TimestampText(time.Now()), accountID)
 	if err != nil {
-		return fmt.Errorf("更新微信读书公众号抓取策略: %w", err)
+		return fmt.Errorf("更新微信读书公众号: %w", err)
 	}
 	rows, err := result.RowsAffected()
-	if err != nil || rows != 1 {
+	if err != nil {
+		return fmt.Errorf("读取微信读书公众号更新结果: %w", err)
+	}
+	if rows != 1 {
 		return fmt.Errorf("微信读书公众号不存在")
 	}
 	return nil
 }
 
-// markWeReadAccountChecked 记录单个公众号最近一次访问微信读书列表的时间。
 // 输入：ctx 控制写入，accountID 是公众号，checkedAt 是本次检查时间。
 // 输出：返回写入错误。
 // 副作用：写入 weread_article_account。

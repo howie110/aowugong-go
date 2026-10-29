@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	appdatabase "github.com/howiedata/aowugong-go/internal/database"
 )
 
 // Repository 负责通知发送结果的 PostgreSQL 持久化。
@@ -71,7 +73,7 @@ func (r *Repository) Save(ctx context.Context, record Record) error {
 	_, err := r.db.ExecContext(ctx, `INSERT INTO notification_log(
 		channel, title, message, status, error_message, sent_at
 	) VALUES(?,?,?,?,?,?)`, record.Channel, record.Title, record.Message, record.Status,
-		nullIfEmpty(record.ErrorMessage), time.Now())
+		nullIfEmpty(record.ErrorMessage), appdatabase.TimestampText(time.Now()))
 	if err != nil {
 		return fmt.Errorf("写入通知日志: %w", err)
 	}
@@ -114,7 +116,7 @@ func (r *Repository) List(ctx context.Context, filter LogFilter) (LogPage, error
 		return LogPage{}, fmt.Errorf("统计通知历史: %w", err)
 	}
 	query := `SELECT id, channel, title, message, status,
-		COALESCE(error_message, ''), sent_at, COALESCE(source, ''), COALESCE(request_id, '')
+		COALESCE(error_message, ''), SUBSTR(sent_at, 1, 19), COALESCE(source, ''), COALESCE(request_id, '')
 		FROM notification_log WHERE ` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
 	pageArgs := append(append([]any{}, args...), filter.PageSize, (filter.Page-1)*filter.PageSize)
 	rows, err := r.db.QueryContext(ctx, query, pageArgs...)
@@ -157,25 +159,25 @@ func notificationLogWhere(filter LogFilter) (string, []any) {
 		args = append(args, status)
 	}
 	switch filter.Category {
-	case "任务":
+	case CategoryTask:
 		clauses = append(clauses, "title LIKE ?")
-		args = append(args, "任务 / %")
-	case "备份":
-		clauses = append(clauses, "(title LIKE ? OR title LIKE ?)")
-		args = append(args, "备份 / %", "server-alerts / Vaultwarden 备份%")
-	case "监控":
+		args = append(args, CategoryTask+" / %")
+	case CategoryBackup:
+		clauses = append(clauses, "(title LIKE ? OR source = ?)")
+		args = append(args, CategoryBackup+" / %", "server-alerts")
+	case CategoryMonitor:
 		clauses = append(clauses, "title LIKE ?")
-		args = append(args, "监控 / %")
-	case "订阅":
+		args = append(args, CategoryMonitor+" / %")
+	case CategorySubscription:
 		clauses = append(clauses, "title LIKE ?")
-		args = append(args, "订阅 / %")
-	case "项目":
-		clauses = append(clauses, "source IS NOT NULL AND title NOT LIKE ?")
-		args = append(args, "server-alerts / Vaultwarden 备份%")
-	case "其他":
+		args = append(args, CategorySubscription+" / %")
+	case CategoryProject:
+		clauses = append(clauses, "source IS NOT NULL AND source <> ?")
+		args = append(args, "server-alerts")
+	case CategoryOther:
 		clauses = append(clauses,
 			"source IS NULL AND title NOT LIKE ? AND title NOT LIKE ? AND title NOT LIKE ? AND title NOT LIKE ?")
-		args = append(args, "任务 / %", "备份 / %", "监控 / %", "订阅 / %")
+		args = append(args, CategoryTask+" / %", CategoryBackup+" / %", CategoryMonitor+" / %", CategorySubscription+" / %")
 	}
 	return strings.Join(clauses, " AND "), args
 }

@@ -42,7 +42,7 @@ test('release contains required artifacts and revision, excludes private configu
   const f = fixture(t);
   const archive = buildRelease(f.root, 'v-test', f.execute);
   const list = run('tar', ['-tzf', archive], { stdio: 'pipe' });
-  for (const file of ['aowugong', 'aowugong-migrate', 'web/dist/index.html', 'skills/tool/SKILL.md', 'migrations/postgres/001.sql', 'REVISION']) assert.ok(list.includes(file));
+  for (const file of ['aowugong', 'web/dist/index.html', 'skills/tool/SKILL.md', 'migrations/postgres/001.sql', 'REVISION']) assert.ok(list.includes(file));
   assert.ok(!list.includes('.env'));
   assert.equal(run('tar', ['-xOf', archive, 'aowugong-go-v-test-linux-amd64/REVISION'], { stdio: 'pipe' }), f.git(['rev-parse', 'HEAD']));
   assert.ok(readFileSync(`${archive}.sha256`, 'utf8').startsWith(createHash('sha256').update(readFileSync(archive)).digest('hex')));

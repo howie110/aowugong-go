@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	appdatabase "github.com/howiedata/aowugong-go/internal/database"
+
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/howiedata/aowugong-go/internal/client"
 	"github.com/howiedata/aowugong-go/internal/testdatabase"
@@ -42,41 +44,6 @@ func (g *recordingArticleGateway) Fetch(ctx context.Context, sourceID int64, fee
 	return []client.ArticleItem{}, nil
 }
 
-// TestServiceUsesRuntimeFeedURL 验证共享数据库地址不会覆盖当前进程配置。
-// 输入：数据库保存服务器地址，当前进程配置本地 SSH 隧道地址。
-// 输出：Miniflux 客户端收到当前进程配置地址。
-// 副作用：执行模拟来源查询和状态更新。
-func TestServiceUsesRuntimeFeedURL(t *testing.T) {
-	// 1. 创建包含服务器持久化地址的模拟文章来源。
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New() error = %v", err)
-	}
-	defer db.Close()
-	mock.ExpectQuery("SELECT id, source_code, source_name, source_type, feed_url, is_active").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "source_code", "source_name", "source_type", "feed_url", "is_active",
-			"description", "last_fetch_at", "last_fetch_status", "last_fetch_message",
-		}).AddRow(1, "wechat_aggregate", "Miniflux 投资文章", "miniflux",
-			"http://8.138.123.59:5000", 1, "", "", "success", ""))
-	mock.ExpectExec("UPDATE investment_article_source").WillReturnResult(sqlmock.NewResult(0, 1))
-
-	// 2. 执行本地同步并核对只使用本地进程的隧道地址。
-	articles := &recordingArticleGateway{}
-	service := NewService(NewRepository(db), ServiceOptions{
-		Articles: articles, FeedURL: "http://127.0.0.1:15000",
-	})
-	if _, err := service.Sync(context.Background(), 30, false, 0); err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
-	if articles.feedURL != "http://127.0.0.1:15000" {
-		t.Fatalf("Fetch() feedURL = %q", articles.feedURL)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("database expectations = %v", err)
-	}
-}
-
 // Fetch 返回跨越单批分析上限的文章集合。
 // 输入：ctx、sourceID、feedURL 和 limit 模拟正式客户端。
 // 输出：返回 count 篇具有唯一键的文章。
@@ -88,7 +55,7 @@ func (g manyArticleGateway) Fetch(ctx context.Context, sourceID int64, feedURL s
 		items = append(items, client.ArticleItem{
 			ArticleKey: fmt.Sprintf("scheduled-%03d", index), ExternalID: fmt.Sprintf("scheduled-%03d", index),
 			Title: fmt.Sprintf("定时文章 %03d", index), Link: fmt.Sprintf("https://example.com/scheduled/%d", index),
-			Author: "完整作者", PublishedAt: shanghaiNowText(), Summary: "摘要", Content: "正文",
+			Author: "完整作者", PublishedAt: appdatabase.TimestampText(time.Now()), Summary: "摘要", Content: "正文",
 		})
 	}
 	return items, nil
@@ -102,7 +69,7 @@ func (f *fixedArticleGateway) Fetch(ctx context.Context, sourceID int64, feedURL
 	// 1. 返回稳定键和完整作者的规范化文章。
 	return []client.ArticleItem{{
 		ArticleKey: "sync-article-key", ExternalID: "sync-1", Title: "同步文章",
-		Link: "https://example.com/sync", Author: "完整作者", PublishedAt: shanghaiNowText(),
+		Link: "https://example.com/sync", Author: "完整作者", PublishedAt: appdatabase.TimestampText(time.Now()),
 		Summary: "同步摘要", Content: "同步正文",
 	}}, nil
 }
@@ -199,8 +166,8 @@ func TestServiceSyncsArticlesAndAnalyzesThroughUnifiedEntry(t *testing.T) {
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
-		t.Fatalf("SyncDefaultSource() error = %v", err)
+	if err := insertTestSource(db, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("insertTestSource() error = %v", err)
 	}
 	sourceClient := &fixedArticleGateway{}
 	service := NewService(repository, ServiceOptions{Articles: sourceClient, AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: fixedAnalysisGateway{}}}})
@@ -242,8 +209,8 @@ func TestServiceAnalyzesAndClassifiesArticleWithOneModelCall(t *testing.T) {
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
-		t.Fatalf("SyncDefaultSource() error = %v", err)
+	if err := insertTestSource(db, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("insertTestSource() error = %v", err)
 	}
 	gateway := &countingCombinedAnalysisGateway{}
 	service := NewService(repository, ServiceOptions{
@@ -284,8 +251,8 @@ func TestServiceRetriesMalformedArticleJSON(t *testing.T) {
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
-		t.Fatalf("SyncDefaultSource() error = %v", err)
+	if err := insertTestSource(db, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("insertTestSource() error = %v", err)
 	}
 	gateway := &retryingArticleAnalysisGateway{}
 	service := NewService(repository, ServiceOptions{Articles: &fixedArticleGateway{}, AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: gateway}}})
@@ -327,8 +294,8 @@ func TestServiceRepairsMissingArticleClassifications(t *testing.T) {
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
-		t.Fatalf("SyncDefaultSource() error = %v", err)
+	if err := insertTestSource(db, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("insertTestSource() error = %v", err)
 	}
 	gateway := &incompleteArticleClassificationGateway{}
 	service := NewService(repository, ServiceOptions{Articles: &fixedArticleGateway{}, AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: gateway}}})
@@ -363,8 +330,8 @@ func TestServiceScheduledSyncDrainsMultipleAnalysisBatches(t *testing.T) {
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
-		t.Fatalf("SyncDefaultSource() error = %v", err)
+	if err := insertTestSource(db, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("insertTestSource() error = %v", err)
 	}
 	service := NewService(repository, ServiceOptions{
 		Articles: manyArticleGateway{count: 51}, AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: fixedAnalysisGateway{}}},
@@ -389,8 +356,8 @@ func TestServiceScheduledSyncFailsWithPendingArticles(t *testing.T) {
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
-		t.Fatalf("SyncDefaultSource() error = %v", err)
+	if err := insertTestSource(db, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("insertTestSource() error = %v", err)
 	}
 	service := NewService(repository, ServiceOptions{Articles: manyArticleGateway{count: 1}})
 
@@ -418,8 +385,8 @@ func TestServiceScheduledSyncFailsWhenArticleLatestIsStale(t *testing.T) {
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
-		t.Fatalf("SyncDefaultSource() error = %v", err)
+	if err := insertTestSource(db, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("insertTestSource() error = %v", err)
 	}
 	service := NewService(repository, ServiceOptions{
 		Articles: staleArticleGateway{}, AnalysisModels: []AnalysisModelConfig{{ID: "test-model", Model: "test-model", Analyzer: fixedAnalysisGateway{}}},
@@ -445,8 +412,8 @@ func TestServiceScheduledSyncAllowsNoNewWeReadArticles(t *testing.T) {
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
-		t.Fatalf("SyncDefaultSource() error = %v", err)
+	if err := insertTestSource(db, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("insertTestSource() error = %v", err)
 	}
 	service := NewService(repository, ServiceOptions{Articles: &recordingArticleGateway{}})
 
@@ -469,9 +436,9 @@ func TestServiceScheduledSyncReportsMissingClassifierForUnknownSignals(t *testin
 			"id", "source_code", "source_name", "source_type", "feed_url", "is_active",
 			"description", "last_fetch_at", "last_fetch_status", "last_fetch_message",
 		}))
-	mock.ExpectQuery("SELECT[[:space:]]+\\(SELECT COUNT\\(\\*\\) FROM investment_article_source").
-		WillReturnRows(sqlmock.NewRows([]string{"sources", "articles", "analyzed", "pending", "latest"}).
-			AddRow(0, 1, 1, 0, "2026-07-20 10:00:00"))
+	mock.ExpectQuery("SELECT[[:space:]]+\\(SELECT COUNT\\(\\*\\) FROM investment_article\\)").
+		WillReturnRows(sqlmock.NewRows([]string{"articles", "analyzed", "pending", "latest"}).
+			AddRow(1, 1, 0, "2026-07-20 10:00:00"))
 	mock.ExpectQuery("SELECT COALESCE\\(analysis.recommendations_json").
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"recommendations_json", "risks_json", "market_mood", "prediction", "occurred_at"}).

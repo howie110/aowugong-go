@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	appdatabase "github.com/howiedata/aowugong-go/internal/database"
 )
 
 func (r *Repository) lookupDispatch(ctx context.Context, source, key, message string) (DispatchResult, bool, error) {
@@ -28,7 +30,8 @@ func (r *Repository) lookupDispatch(ctx context.Context, source, key, message st
 func (r *Repository) claimDispatch(ctx context.Context, source, key, title, message string) (DispatchResult, error) {
 	res, err := r.db.ExecContext(ctx, `INSERT INTO notification_log(channel,title,message,status,error_message,sent_at,source,request_id)
 	VALUES(?,?,?,'unknown',?,?,?,?) ON CONFLICT(source,request_id) DO NOTHING`,
-		"wecom_bot", title, message, "发送中或结果未确认；禁止自动重发", time.Now(), source, key)
+		"wecom_bot", title, message, "发送中或结果未确认；禁止自动重发",
+		appdatabase.TimestampText(time.Now()), source, key)
 	if err != nil {
 		return DispatchResult{}, ErrStorage
 	}

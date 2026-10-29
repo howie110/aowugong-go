@@ -41,12 +41,6 @@ export function NotificationExternal() {
     };
   }, []);
 
-  const endpoint = config ? `${window.location.origin}${config.endpoint}` : "";
-  const token = config?.token || "";
-  const curlExample = buildCurl(endpoint, tokenPlaceholder);
-  const mcpExample = JSON.stringify(buildMCP(endpoint, tokenPlaceholder), null, 2);
-  const promptExample = buildPrompt(endpoint, tokenPlaceholder);
-
   /** copy 把文本写入剪贴板并反馈结果。 */
   async function copy(text: string, label: string) {
     try {
@@ -60,6 +54,25 @@ export function NotificationExternal() {
   if (isLoading) {
     return <Skeleton className="h-64" />;
   }
+  if (!config) {
+    return (
+      <Card className="min-w-0">
+        <CardHeader><CardTitle>外部调用 / MCP</CardTitle></CardHeader>
+        <CardContent>
+          <Alert>
+            <AlertTitle>无法读取外部调用配置</AlertTitle>
+            <AlertDescription>请刷新页面重试。</AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const endpoint = `${window.location.origin}${config.endpoint}`;
+  const token = config.token;
+  const curlExample = buildCurl(endpoint, tokenPlaceholder);
+  const mcpExample = JSON.stringify(buildMCP(endpoint, tokenPlaceholder, config), null, 2);
+  const promptExample = buildPrompt(endpoint, tokenPlaceholder, config);
 
   return (
     <Card className="min-w-0">
@@ -70,7 +83,7 @@ export function NotificationExternal() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {!config?.configured ? (
+        {!config.configured ? (
           <Alert>
             <AlertTitle>尚未配置 external 项目 Token</AlertTitle>
             <AlertDescription>
@@ -124,23 +137,23 @@ export function NotificationExternal() {
           title="MCP 工具描述（可直接复制给 AI/Agent）"
           icon={<Copy className="h-4 w-4" />}
           code={mcpExample}
-          onCopy={() => void copy(JSON.stringify(buildMCP(endpoint, token || tokenPlaceholder), null, 2), "MCP 工具描述")}
+          onCopy={() => void copy(JSON.stringify(buildMCP(endpoint, token || tokenPlaceholder, config), null, 2), "MCP 工具描述")}
         />
 
         <CodeBlock
           title="给 AI 的使用说明"
           icon={<Copy className="h-4 w-4" />}
           code={promptExample}
-          onCopy={() => void copy(buildPrompt(endpoint, token || tokenPlaceholder), "使用说明")}
+          onCopy={() => void copy(buildPrompt(endpoint, token || tokenPlaceholder, config), "使用说明")}
         />
 
         <div className="rounded-md border p-3 text-sm text-muted-foreground">
           <div className="font-medium text-foreground">调用规则</div>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li>只接受 `request_id`、`title`、`content` 三个字段，不支持文件或附件。</li>
-            <li>标题单行；完整消息最多 2048 UTF-8 字节；请求最多 16 KiB。</li>
+            <li>标题单行；完整消息最多 {config.max_message_bytes} UTF-8 字节；请求最多 {Math.round(config.max_request_bytes / 1024)} KiB。</li>
             <li>同一来源、同一 `request_id`、相同内容幂等；相同编号不同内容返回 409。</li>
-            <li>全部调用共享每分钟 10 次新发送额度，返回 429 时按 `Retry-After` 等待。</li>
+            <li>全部调用共享每分钟 {config.rate_limit_per_minute} 次新发送额度，返回 429 时按 `Retry-After` 等待。</li>
             <li>鉴权头为 `Authorization: Bearer &lt;固定 Key&gt;`，不能用网页登录 Token 代替。</li>
           </ul>
         </div>
@@ -176,7 +189,7 @@ function buildCurl(endpoint: string, token: string) {
 }
 
 /** buildMCP 生成给 AI/Agent 的工具描述；只支持文本。 */
-function buildMCP(endpoint: string, token: string) {
+function buildMCP(endpoint: string, token: string, limits: NotificationExternalConfig) {
   return {
     name: "send_notification",
     description: "Send a plain-text WeChat notification. Text only; no files or attachments.",
@@ -198,7 +211,7 @@ function buildMCP(endpoint: string, token: string) {
         },
         content: {
           type: "string",
-          description: "Plain text notification body. The final message is limited to 2048 UTF-8 bytes.",
+          description: `Plain text notification body. The final message is limited to ${limits.max_message_bytes} UTF-8 bytes.`,
         },
       },
       required: ["request_id", "title", "content"],
@@ -207,12 +220,12 @@ function buildMCP(endpoint: string, token: string) {
 }
 
 /** buildPrompt 生成一段可直接喂给 AI 的调用说明。 */
-function buildPrompt(endpoint: string, token: string) {
+function buildPrompt(endpoint: string, token: string, limits: NotificationExternalConfig) {
   return [
     "你可以调用 send_notification 发送微信通知。",
     `接口：POST ${endpoint}`,
     `鉴权：Authorization: Bearer ${token}`,
     "请求体：{\"request_id\":\"唯一编号\",\"title\":\"单行标题\",\"content\":\"纯文本正文\"}",
-    "规则：只发文本，不发文件；request_id 用于幂等；正文最多 2048 UTF-8 字节；全局限流每分钟 10 次。",
+    `规则：只发文本，不发文件；request_id 用于幂等；正文最多 ${limits.max_message_bytes} UTF-8 字节；全局限流每分钟 ${limits.rate_limit_per_minute} 次。`,
   ].join("\n");
 }

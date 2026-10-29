@@ -59,9 +59,12 @@ type Notifier interface {
 }
 
 // Definition 描述注册任务的名称、Cron、手动属性、业务互斥键、超时和入口。
+// Category 和 FailureTitle 只影响失败通知标题，空值分别回退到“任务”和任务名。
 type Definition struct {
 	Name           string
 	Description    string
+	Category       string
+	FailureTitle   string
 	Schedule       string
 	ManualOnly     bool
 	ConcurrencyKey string
@@ -267,7 +270,7 @@ func (r *Registry) Run(ctx context.Context, name string, source Source) (Result,
 
 	// 5. 失败时发送固定四段微信通知，并返回原始任务错误。
 	if outcome.err != nil {
-		r.notifyFailure(definition.Name, executionID, finishedAt, outcome.err)
+		r.notifyFailure(definition, executionID, finishedAt, outcome.err)
 		return result, fmt.Errorf("执行任务 %s: %w", definition.Name, outcome.err)
 	}
 	return result, nil
@@ -357,10 +360,11 @@ func (r *Registry) finishExecution(ctx context.Context, result Result, runErr er
 }
 
 // notifyFailure 使用固定四段格式发送任务失败微信。
-// 输入：name 是任务名，executionID 是本次记录，failedAt 是失败时间，runErr 是任务错误。
+// 输入：definition 是任务定义，executionID 是本次记录，failedAt 是失败时间，runErr 是任务错误。
 // 输出：无，通知自身失败只写日志，不覆盖任务错误。
 // 副作用：读取 PostgreSQL；新故障调用统一 notification service 发送微信并写通知日志。
-func (r *Registry) notifyFailure(name string, executionID int64, failedAt time.Time, runErr error) {
+func (r *Registry) notifyFailure(definition Definition, executionID int64, failedAt time.Time, runErr error) {
+	name := definition.Name
 	// 1. 未配置通知服务时记录警告并结束。
 	if r.notifier == nil {
 		r.logger.Warn("任务失败通知未配置", "job", name)
@@ -379,24 +383,25 @@ func (r *Registry) notifyFailure(name string, executionID int64, failedAt time.T
 		name, failedAt.Format("2006-01-02 15:04:05"), runErr.Error())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := r.notifier.Text(ctx, failureTitleParts(name), body); err != nil {
+	if err := r.notifier.Text(ctx, failureTitle(definition), body); err != nil {
 		r.logger.Error("发送任务失败通知失败", "job", name, "error", err)
 	}
 }
 
-// failureTitleParts 按任务类型生成微信标题分类。
-// 输入：name 是任务名称。
+// failureTitle 按任务定义生成微信标题分类。
+// 输入：definition 提供 Category、FailureTitle 和 Name。
 // 输出：返回“分类 / 对象”形式的标题层级。
 // 副作用：无。
-func failureTitleParts(name string) []string {
-	switch name {
-	case "check_service_monitors":
-		return []string{"监控", "服务异常"}
-	case "backup_postgres", "backup_github_code", "email_vaultwarden_backup":
-		return []string{"备份", name}
-	default:
-		return []string{"任务", name}
+func failureTitle(definition Definition) []string {
+	category := strings.TrimSpace(definition.Category)
+	if category == "" {
+		category = "任务"
 	}
+	subject := strings.TrimSpace(definition.FailureTitle)
+	if subject == "" {
+		subject = definition.Name
+	}
+	return []string{category, subject}
 }
 
 // shouldNotifyFailure 判断本次失败是否是成功后出现的新故障或错误内容已经变化。

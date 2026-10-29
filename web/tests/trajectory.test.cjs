@@ -13,12 +13,14 @@ function load() {
     ).outputText,
     {
       exports,
-      require: () => ({
-        requestJSON: (...x) => {
-          calls.push(x);
-          return Promise.resolve({});
-        },
-      }),
+      require: (name) => name === "@/lib/beijing-time"
+        ? require("./helpers/beijing-time.cjs")
+        : ({
+          requestJSON: (...x) => {
+            calls.push(x);
+            return Promise.resolve({});
+          },
+        }),
       Date,
       URLSearchParams,
     },

@@ -1,3 +1,4 @@
+import { beijingToday, formatBeijingDateTime } from "@/lib/beijing-time";
 import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, FileImage, ImageUp, RefreshCw, UploadCloud, X } from "lucide-react";
 
@@ -23,9 +24,7 @@ import { fetchRecentSnapshots, uploadPositionSnapshots, type AssetSnapshot, type
 import { notify } from "@/lib/notify";
 
 function getTodayText() {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60000;
-  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+  return beijingToday();
 }
 
 export function PositionUploadPage() {
@@ -273,15 +272,7 @@ function ImportMeta({ label, value }: { label: string; value: string }) {
 }
 
 function formatDateTime(value?: string | null) {
-  if (!value) {
-    return "-";
-  }
-  return new Date(value).toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatBeijingDateTime(value, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 /** formatFileSize 将文件字节数格式化为易读文本，无副作用。 */

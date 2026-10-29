@@ -163,7 +163,7 @@ func (s *DashboardService) BacktestSummary() PageSummary {
 	// 1. 返回与纯计算回测包一致的前端展示模型。
 	return PageSummary{
 		Title:       "回测",
-		Description: "策略回测由纯 Go 计算引擎执行，统一返回收益、回撤和交易统计。",
+		Description: "回测引擎已实现，页面接口尚未接入。",
 		Modules: []Item{
 			{Name: "engine", Description: "只处理回测执行流程和持仓变化"},
 			{Name: "metrics", Description: "只处理收益、回撤和胜率等统计"},
@@ -171,9 +171,9 @@ func (s *DashboardService) BacktestSummary() PageSummary {
 			{Name: "service", Description: "供 API、定时任务和 CLI 复用的统一入口"},
 		},
 		Items: []Item{
-			{Name: "股票回测", Entry: "RunStockBacktest", Status: "ready"},
-			{Name: "ETF 回测", Entry: "RunETFBacktest", Status: "ready"},
-			{Name: "Web3 回测", Entry: "RunWeb3Backtest", Status: "ready"},
+			{Name: "股票回测", Entry: "RunStockBacktest", Status: "未接入"},
+			{Name: "ETF 回测", Entry: "RunETFBacktest", Status: "未接入"},
+			{Name: "Web3 回测", Entry: "RunWeb3Backtest", Status: "未接入"},
 		},
 	}
 }

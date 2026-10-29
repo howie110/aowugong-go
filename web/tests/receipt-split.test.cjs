@@ -12,7 +12,9 @@ function load() {
     ).outputText,
     {
       exports,
-      require: () => ({ requestJSON: () => {} }),
+      require: (name) => name === "@/lib/beijing-time"
+        ? require("./helpers/beijing-time.cjs")
+        : ({ requestJSON: () => {} }),
       Date,
       URLSearchParams,
     },

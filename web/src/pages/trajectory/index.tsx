@@ -1,3 +1,4 @@
+import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { useEffect, useState } from "react";
 import { RefreshCw, MapPin, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,12 +15,7 @@ import {
   type TrajectoryReport,
 } from "@/lib/trajectory";
 const time = (value: string | null) =>
-  value
-    ? new Date(value).toLocaleString("zh-CN", {
-        timeZone: "Asia/Shanghai",
-        hour12: false,
-      })
-    : "尚无记录";
+  formatBeijingDateTime(value, { hour12: false }, "尚无记录");
 const numeric = (value: number | null, unit = "") =>
   value === null
     ? "—"

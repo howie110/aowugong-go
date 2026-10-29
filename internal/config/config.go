@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"net/netip"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -23,7 +24,8 @@ const (
 	defaultTokenLifetime      = 72 * time.Hour
 	defaultWorkNavigationPath = "storage/private/work/navigation.json"
 	defaultVPNSourceDir       = "storage/private/vpn"
-	defaultBackupDir          = "storage/backup"
+	DefaultBackupDir          = "storage/backup"
+	DefaultBackupRetention    = 7
 	defaultPositionUploadDir  = "storage/uploads/positions"
 	defaultPositionTempDir    = "storage/temp/positions"
 	defaultPictureProxyHost   = "pic.aowugong.top"
@@ -160,12 +162,10 @@ type Email struct {
 	Password string
 }
 
-// Miniflux 描述投资文章聚合 API 配置。
+// Miniflux 描述独立 RSS 服务的本机地址和公网展示地址。
 type Miniflux struct {
 	BaseURL    string
 	MonitorURL string
-	APIToken   string
-	Category   string
 }
 
 // WeRead 描述微信读书 Agent Gateway 配置。
@@ -191,6 +191,33 @@ type Tushare struct {
 // WeComBot 描述企业微信群机器人文本通知配置。
 type WeComBot struct {
 	WebhookURL string
+}
+
+// Configured 返回企业微信官方 Webhook 是否有效。
+func (c WeComBot) Configured() bool {
+	return ValidateWeComBotWebhook(c.WebhookURL) == nil
+}
+
+// ValidateWeComBotWebhook 校验企业微信官方 HTTPS Webhook。
+func ValidateWeComBotWebhook(address string) error {
+	parsed, err := url.Parse(strings.TrimSpace(address))
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() != "qyapi.weixin.qq.com" || parsed.Port() != "" ||
+		parsed.User != nil || parsed.Fragment != "" || parsed.Path != "/cgi-bin/webhook/send" {
+		return fmt.Errorf("WECOM_BOT_WEBHOOK_URL 必须是企业微信官方 HTTPS Webhook")
+	}
+	query := parsed.Query()
+	if len(query) != 1 || len(query["key"]) != 1 || strings.TrimSpace(query.Get("key")) == "" {
+		return fmt.Errorf("WECOM_BOT_WEBHOOK_URL 缺少有效 key")
+	}
+	return nil
+}
+
+// Validate 校验跨字段的启动配置。
+func (c Config) Validate() error {
+	if len(c.NotificationTokens) > 0 && !c.Clients.WeComBot.Configured() {
+		return fmt.Errorf("启用通知接口必须配置有效的 WECOM_BOT_WEBHOOK_URL")
+	}
+	return nil
 }
 
 // PositionOCR 描述仓位截图 OCR 配置。
@@ -239,8 +266,8 @@ func Load(lookup LookupEnv) (Config, error) {
 		},
 		Storage: Storage{
 			WorkNavigationPath: defaultWorkNavigationPath,
-			BackupDir:          defaultBackupDir,
-			BackupRetention:    7,
+			BackupDir:          DefaultBackupDir,
+			BackupRetention:    DefaultBackupRetention,
 			PositionUploadDir:  defaultPositionUploadDir,
 			PositionTempDir:    defaultPositionTempDir,
 		},
@@ -263,7 +290,7 @@ func Load(lookup LookupEnv) (Config, error) {
 				SkillVersion: "1.0.4",
 			},
 			Miniflux: Miniflux{
-				BaseURL: "http://127.0.0.1:5000", MonitorURL: "https://miniflux.aowugong.top/", Category: "投资文章",
+				BaseURL: "http://127.0.0.1:5000", MonitorURL: "https://miniflux.aowugong.top/",
 			},
 			DeepSeek: DeepSeek{BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"},
 			Tushare:  Tushare{BaseURL: "https://api.tushare.pro"},
@@ -355,8 +382,6 @@ func Load(lookup LookupEnv) (Config, error) {
 	loadString(lookup, "WEREAD_SKILL_VERSION", &cfg.Clients.WeRead.SkillVersion)
 	loadString(lookup, "MINIFLUX_BASE_URL", &cfg.Clients.Miniflux.BaseURL)
 	loadString(lookup, "MINIFLUX_MONITOR_URL", &cfg.Clients.Miniflux.MonitorURL)
-	loadString(lookup, "MINIFLUX_API_TOKEN", &cfg.Clients.Miniflux.APIToken)
-	loadString(lookup, "MINIFLUX_CATEGORY", &cfg.Clients.Miniflux.Category)
 	loadString(lookup, "DEEPSEEK_BASE_URL", &cfg.Clients.DeepSeek.BaseURL)
 	loadString(lookup, "DEEPSEEK_API_KEY", &cfg.Clients.DeepSeek.APIKey)
 	loadString(lookup, "DEEPSEEK_MODEL", &cfg.Clients.DeepSeek.Model)

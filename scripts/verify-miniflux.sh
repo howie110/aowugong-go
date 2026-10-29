@@ -44,14 +44,20 @@ echo "AOWUGONG"
 curl -fsS http://127.0.0.1:12345/api/v1/health
 echo
 
-# 5. 核对 aowugong 已配置 Miniflux 且旧 RSS 参数不存在，不输出配置值。
+# 5. 核对 aowugong 只保留 Miniflux 地址，旧 RSS 与已废弃的 Token/分类配置不存在。
 echo "AOWUGONG_MINIFLUX_CONFIG"
-for key in MINIFLUX_BASE_URL MINIFLUX_MONITOR_URL MINIFLUX_API_TOKEN MINIFLUX_CATEGORY; do
+for key in MINIFLUX_BASE_URL MINIFLUX_MONITOR_URL; do
 	if ! grep -Eq "^${key}=.+" /opt/aowugong-go/shared/.env; then
 		echo "missing ${key}" >&2
 		exit 1
 	fi
 	echo "${key}=configured"
+done
+for key in MINIFLUX_API_TOKEN MINIFLUX_CATEGORY; do
+	if grep -Eq "^${key}=" /opt/aowugong-go/shared/.env; then
+		echo "废弃配置仍存在：${key}" >&2
+		exit 1
+	fi
 done
 if grep -Eq '^(INVESTMENT_ARTICLE_AGGREGATE_RSS_URL|WECHAT_RSS_MONITOR_URL)=' /opt/aowugong-go/shared/.env; then
 	echo "旧 WeChatRSS 配置仍存在" >&2

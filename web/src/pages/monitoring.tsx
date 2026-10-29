@@ -1,3 +1,4 @@
+import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { ExternalLink, RefreshCw, Radar } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -194,13 +195,5 @@ function MonitorStatusBadge({ status }: { status: string }) {
 }
 
 function formatDate(value?: string | null) {
-  if (!value) {
-    return "-";
-  }
-  return new Date(value).toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatBeijingDateTime(value, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }

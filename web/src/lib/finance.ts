@@ -1,5 +1,4 @@
 import { requestJSON } from "@/lib/request";
-import type { WeReadDashboardData } from "@/lib/weread";
 
 export type FinancePageKey =
   | "overview"
@@ -61,8 +60,16 @@ export type FinancePageData = {
   runner?: string;
   fail_notify?: string;
   receiver_count?: number;
-  weread?: WeReadDashboardData;
 };
+
+// 只有这些页面从 finance summary 接口读取统一页面数据。
+export type FinanceDashboardPageKey =
+  | "overview"
+  | "backtest"
+  | "data"
+  | "jobs"
+  | "trading"
+  | "notifications";
 
 export const pagePermissionMap: Record<FinancePageKey, string> = {
   overview: "page:finance:overview",
@@ -179,31 +186,13 @@ export function getFinancePageMeta(pageKey: FinancePageKey) {
   return pageMetaMap[pageKey];
 }
 
-const pageEndpointMap: Record<FinancePageKey, string> = {
-  trajectory: "/api/v1/trajectory/points",
-  receiptSplit: "/api/v1/receipt-split/statistics",
-  analytics: "/api/v1/analytics/report/",
-  chatArchive: "/api/v1/chat-archive/conversations",
- blogStatus: "/api/v1/blog/admin/statuses",
+const pageEndpointMap: Record<FinanceDashboardPageKey, string> = {
   overview: "/api/v1/finance/overview/",
-  weread: "/api/v1/weread/dashboard",
-  positions: "/api/v1/finance/positions/summary",
-  stockAnalysis: "/api/v1/finance/stock-analysis/summary",
-  articleFetch: "/api/v1/finance/article-analysis/fetch-summary",
-  articleAnalysis: "/api/v1/finance/article-analysis/summary",
   backtest: "/api/v1/finance/backtest/summary",
   data: "/api/v1/finance/data/summary",
   jobs: "/api/v1/finance/jobs/summary",
   trading: "/api/v1/finance/trading/summary",
   notifications: "/api/v1/finance/notifications/summary",
-  mahjong: "/api/v1/mahjong/summary",
-  subscriptions: "/api/v1/subscriptions/summary",
-  monitoring: "/api/v1/monitoring/summary",
-  work: "/api/v1/work/navigation",
-  database: "/api/v1/database/summary",
-  vpnDistribution: "/api/v1/vpn/distribution/summary",
-  vpnResources: "/api/v1/vpn/resources/summary",
-  permissions: "/api/v1/permissions/summary",
 };
 
 // 页面路径只在此维护；保留已有 URL 和未知路径的控制台回退。
@@ -245,7 +234,7 @@ export function getFinancePageFromPath(pathname: string): FinancePageKey {
 
 export { ApiError } from "@/lib/request";
 
-export async function fetchFinancePage(pageKey: FinancePageKey): Promise<FinancePageData> {
+export async function fetchFinancePage(pageKey: FinanceDashboardPageKey): Promise<FinancePageData> {
   return requestJSON<FinancePageData>(pageEndpointMap[pageKey], {}, "获取页面数据失败");
 }
 

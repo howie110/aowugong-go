@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { Button } from "@/components/ui/button";
 import { deleteStatus, listStatuses, type BlogStatus } from "@/lib/blog";
 import { StatusEditor } from "./blog/status-editor";
@@ -57,7 +58,7 @@ export function BlogStatusPage() {
       {error && <div role="alert" className="blog-error">{error} <Button variant="outline" onClick={() => setReload((value) => value + 1)}>重新读取</Button></div>}
       {!loading && !error && !statuses.length && <p className="text-sm text-muted-foreground">还没有发布动态。</p>}
       {statuses.map((status) => <article key={status.id} className="blog-status-card">
-        <div className="mb-4 text-xs text-muted-foreground"><time dateTime={status.published_at ?? status.created_at}>{new Date(status.published_at ?? status.created_at).toLocaleString("zh-CN")}</time>{!status.published && <span className="ml-2">未发布</span>}</div>
+        <div className="mb-4 text-xs text-muted-foreground"><time dateTime={status.published_at ?? status.created_at}>{formatBeijingDateTime(status.published_at ?? status.created_at, { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}</time>{!status.published && <span className="ml-2">未发布</span>}</div>
         {editing === status.id ? <StatusEditor initial={status} onSaved={(item) => saved(item, true)} onCancel={() => setEditing(null)} /> : <>
           <StatusImageGallery images={status.images} />
           <p className="blog-status-text">{status.body}</p>

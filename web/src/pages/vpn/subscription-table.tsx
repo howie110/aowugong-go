@@ -1,3 +1,4 @@
+import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { Ban, Ellipsis, RefreshCw, RotateCw, UploadCloud } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -100,5 +101,5 @@ export function UserSubscriptionTable({
 }
 
 function formatTime(value?: string | null) {
-  return value ? value.slice(0, 16) : "-";
+  return formatBeijingDateTime(value, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }, "-", "sv-SE");
 }

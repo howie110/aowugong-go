@@ -2,21 +2,21 @@ const TrajectoryPage = lazy(() => import("@/pages/trajectory").then(module => ({
 const ReceiptSplitPage = lazy(() => import("@/pages/receipt-split").then(module => ({ default:module.ReceiptSplitPage })));
 const AnalyticsPage = lazy(() => import("@/pages/analytics").then((module) => ({ default: module.AnalyticsPage })));
 import { requestWorkbenchNavigation } from "@/lib/navigation-guard";
-import { canViewChatArchive } from "@/lib/chat-archive";
-import { Suspense, lazy, useEffect, useState } from "react";
+import { type ReactNode, Suspense, lazy, useEffect, useState } from "react";
 
 import { pageLabelMap } from "@/components/layout/app-navigation";
 import { AppShell } from "@/components/layout/app-shell";
 import { UserProfile, getProfile } from "@/lib/auth";
 import {
   ApiError,
+  type FinanceDashboardPageKey,
   type FinancePageData,
   type FinancePageKey,
   fetchFinancePage,
   getFinancePageFromPath,
   getFinancePagePath,
-  pagePermissionMap,
 } from "@/lib/finance";
+import { canAccessPage } from "@/lib/permissions";
 import {
   BacktestContent,
   DataContent,
@@ -45,26 +45,13 @@ const DatabasePage = lazy(() => import("@/pages/database").then((module) => ({ d
 const VPNDistributionPage = lazy(() => import("@/pages/vpn").then((module) => ({ default: module.VPNDistributionPage })));
 const VPNResourcesPage = lazy(() => import("@/pages/vpn").then((module) => ({ default: module.VPNResourcesPage })));
 
-const selfManagedPages = new Set<FinancePageKey>([
-  "trajectory",
-  "receiptSplit",
-  "analytics",
-  "chatArchive",
- "blogStatus",
-  "positions",
-  "stockAnalysis",
-  "articleFetch",
-  "articleAnalysis",
-  "weread",
-  "mahjong",
-  "subscriptions",
-  "work",
-  "permissions",
-  "monitoring",
-  "database",
-  "vpnDistribution",
-  "vpnResources",
-]);
+const dashboardDataPages = ["overview", "backtest", "data", "jobs", "trading", "notifications"] as const;
+const dashboardDataPageSet = new Set<FinancePageKey>(dashboardDataPages);
+
+function isDashboardDataPage(pageKey: FinancePageKey): pageKey is FinanceDashboardPageKey {
+  return dashboardDataPageSet.has(pageKey);
+}
+
 const pageOrder: FinancePageKey[] = [
   "overview",
  "blogStatus",
@@ -141,7 +128,7 @@ export function DashboardPage({ initialPage }: DashboardPageProps) {
         isCancelled = true;
       };
     }
-    if (selfManagedPages.has(activePage)) {
+    if (!isDashboardDataPage(activePage)) {
       setIsPageLoading(false);
       return () => {
         isCancelled = true;
@@ -219,7 +206,7 @@ export function DashboardPage({ initialPage }: DashboardPageProps) {
         />
         {pageError ? (
           <ErrorCard message={pageError} />
-        ) : !selfManagedPages.has(activePage) && (isPageLoading || !pageData) ? (
+        ) : isDashboardDataPage(activePage) && (isPageLoading || !pageData) ? (
           <LoadingCard />
         ) : (
           <Suspense fallback={<LoadingCard />}>
@@ -240,77 +227,41 @@ function FinancePageBody({
   pageData: FinancePageData | null;
   isStockAnalysisMasked: boolean;
 }) {
-  if (pageKey === "blogStatus") { return <BlogStatusPage />; }
-  if (pageKey === "overview") {
-    return pageData ? <OverviewContent pageData={pageData} /> : <LoadingCard />;
+  const selfManagedComponents: Record<Exclude<FinancePageKey, FinanceDashboardPageKey>, () => ReactNode> = {
+    blogStatus: () => <BlogStatusPage />,
+    weread: () => <WeReadPage />,
+    mahjong: () => <MahjongPage />,
+    subscriptions: () => <SubscriptionsPage />,
+    trajectory: () => <TrajectoryPage />,
+    receiptSplit: () => <ReceiptSplitPage />,
+    analytics: () => <AnalyticsPage />,
+    chatArchive: () => <ChatArchivePage />,
+    work: () => <WorkPage />,
+    positions: () => <PositionUploadPage />,
+    stockAnalysis: () => <StockAnalysisPage isSensitiveMasked={isStockAnalysisMasked} />,
+    articleAnalysis: () => <ArticleAnalysisPage />,
+    articleFetch: () => <ArticleFetchPage />,
+    permissions: () => <PermissionsPage />,
+    monitoring: () => <MonitoringPage />,
+    database: () => <DatabasePage />,
+    vpnDistribution: () => <VPNDistributionPage />,
+    vpnResources: () => <VPNResourcesPage />,
+  };
+  const dashboardComponents: Record<FinanceDashboardPageKey, (data: FinancePageData) => ReactNode> = {
+    overview: (data) => <OverviewContent pageData={data} />,
+    backtest: (data) => <BacktestContent pageData={data} />,
+    data: (data) => <DataContent pageData={data} />,
+    jobs: (data) => <JobsContent pageData={data} />,
+    trading: (data) => <TradingContent pageData={data} />,
+    notifications: (data) => <NotificationsContent pageData={data} />,
+  };
+  if (isDashboardDataPage(pageKey)) {
+    if (!pageData) {
+      return <LoadingCard />;
+    }
+    return dashboardComponents[pageKey](pageData);
   }
-  if (pageKey === "weread") {
-    return <WeReadPage />;
-  }
-  if (pageKey === "mahjong") {
-    return <MahjongPage />;
-  }
-  if (pageKey === "subscriptions") {
-    return <SubscriptionsPage />;
-  }
-  if (pageKey === "trajectory") return <TrajectoryPage />;
-  if (pageKey === "receiptSplit") return <ReceiptSplitPage />;
-  if (pageKey === "analytics") return <AnalyticsPage />;
-  if (pageKey === "chatArchive") return <ChatArchivePage />;
-  if (pageKey === "work") {
-    return <WorkPage />;
-  }
-  if (pageKey === "positions") {
-    return <PositionUploadPage />;
-  }
-  if (pageKey === "stockAnalysis") {
-    return <StockAnalysisPage isSensitiveMasked={isStockAnalysisMasked} />;
-  }
-  if (pageKey === "articleAnalysis") {
-    return <ArticleAnalysisPage />;
-  }
-  if (pageKey === "articleFetch") {
-    return <ArticleFetchPage />;
-  }
-  if (pageKey === "permissions") {
-    return <PermissionsPage />;
-  }
-  if (pageKey === "monitoring") {
-    return <MonitoringPage />;
-  }
-  if (pageKey === "database") {
-    return <DatabasePage />;
-  }
-  if (pageKey === "vpnDistribution") {
-    return <VPNDistributionPage />;
-  }
-  if (pageKey === "vpnResources") {
-    return <VPNResourcesPage />;
-  }
-  if (!pageData) {
-    return <LoadingCard />;
-  }
-  if (pageKey === "backtest") {
-    return <BacktestContent pageData={pageData} />;
-  }
-  if (pageKey === "data") {
-    return <DataContent pageData={pageData} />;
-  }
-  if (pageKey === "jobs") {
-    return <JobsContent pageData={pageData} />;
-  }
-  if (pageKey === "trading") {
-    return <TradingContent pageData={pageData} />;
-  }
-  return <NotificationsContent pageData={pageData} />;
-}
-
-function canAccessPage(user: UserProfile, pageKey: FinancePageKey) {
-  if (pageKey === "trajectory" || pageKey === "chatArchive" || pageKey === "analytics" || pageKey === "receiptSplit") return canViewChatArchive(user);
-  if ((user.roles ?? []).includes("admin")) {
-    return true;
-  }
-  return (user.permissions ?? []).includes(pagePermissionMap[pageKey]);
+  return selfManagedComponents[pageKey]();
 }
 
 function getFirstAccessiblePage(user: UserProfile) {

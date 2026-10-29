@@ -21,8 +21,9 @@ type promptFeedbackPayload struct {
 }
 
 type weReadAccountPayload struct {
-	FetchIntervalMinutes int `json:"fetch_interval_minutes"`
-	FetchLimit           int `json:"fetch_limit"`
+	FetchIntervalMinutes *int  `json:"fetch_interval_minutes"`
+	FetchLimit           *int  `json:"fetch_limit"`
+	Enabled              *bool `json:"enabled"`
 }
 
 type articleAnalysisModelPayload struct {
@@ -44,7 +45,6 @@ func registerArticleAnalysisRoutes(router chi.Router, authService *auth.Service,
 
 	// 2. 抓取与模型执行接口使用管理员默认拥有的文章抓取权限。
 	fetch := router.With(authenticate(authService), requirePermission(rbacService, rbac.PermissionFinanceArticleFetch))
-	fetch.Get("/api/v1/finance/article-analysis/fetch-summary", handlers.fetchSummary)
 	fetch.Get("/api/v1/finance/article-analysis/sources", handlers.sources)
 	fetch.Get("/api/v1/finance/article-analysis/model-settings", handlers.analysisModelSettings)
 	fetch.Put("/api/v1/finance/article-analysis/model-settings", handlers.updateAnalysisModelSettings)
@@ -55,7 +55,6 @@ func registerArticleAnalysisRoutes(router chi.Router, authService *auth.Service,
 	fetch.Post("/api/v1/finance/article-analysis/weread/login", handlers.startWeReadLogin)
 	fetch.Get("/api/v1/finance/article-analysis/weread/login", handlers.pollWeReadLogin)
 	fetch.Get("/api/v1/finance/article-analysis/weread/login/qr.png", handlers.weReadLoginQR)
-	fetch.Post("/api/v1/finance/article-analysis/weread/accounts/refresh", handlers.refreshWeReadAccounts)
 	fetch.Patch("/api/v1/finance/article-analysis/weread/accounts/{accountID}", handlers.updateWeReadAccount)
 
 	// 3. 人工反馈只要求登录，处理器内额外校验 admin 角色。
@@ -156,20 +155,6 @@ func (h articleAnalysisHandlers) weReadLoginQR(w http.ResponseWriter, request *h
 	_, _ = w.Write(content)
 }
 
-// refreshWeReadAccounts 重新发现微信读书书架公众号。
-// 输入：request 已通过文章抓取权限校验。
-// 输出：写入最新 WeReadAccount 数组。
-// 副作用：调用微信读书并写 PostgreSQL。
-func (h articleAnalysisHandlers) refreshWeReadAccounts(w http.ResponseWriter, request *http.Request) {
-	// 1. 刷新书架并返回完整账号列表。
-	result, err := h.service.RefreshWeReadAccounts(request.Context())
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "upstream_error", "刷新微信读书公众号失败")
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
 // updateWeReadAccount 更新一个公众号的投资文章抓取策略。
 // 输入：路径 accountID 和 JSON 抓取频率、单次数量。
 // 输出：成功时写入 status=ok。
@@ -181,12 +166,24 @@ func (h articleAnalysisHandlers) updateWeReadAccount(w http.ResponseWriter, requ
 		writeError(w, http.StatusBadRequest, "invalid_request", "公众号抓取策略请求无效")
 		return
 	}
-	settings := articleanalysis.WeReadAccountSettings{
-		FetchIntervalMinutes: payload.FetchIntervalMinutes,
-		FetchLimit:           payload.FetchLimit,
+	accountID := chi.URLParam(request, "accountID")
+	var settings *articleanalysis.WeReadAccountSettings
+	if payload.FetchIntervalMinutes != nil || payload.FetchLimit != nil {
+		if payload.FetchIntervalMinutes == nil || payload.FetchLimit == nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "抓取频率和数量必须同时提供")
+			return
+		}
+		settings = &articleanalysis.WeReadAccountSettings{
+			FetchIntervalMinutes: *payload.FetchIntervalMinutes,
+			FetchLimit:           *payload.FetchLimit,
+		}
 	}
-	if err := h.service.SetWeReadAccountSettings(request.Context(), chi.URLParam(request, "accountID"), settings); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "更新公众号抓取策略失败")
+	if settings == nil && payload.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "没有可更新的公众号设置")
+		return
+	}
+	if err := h.service.UpdateWeReadAccount(request.Context(), accountID, settings, payload.Enabled); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "更新公众号设置失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -201,20 +198,6 @@ func (h articleAnalysisHandlers) summary(w http.ResponseWriter, request *http.Re
 	result, err := h.service.AnalysisSummary(request.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "读取投资文章分析摘要失败")
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-// fetchSummary 返回投资文章抓取页面摘要。
-// 输入：request 已通过认证和文章抓取权限校验。
-// 输出：写入 PageSummary JSON。
-// 副作用：读取 PostgreSQL 并写入 HTTP 响应。
-func (h articleAnalysisHandlers) fetchSummary(w http.ResponseWriter, request *http.Request) {
-	// 1. 读取统一摘要并转换服务错误。
-	result, err := h.service.FetchSummary(request.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "读取投资文章抓取摘要失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

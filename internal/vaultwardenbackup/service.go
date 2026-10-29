@@ -22,6 +22,8 @@ const recoveryInstructions = `这是旧服务器已经完全损坏或丢失时�
 
 var recoveryScriptNames = []string{
 	"install-vaultwarden.sh",
+	"install-vaultwarden-alert.sh",
+	"vaultwarden-backup-notify.sh",
 	"backup-vaultwarden.sh",
 	"restore-vaultwarden-disaster.sh",
 }

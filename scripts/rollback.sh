@@ -26,17 +26,6 @@ port="${address##*:}"
 temporary_service="$(mktemp)"
 changed=1
 
-# render_service 按指定发布目录安装正式 systemd unit。
-# 输入：release_path 是发布目录。
-# 输出：无。
-# 副作用：覆盖 aowugong-go systemd unit。
-render_service() {
-  local release_path="$1"
-  sed -e "s|@APP_ROOT@|$APP_ROOT|g" -e "s|@RUN_USER@|$RUN_USER|g" -e "s|@RUN_GROUP@|$RUN_GROUP|g" \
-    "$release_path/init/systemd/aowugong-go.service" > "$temporary_service"
-  install -m 0644 "$temporary_service" "$SYSTEMD_UNIT_DIR/${SERVICE_NAME}.service"
-}
-
 # restore_current 在回滚失败时恢复操作前版本。
 # 输入：由 EXIT trap 取得退出状态。
 # 输出：保留原退出状态。
@@ -47,7 +36,7 @@ restore_current() {
   if [ "$changed" -eq 1 ]; then
     set +e
     point_symlink "$APP_ROOT/current" "$current_target"
-    render_service "$current_target"
+    render_service "$current_target" "$SERVICE_NAME" "$SYSTEMD_UNIT_DIR" "$APP_ROOT" "$RUN_USER" "$RUN_GROUP" "$temporary_service"
     systemctl daemon-reload
     systemctl restart "$SERVICE_NAME" >/dev/null 2>&1 || true
     wait_for_health "http://127.0.0.1:${port}/api/v1/health" 30 || true
@@ -58,7 +47,7 @@ restore_current() {
 trap restore_current EXIT
 
 point_symlink "$APP_ROOT/current" "$previous_target"
-render_service "$previous_target"
+render_service "$previous_target" "$SERVICE_NAME" "$SYSTEMD_UNIT_DIR" "$APP_ROOT" "$RUN_USER" "$RUN_GROUP" "$temporary_service"
 systemctl daemon-reload
 systemctl restart "$SERVICE_NAME"
 wait_for_health "http://127.0.0.1:${port}/api/v1/health" 30 || die "上一版本健康检查失败"

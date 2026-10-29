@@ -2,10 +2,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const vm = require("node:vm");
-const ts = require("../node_modules/typescript");
+const { loadTypeScript } = require("./helpers/load-typescript.cjs");
 
-const pageUtilsPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/page-utils.ts");
 const signalRankPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/signal-rank-card.tsx");
 const signalNetTrendPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/signal-net-trend.tsx");
 const articleAnalysisPagePath = path.resolve(__dirname, "../src/pages/finance/article-analysis/index.tsx");
@@ -15,15 +13,9 @@ const articleFetchPagePath = path.resolve(__dirname, "../src/pages/finance/artic
 const summaryCardsPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/summary-cards.tsx");
 const pageConstantsPath = path.resolve(__dirname, "../src/pages/finance/article-analysis/page-constants.ts");
 
-/** 编译并加载不含运行时外部依赖的文章页面工具。 */
+/** 加载生产文章页面工具，模块边界由统一 TypeScript 加载器解析。 */
 function loadPageUtils() {
-  const source = fs.readFileSync(pageUtilsPath, "utf8");
-  const output = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-  }).outputText;
-  const module = { exports: {} };
-  vm.runInNewContext(output, { module, exports: module.exports });
-  return module.exports;
+  return loadTypeScript("pages/finance/article-analysis/page-utils.ts");
 }
 
 test("分析页移除监控公众号并把提示词放入抓取页分析模型", () => {
@@ -51,9 +43,15 @@ test("抓取页三个操作展示后端真实结果而不是统一成功文案",
   assert.match(fetchPage, /notification\.level === "warning"/);
 });
 
+test("文章日期按北京时间显示，不受进程时区影响", () => {
+  const { formatShortDate } = loadPageUtils();
+  assert.equal(formatShortDate("2026-08-26"), "08/26");
+  assert.equal(formatShortDate("2026-10-29T16:30:00Z"), "10/30");
+  assert.equal(formatShortDate(null), "未知");
+});
+
 test("短期市场判断始终补齐全部氛围和涨跌类别", () => {
-  const { completeDistribution, formatDistributionValue, MARKET_MOOD_CATEGORIES, MARKET_PREDICTION_CATEGORIES } = loadPageUtils();
-  const moods = completeDistribution([{ name: "neutral", count: 3 }], MARKET_MOOD_CATEGORIES);
+  const { completeDistribution, formatDistributionValue, MARKET_MOOD_CATEGORIES, MARKET_PREDICTION_CATEGORIES } = loadPageUtils();  const moods = completeDistribution([{ name: "neutral", count: 3 }], MARKET_MOOD_CATEGORIES);
   const predictions = completeDistribution([{ name: "up", count: 2 }], MARKET_PREDICTION_CATEGORIES);
 
   assert.equal(Array.from(moods, (item) => `${item.name}:${item.count}`).join(","), "very_optimistic:0,optimistic:0,neutral:3,pessimistic:0,very_pessimistic:0,unknown:0");

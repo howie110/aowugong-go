@@ -9,7 +9,7 @@ function load(file, dependencies = {}, globals = {}) {
   const source = fs.readFileSync(path.resolve(__dirname, '../src/pages/blog', file), 'utf8');
   const code = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.ReactJSX}}).outputText;
   const module = {exports:{}};
-  vm.runInNewContext(code,{module,exports:module.exports,Uint8Array,crypto:require('node:crypto').webcrypto,URL,window:{confirm:()=>true},require:(name)=>{if(name in dependencies)return dependencies[name];if(name==='@/lib/blog-image')return load('../../lib/blog-image.ts');if(name==='./blog/status-card'||name==='./status-card')return load('status-card.tsx',{'react':dependencies.react,'react/jsx-runtime':jsx,'@/lib/blog':{}});throw new Error(name);},...globals});
+  vm.runInNewContext(code,{module,exports:module.exports,Uint8Array,crypto:require('node:crypto').webcrypto,URL,window:{confirm:()=>true},require:(name)=>{if(name in dependencies)return dependencies[name];if(name==='@/lib/beijing-time')return require('./helpers/beijing-time.cjs');if(name==='@/lib/blog-image')return load('../../lib/blog-image.ts');if(name==='./blog/status-card'||name==='./status-card')return load('status-card.tsx',{'react':dependencies.react,'react/jsx-runtime':jsx,'@/lib/blog':{}});throw new Error(name);},...globals});
   return module.exports;
 }
 const images = load('status-images.ts');
@@ -91,6 +91,7 @@ test('管理页读取全部分页，删除取消不调用接口，失败保留�
   const {BlogStatusPage}=load('../blog-status.tsx',{'react':hooks,'react/jsx-runtime':jsx,'@/components/ui/button':{Button:'button'},'./blog/status-editor':{StatusEditor:'editor'},'./blog/styles.css':{},'@/lib/blog':{listStatuses:async(_admin,offset)=>{offsets.push(offset);return rows.slice(offset,offset+20);},deleteStatus:async()=>{deletes++;if(fail)throw new Error('删除失败');}}},{window:{confirm:()=>confirm}});
   const render=()=>{cursor=0;return BlogStatusPage();};
   render();effect();await tick();let tree=render();assert.deepEqual(offsets,[0,20]);assert.equal(state[0].length,21);
+  assert.equal(find(tree,x=>x.type==='time').props.children,'2026年10月3日 18:00');
   const del=()=>find(tree,x=>x.type==='button'&&x.props.children==='删除').props.onClick();
   del();await tick();assert.equal(deletes,0);
   confirm=true;fail=true;del();await tick();tree=render();assert.equal(state[0].length,21);assert.ok(find(tree,x=>x.props?.role==='alert'));

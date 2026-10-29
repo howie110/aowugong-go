@@ -13,6 +13,7 @@ import (
 	financedata "github.com/howiedata/aowugong-go/internal/finance/data"
 	"github.com/howiedata/aowugong-go/internal/githubbackup"
 	"github.com/howiedata/aowugong-go/internal/monitoring"
+	"github.com/howiedata/aowugong-go/internal/notification"
 	"github.com/howiedata/aowugong-go/internal/scheduler"
 	"github.com/howiedata/aowugong-go/internal/subscription"
 	"github.com/howiedata/aowugong-go/internal/vaultwardenbackup"
@@ -102,19 +103,21 @@ func RegisterAll(registry *scheduler.Registry, dependencies Dependencies) error 
 		{Name: "update_tushare_daily_data", Description: "更新 Tushare 日线数据", ManualOnly: true, Timeout: 2 * time.Hour, Run: taskSet.updateTushareDailyData},
 		{Name: "sync_investment_articles", Description: "手动同步并分析投资文章", ManualOnly: true, ConcurrencyKey: "investment_signal_groups", Timeout: 3 * time.Hour, Run: taskSet.syncInvestmentArticles},
 		{Name: "rebuild_investment_signal_groups", Description: "全局重建投资信号概念组", ManualOnly: true, ConcurrencyKey: "investment_signal_groups", Timeout: 30 * time.Minute, Run: taskSet.rebuildInvestmentSignalGroups},
-		{Name: "check_service_monitors", Description: "检查服务连通性", Schedule: "0 22 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkServiceMonitors},
-		{Name: "check_subscription_expiry_notify", Description: "发送有效订阅月报", Schedule: "30 9 1 * *", Timeout: 10 * time.Minute, Run: taskSet.checkSubscriptionExpiryNotify},
-		{Name: "backup_postgres", Description: "创建 PostgreSQL 一致性备份", Schedule: "30 3 * * *", Timeout: 2 * time.Hour, Run: taskSet.backupPostgres},
+		{Name: "check_service_monitors", Description: "检查服务连通性", Category: notification.CategoryMonitor, FailureTitle: "服务异常", Schedule: "0 22 * * *", Timeout: 10 * time.Minute, Run: taskSet.checkServiceMonitors},
+		{Name: "check_subscription_expiry_notify", Description: "发送有效订阅月报", Category: notification.CategorySubscription, FailureTitle: "到期月报", Schedule: "30 9 1 * *", Timeout: 10 * time.Minute, Run: taskSet.checkSubscriptionExpiryNotify},
+		{Name: "backup_postgres", Description: "创建 PostgreSQL 一致性备份", Category: notification.CategoryBackup, Schedule: "30 3 * * *", Timeout: 2 * time.Hour, Run: taskSet.backupPostgres},
 	}
 	if dependencies.GitHubBackup != nil {
 		definitions = append(definitions, scheduler.Definition{
 			Name: "backup_github_code", Description: "备份账号自有及固定组织 GitHub 仓库",
+			Category: notification.CategoryBackup, FailureTitle: "GitHub 周报",
 			Schedule: "0 4 * * 0", Timeout: 3 * time.Hour, Run: taskSet.backupGitHubCode,
 		})
 	}
 	if dependencies.VaultwardenBackup != nil {
 		definitions = append(definitions, scheduler.Definition{
 			Name: "email_vaultwarden_backup", Description: "加密并邮件发送最新 Vaultwarden 备份",
+			Category: notification.CategoryBackup,
 			Schedule: "0 5 * * 0", Timeout: 30 * time.Minute, Run: taskSet.emailVaultwardenBackup,
 		})
 	}
@@ -227,7 +230,7 @@ func (t *tasks) notifyMonitorRecoveries(ctx context.Context, transitions []monit
 
 	// 2. 合并成一条恢复消息，避免逐个服务刷屏。
 	body := buildMonitorRecoveryBody(recovered, t.dependencies.Now())
-	if err := t.dependencies.Notification.Text(ctx, []string{"监控", "服务恢复"}, body); err != nil {
+	if err := t.dependencies.Notification.Text(ctx, []string{notification.CategoryMonitor, "服务恢复"}, body); err != nil {
 		slog.Error("发送服务恢复通知失败", "error", err)
 	}
 }
@@ -296,7 +299,7 @@ func (t *tasks) checkSubscriptionExpiryNotify(ctx context.Context) (string, erro
 
 	// 2. 使用统一通知服务发送一条合并提醒。
 	body := buildSubscriptionBody(records, t.dependencies.Now(), t.dependencies.SubscriptionURL)
-	if err := t.dependencies.Notification.Text(ctx, []string{"订阅", "到期月报"}, body); err != nil {
+	if err := t.dependencies.Notification.Text(ctx, []string{notification.CategorySubscription, "到期月报"}, body); err != nil {
 		return "", fmt.Errorf("发送订阅到期提醒: %w", err)
 	}
 	return fmt.Sprintf("已发送有效订阅月报，共 %d 个", len(records)), nil
@@ -338,7 +341,7 @@ func (t *tasks) backupGitHubCode(ctx context.Context) (string, error) {
 		"- 信息：" + message,
 	}, "\n")
 	if err := t.dependencies.Notification.Text(ctx,
-		[]string{"备份", "GitHub 周报"}, body); err != nil {
+		[]string{notification.CategoryBackup, "GitHub 周报"}, body); err != nil {
 		return message, fmt.Errorf("发送 GitHub 代码备份成功通知: %w", err)
 	}
 	return message, nil

@@ -1,3 +1,4 @@
+import { beijingToday, shiftBeijingDate } from "@/lib/beijing-time";
 import { requestJSON } from "@/lib/request";
 export type ReceiptCounts = {
   analysis_users: number;
@@ -22,17 +23,13 @@ export type ReceiptReport = {
   days: ReceiptDay[];
 };
 export function shiftReceiptDate(date: string, days: number) {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
+  return shiftBeijingDate(date, days);
 }
 export function receiptRange(days: number, now = new Date()) {
-  const today = new Date(now.getTime() + 8 * 3600000)
-    .toISOString()
-    .slice(0, 10);
+  const today = beijingToday(now);
   return {
-    from: shiftReceiptDate(today, 1 - days),
-    to: shiftReceiptDate(today, 1),
+    from: shiftBeijingDate(today, 1 - days),
+    to: shiftBeijingDate(today, 1),
   };
 }
 export function getReceiptStatistics(

@@ -20,6 +20,15 @@ type recordingMailer struct {
 	content []byte
 }
 
+// expectedRecoveryScripts 是灾难恢复包必须包含的脚本，独立于生产清单以发现漂移。
+var expectedRecoveryScripts = []string{
+	"install-vaultwarden.sh",
+	"install-vaultwarden-alert.sh",
+	"vaultwarden-backup-notify.sh",
+	"backup-vaultwarden.sh",
+	"restore-vaultwarden-disaster.sh",
+}
+
 // Send 记录邮件并读取临时附件供测试解密。
 // 输入：ctx 是调用上下文，message 是待发送邮件。
 // 输出：读取成功返回 nil，否则返回文件错误。
@@ -63,7 +72,7 @@ func TestSendLatestEncryptsNewestBackup(t *testing.T) {
 		t.Fatalf("os.Chtimes(new) error = %v", err)
 	}
 	scriptsDirectory := t.TempDir()
-	for _, scriptName := range recoveryScriptNames {
+	for _, scriptName := range expectedRecoveryScripts {
 		if err := os.WriteFile(filepath.Join(scriptsDirectory, scriptName), []byte("#!/usr/bin/env bash\n"), 0o700); err != nil {
 			t.Fatalf("write recovery script %s: %v", scriptName, err)
 		}
@@ -89,7 +98,7 @@ func TestSendLatestEncryptsNewestBackup(t *testing.T) {
 	}
 	var encryptedContent []byte
 	foundInstructions := false
-	foundScripts := make(map[string]bool, len(recoveryScriptNames))
+	foundScripts := make(map[string]bool, len(expectedRecoveryScripts))
 	for _, file := range packageReader.File {
 		fileReader, openErr := file.Open()
 		if openErr != nil {
@@ -108,13 +117,13 @@ func TestSendLatestEncryptsNewestBackup(t *testing.T) {
 		if strings.HasSuffix(file.Name, ".tar.gz.age") {
 			encryptedContent = content
 		}
-		for _, scriptName := range recoveryScriptNames {
+		for _, scriptName := range expectedRecoveryScripts {
 			if file.Name == "scripts/"+scriptName {
 				foundScripts[scriptName] = len(content) > 0
 			}
 		}
 	}
-	if !foundInstructions || len(encryptedContent) == 0 || len(foundScripts) != len(recoveryScriptNames) {
+	if !foundInstructions || len(encryptedContent) == 0 || len(foundScripts) != len(expectedRecoveryScripts) {
 		t.Fatalf("recovery package files = %+v", packageReader.File)
 	}
 	reader, err := age.Decrypt(bytes.NewReader(encryptedContent), identity)

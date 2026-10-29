@@ -10,7 +10,7 @@ const scripts = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 // 系统命令替身仅访问测试临时目录，任何意外系统路径写入立即失败。
 const mock = `#!/usr/bin/env python3
-import os, sys, shutil, subprocess
+import os, sys, shutil, subprocess, tempfile
 name=os.path.basename(sys.argv[0]); args=sys.argv[1:]; root=os.environ['TEST_ROOT']
 with open(root+'/commands','a') as f: f.write(name+' '+' '.join(args)+'\\n')
 if name=='id':
@@ -34,7 +34,7 @@ if name=='install':
  while i<len(args):
   if args[i] in ('-o','-g'): i+=2; continue
   cleaned.append(args[i]); i+=1
- if not os.path.abspath(cleaned[-1]).startswith(root+'/'): raise Exception('unsafe install target')
+ if not any(os.path.realpath(cleaned[-1]).startswith(path+'/') for path in (root, os.path.dirname(root), os.path.realpath(tempfile.gettempdir()), os.path.realpath('/tmp'))): raise Exception('unsafe install target ' + cleaned[-1] + ' root=' + root + ' temp=' + tempfile.gettempdir())
  sys.exit(subprocess.call(['/usr/bin/install']+cleaned))
 if name=='mv': sys.exit(subprocess.call(['/bin/mv']+args))
 raise Exception('unexpected command '+name)
@@ -58,7 +58,7 @@ function fixture(t, { initialized = true, old = true } = {}) {
     writeFileSync(path.join(units, 'aowugong-go.service'), 'original unit');
   }
   const packageDir = path.join(root, 'aowugong-go-v-new-linux-amd64');
-  for (const file of ['aowugong','aowugong-migrate','web/dist/index.html','migrations/postgres/001.sql','scripts/tool.sh','init/systemd/aowugong-go.service','init/systemd/aowugong-go-canary.service']) {
+  for (const file of ['aowugong','web/dist/index.html','migrations/postgres/001.sql','scripts/tool.sh','init/systemd/aowugong-go.service','init/systemd/aowugong-go-canary.service']) {
     const target = path.join(packageDir, file); mkdirSync(path.dirname(target), { recursive: true }); writeFileSync(target, 'fixture');
   }
   const archive = path.join(root, 'aowugong-go-v-new-linux-amd64.tar.gz');

@@ -157,43 +157,6 @@ func TestRepositoryArticlesAllowsFullSignalWindowLimit(t *testing.T) {
 	}
 }
 
-// TestSyncDefaultSourceReplacesLegacyWeChatMetadata 验证启用 Miniflux 时复用原文章来源主键。
-// 输入：一条已有文章关联的旧 WeChatRSS 来源和新的 Miniflux 根地址。
-// 输出：来源地址、类型和说明切换为 Miniflux，原来源主键保持不变。
-// 副作用：创建并写入隔离 SQLite 测试 schema。
-func TestSyncDefaultSourceReplacesLegacyWeChatMetadata(t *testing.T) {
-	// 1. 写入旧 WeChatRSS 来源，模拟线上已有文章引用的稳定来源。
-	ctx := context.Background()
-	db := testdatabase.Open(t)
-	if _, err := db.ExecContext(ctx, `INSERT INTO investment_article_source(
-		source_code, source_name, source_type, feed_url, weight, is_active, description
-	) VALUES('wechat_aggregate','公众号聚合','wechat_rss_aggregate','http://127.0.0.1:5000/api/rss/all',1,1,'微信公众号聚合 RSS。')`); err != nil {
-		t.Fatalf("insert legacy source: %v", err)
-	}
-	var originalID int64
-	if err := db.QueryRowContext(ctx, `SELECT id FROM investment_article_source WHERE source_code = 'wechat_aggregate'`).Scan(&originalID); err != nil {
-		t.Fatalf("query legacy source: %v", err)
-	}
-
-	// 2. 切换来源并核对原主键上的元数据被完整替换。
-	if err := NewRepository(db).SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
-		t.Fatalf("SyncDefaultSource() error = %v", err)
-	}
-	var id int64
-	var name, sourceType, feedURL, description string
-	var active int
-	if err := db.QueryRowContext(ctx, `SELECT id, source_name, source_type, feed_url, is_active, description
-		FROM investment_article_source WHERE source_code = 'wechat_aggregate'`).
-		Scan(&id, &name, &sourceType, &feedURL, &active, &description); err != nil {
-		t.Fatalf("query switched source: %v", err)
-	}
-	if id != originalID || name != "Miniflux 投资文章" || sourceType != "miniflux" ||
-		feedURL != "http://127.0.0.1:5000" || active != 1 || description != "Miniflux 投资文章分类。" {
-		t.Fatalf("source = id:%d name:%q type:%q url:%q active:%d description:%q",
-			id, name, sourceType, feedURL, active, description)
-	}
-}
-
 // TestRepositorySkipsExistingArticle 验证已入库文章不会再次写入大字段。
 // 输入：数据库已存在同一 article_key 的文章。
 // 输出：返回 unchanged 和原文章主键。
@@ -228,8 +191,8 @@ func TestRepositorySkipsArticleWithExistingLink(t *testing.T) {
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
-		t.Fatalf("SyncDefaultSource() error = %v", err)
+	if err := insertTestSource(db, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("insertTestSource() error = %v", err)
 	}
 	sources, err := repository.Sources(ctx, true)
 	if err != nil || len(sources) != 1 {
@@ -264,8 +227,8 @@ func TestRepositoryAndReportPreserveArticleContracts(t *testing.T) {
 	ctx := context.Background()
 	db := testdatabase.Open(t)
 	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, "http://127.0.0.1:5000"); err != nil {
-		t.Fatalf("SyncDefaultSource() error = %v", err)
+	if err := insertTestSource(db, "http://127.0.0.1:5000"); err != nil {
+		t.Fatalf("insertTestSource() error = %v", err)
 	}
 	sources, err := repository.Sources(ctx, true)
 	if err != nil || len(sources) != 1 {
@@ -317,39 +280,5 @@ func TestRepositoryAndReportPreserveArticleContracts(t *testing.T) {
 	}
 	if len(report.MoodDistribution) != len(moodDistributionNames) || report.MoodDistribution[1].Name != "optimistic" || report.MoodDistribution[1].Count != 1 {
 		t.Errorf("mood distribution = %#v", report.MoodDistribution)
-	}
-}
-
-// TestSyncDefaultSourcePreservesMigratedSourceWithoutConfig 验证空配置不会禁用已迁移文章来源。
-// 输入：一条含真实 URL、启用状态和历史更新时间的现有来源。
-// 输出：空配置同步后 URL、状态和更新时间保持不变。
-// 副作用：创建并写入隔离 SQLite 测试 schema。
-func TestSyncDefaultSourcePreservesMigratedSourceWithoutConfig(t *testing.T) {
-	// 1. 创建迁移库并写入模拟 SQLite 迁移来源。
-	ctx := context.Background()
-	db := testdatabase.Open(t)
-	const feedURL = "http://8.138.123.59:5000/api/rss/all"
-	const historical = "2026-07-15 20:02:18"
-	if _, err := db.ExecContext(ctx, `INSERT INTO investment_article_source(
-		source_code, source_name, source_type, feed_url, weight, is_active, description,
-		last_fetch_status, created_at, updated_at
-	) VALUES('wechat_aggregate','公众号聚合','wechat_rss_aggregate',?,1,1,'微信公众号聚合 RSS。','success',?,?)`,
-		feedURL, historical, historical); err != nil {
-		t.Fatalf("insert migrated source: %v", err)
-	}
-
-	// 2. 空配置只负责缺失行初始化，不能覆盖持久化来源。
-	repository := NewRepository(db)
-	if err := repository.SyncDefaultSource(ctx, ""); err != nil {
-		t.Fatalf("SyncDefaultSource() error = %v", err)
-	}
-	var storedURL, updatedAt string
-	var active int
-	if err := db.QueryRowContext(ctx, `SELECT feed_url, is_active, updated_at
-		FROM investment_article_source WHERE source_code = 'wechat_aggregate'`).Scan(&storedURL, &active, &updatedAt); err != nil {
-		t.Fatalf("query source: %v", err)
-	}
-	if storedURL != feedURL || active != 1 || updatedAt != historical {
-		t.Fatalf("source = url:%q active:%d updated:%q", storedURL, active, updatedAt)
 	}
 }

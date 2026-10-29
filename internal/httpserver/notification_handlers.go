@@ -3,6 +3,7 @@ package httpserver
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -27,7 +28,7 @@ func newNotificationHandler(service *notification.Service, tokens map[string]str
 			writeError(w, 415, "unsupported_media_type", "需要 application/json")
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
+		r.Body = http.MaxBytesReader(w, r.Body, notification.MaxRequestBodyBytes)
 		defer r.Body.Close()
 		// 仅限制此小型 JSON 接口的读取时间，不改变其他上传接口的超时。
 		controller := http.NewResponseController(w)
@@ -53,7 +54,7 @@ func newNotificationHandler(service *notification.Service, tokens map[string]str
 		if decodeErr != nil {
 			var tooLarge *http.MaxBytesError
 			if errors.As(decodeErr, &tooLarge) {
-				writeError(w, 413, "payload_too_large", "请求不得超过 16 KiB")
+				writeError(w, 413, "payload_too_large", fmt.Sprintf("请求不得超过 %d KiB", notification.MaxRequestBodyBytes/1024))
 			} else {
 				writeError(w, 400, "invalid_json", "需要单个合法 JSON 对象，且不能包含未知字段")
 			}

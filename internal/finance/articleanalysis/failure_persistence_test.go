@@ -18,7 +18,7 @@ func TestMissingArticleClientReportsStatusWriteFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectQuery("SELECT id, source_code, source_name, source_type, feed_url, is_active").WillReturnRows(sqlmock.NewRows([]string{"id", "source_code", "source_name", "source_type", "feed_url", "is_active", "description", "last_fetch_at", "last_fetch_status", "last_fetch_message"}).AddRow(1, "test", "测试来源", "miniflux", "", 1, "", "", "", ""))
+	mock.ExpectQuery("SELECT id, source_code, source_name, source_type, feed_url, is_active").WillReturnRows(sqlmock.NewRows([]string{"id", "source_code", "source_name", "source_type", "feed_url", "is_active", "description", "last_fetch_at", "last_fetch_status", "last_fetch_message"}).AddRow(1, "test", "测试来源", "feed", "", 1, "", "", "", ""))
 	failure := errors.New("database unavailable")
 	mock.ExpectExec("UPDATE investment_article_source").WillReturnError(failure)
 	_, err = NewService(NewRepository(db), ServiceOptions{}).Sync(context.Background(), 30, false, 0)
@@ -39,7 +39,8 @@ func TestWeReadFetchPreservesUpstreamAndPersistenceErrors(t *testing.T) {
 			if err := repo.upsertWeReadAccounts(ctx, []WeReadAccount{{AccountID: "MP_WXS_100", Title: "测试公众号"}}); err != nil {
 				t.Fatal(err)
 			}
-			if err := repo.setWeReadAccountEnabled(ctx, "MP_WXS_100", true); err != nil {
+			enabled := true
+			if err := repo.updateWeReadAccount(ctx, "MP_WXS_100", nil, &enabled); err != nil {
 				t.Fatal(err)
 			}
 			transport := articleAnalysisRoundTripFunc(func(r *http.Request) (*http.Response, error) {

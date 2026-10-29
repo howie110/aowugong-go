@@ -1,6 +1,10 @@
 package httpserver
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/howiedata/aowugong-go/internal/notification"
+)
 
 // TestBuildNotificationExternalConfig 验证外部调用配置只读取 external 项目。
 // 输入：包含和不包含 external Token 的映射。
@@ -16,7 +20,9 @@ func TestBuildNotificationExternalConfig(t *testing.T) {
 		t.Fatalf("config = %#v", config)
 	}
 	if config.Endpoint != "/api/v1/notifications/wechat" || config.Project != "external" ||
-		config.MaxMessageBytes != 2048 || config.MaxRequestBytes != 16384 || config.RateLimitPerMinute != 10 {
+		config.MaxMessageBytes != notification.MaxMessageBytes ||
+		config.MaxRequestBytes != notification.MaxRequestBodyBytes ||
+		config.RateLimitPerMinute != notification.RateLimitPerMinute {
 		t.Fatalf("config limits = %#v", config)
 	}
 

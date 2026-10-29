@@ -204,3 +204,20 @@ restore_service_state() {
     systemctl stop "$service_name" >/dev/null 2>&1 || true
   fi
 }
+
+# render_service 按发布目录渲染并安装 systemd unit。
+# 输入：release_path 发布目录、service_name 服务名、unit_dir 目标目录、模板变量和临时输出文件。
+# 输出：无。
+# 副作用：写临时 unit 并安装到 systemd 目录。
+render_service() {
+  local release_path="$1"
+  local service_name="$2"
+  local unit_dir="$3"
+  local app_root="$4"
+  local run_user="$5"
+  local run_group="$6"
+  local output="$7"
+  sed -e "s|@APP_ROOT@|$app_root|g" -e "s|@RUN_USER@|$run_user|g" -e "s|@RUN_GROUP@|$run_group|g" \
+    "$release_path/init/systemd/${service_name}.service" > "$output"
+  install -m 0644 "$output" "$unit_dir/${service_name}.service"
+}

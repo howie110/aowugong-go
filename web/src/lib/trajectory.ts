@@ -1,3 +1,4 @@
+import { beijingToday, shiftBeijingDate } from "@/lib/beijing-time";
 import { requestJSON } from "@/lib/request";
 export type TrajectoryDevice = {
   id: string;
@@ -43,12 +44,9 @@ export type TrajectoryFilter = {
   snapshot?: string;
 };
 const base = "/api/v1/trajectory";
-export const trajectoryToday = (now = new Date()) =>
-  new Date(now.getTime() + 8 * 3600000).toISOString().slice(0, 10);
+export const trajectoryToday = (now = new Date()) => beijingToday(now);
 export function nextTrajectoryDay(day: string) {
-  const d = new Date(`${day}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
+  return shiftBeijingDate(day, 1);
 }
 export function getTrajectory(f: TrajectoryFilter, signal?: AbortSignal) {
   const q = new URLSearchParams({

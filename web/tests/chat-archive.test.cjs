@@ -4,11 +4,12 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('../node_modules/typescript');
 const jsx = require('../node_modules/react/jsx-runtime');
+const { loadTypeScript } = require('./helpers/load-typescript.cjs');
 
 function load(path, deps, globals = {}) {
  const code=ts.transpileModule(fs.readFileSync(require.resolve(path),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.ReactJSX}}).outputText;
  const module={exports:{}};
- vm.runInNewContext(code,{module,exports:module.exports,URLSearchParams,Blob,URL,Error,...globals,require(name){if(name in deps)return deps[name];if(name==='react/jsx-runtime')return jsx;throw new Error(name);}});
+ vm.runInNewContext(code,{module,exports:module.exports,URLSearchParams,Blob,URL,Error,...globals,require(name){if(name in deps)return deps[name];if(name==='@/lib/beijing-time')return require('./helpers/beijing-time.cjs');if(name==='react/jsx-runtime')return jsx;throw new Error(name);}});
  return module.exports;
 }
 
@@ -31,9 +32,9 @@ test('statistics uses one dedicated request without message pagination',async()=
 });
 
 test('archive page permission cannot be granted to non-admin',()=>{
- const {canViewChatArchive}=load('../src/lib/chat-archive.ts',{'@/lib/request':{},'@/lib/auth':{}});
- assert.equal(canViewChatArchive({roles:['investor'],permissions:['page:chat_archive']}),false);
- assert.equal(canViewChatArchive({roles:['admin'],permissions:[]}),true);
+ const {canAccessPage}=loadTypeScript('lib/permissions.ts',{mocks:{'@/lib/finance':{pagePermissionMap:{chatArchive:'page:chat_archive'}}}});
+ assert.equal(canAccessPage({roles:['investor'],permissions:['page:chat_archive']},'chatArchive'),false);
+ assert.equal(canAccessPage({roles:['admin'],permissions:[]},'chatArchive'),true);
 });
 
 function harness(globals = {}){

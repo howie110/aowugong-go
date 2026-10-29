@@ -77,7 +77,8 @@ func parseNotificationLogFilter(request *http.Request) (notification.LogFilter, 
 		return filter, fmt.Errorf("通知状态无效")
 	}
 	switch filter.Category {
-	case "", "任务", "备份", "监控", "订阅", "项目", "其他":
+	case "", notification.CategoryTask, notification.CategoryBackup, notification.CategoryMonitor,
+		notification.CategorySubscription, notification.CategoryProject, notification.CategoryOther:
 	default:
 		return filter, fmt.Errorf("通知分类无效")
 	}

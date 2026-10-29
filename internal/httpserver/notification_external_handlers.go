@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/howiedata/aowugong-go/internal/auth"
+	"github.com/howiedata/aowugong-go/internal/notification"
 	"github.com/howiedata/aowugong-go/internal/rbac"
 )
 
@@ -47,8 +48,8 @@ func buildNotificationExternalConfig(tokens map[string]string) notificationExter
 		Project:            "external",
 		Configured:         token != "",
 		Token:              token,
-		MaxMessageBytes:    2048,
-		MaxRequestBytes:    16384,
-		RateLimitPerMinute: 10,
+		MaxMessageBytes:    notification.MaxMessageBytes,
+		MaxRequestBytes:    notification.MaxRequestBodyBytes,
+		RateLimitPerMinute: notification.RateLimitPerMinute,
 	}
 }

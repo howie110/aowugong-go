@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/sidebar";
 import { UserProfile, clearToken } from "@/lib/auth";
 import { FinancePageKey } from "@/lib/finance";
+import { canAccessPage } from "@/lib/permissions";
 import { AppBreadcrumb } from "./app-breadcrumb";
 import { NAV_GROUP_STORAGE_KEY, navGroups, pageGroupMap } from "./app-navigation";
 import { SidebarNavigation } from "./app-sidebar-navigation";
@@ -32,13 +33,10 @@ type AppShellProps = {
 };
 
 export function AppShell({ user, activePage, onNavigate, children }: AppShellProps) {
-  const roleCodes = user?.roles ?? [];
-  const permissionCodes = user?.permissions ?? [];
-  const canViewAllPages = roleCodes.includes("admin");
   const visibleNavGroups = navGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => (item.key === "trajectory" || item.key === "chatArchive" || item.key === "analytics" || item.key === "receiptSplit") ? canViewAllPages : canViewAllPages || permissionCodes.includes(item.permission)),
+      items: group.items.filter((item) => canAccessPage(user, item.key)),
     }))
     .filter((group) => group.items.length > 0);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => readOpenGroups(activePage));

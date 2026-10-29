@@ -24,7 +24,7 @@ func (s *Service) SyncNow(ctx context.Context, fetchLimit int, analyze bool, ana
 // 副作用：读取外部文章，按需调用当前分析模型，并写入 PostgreSQL。
 func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analysisLimit int) (SyncResult, error) {
 	// 1. 读取启用来源并初始化稳定空数组结果。
-	sources, err := s.repository.sourceRecords(ctx)
+	sources, err := s.repository.Sources(ctx, true)
 	if err != nil {
 		return SyncResult{}, fmt.Errorf("读取待同步文章来源: %w", err)
 	}
@@ -46,11 +46,7 @@ func (s *Service) Sync(ctx context.Context, fetchLimit int, analyze bool, analys
 			result.FailedSources = append(result.FailedSources, map[string]string{"source": source.SourceName, "error": message})
 			continue
 		}
-		feedURL := source.FeedURL
-		if source.SourceType == "miniflux" && s.options.FeedURL != "" {
-			feedURL = s.options.FeedURL
-		}
-		items, fetchErr := s.options.Articles.Fetch(ctx, source.ID, feedURL, fetchLimit)
+		items, fetchErr := s.options.Articles.Fetch(ctx, source.ID, source.FeedURL, fetchLimit)
 		if fetchErr != nil {
 			result.FailedSources = append(result.FailedSources, map[string]string{"source": source.SourceName, "error": fetchErr.Error()})
 		}

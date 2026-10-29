@@ -38,8 +38,11 @@ func TestFinanceSummaryRoutesRequirePermissionAndReturnCurrentData(t *testing.T)
 	positionService := position.NewService(positionRepository, client.NewAliyunOCRClient(config.PositionOCR{}), position.UploadOptions{})
 	stockService := stockanalysis.NewService(stockanalysis.NewRepository(db))
 	articleRepository := articleanalysis.NewRepository(db)
-	if err := articleRepository.SyncDefaultSource(ctx, ""); err != nil {
-		t.Fatalf("SyncDefaultSource() error = %v", err)
+	if _, err := db.ExecContext(ctx, `INSERT INTO investment_article_source(
+		source_code, source_name, source_type, feed_url, weight, is_active, description
+	) VALUES('wechat_aggregate','测试投资文章来源','feed','',1,0,'测试文章来源。')
+	ON CONFLICT(source_code) DO NOTHING`); err != nil {
+		t.Fatalf("insert article source: %v", err)
 	}
 	articleService := articleanalysis.NewService(articleRepository, articleanalysis.ServiceOptions{})
 	jobRegistry := scheduler.NewRegistry(db, nil, nil)
@@ -75,7 +78,6 @@ func TestFinanceSummaryRoutesRequirePermissionAndReturnCurrentData(t *testing.T)
 		"/api/v1/finance/stock-analysis/summary",
 		"/api/v1/finance/stock-analysis/report?limit=500",
 		"/api/v1/finance/article-analysis/summary",
-		"/api/v1/finance/article-analysis/fetch-summary",
 		"/api/v1/finance/article-analysis/sources",
 		"/api/v1/finance/article-analysis/articles?days=60&limit=50",
 		"/api/v1/finance/article-analysis/report?target_days=60&market_days=3",

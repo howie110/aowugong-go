@@ -1,3 +1,4 @@
+import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { listChatAudit, listChatStatistics, type ChatStatistics, type ChatAuditPage } from "@/lib/chat-archive";
@@ -6,8 +7,7 @@ const pageSize = 20;
 const rowColumns = "grid grid-cols-[170px_80px_100px_minmax(120px,1fr)_48px] items-center gap-3";
 
 function displayTime(value: string | null) {
-  if (!value || Number.isNaN(Date.parse(value))) return "来源时间未知";
-  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(new Date(value));
+  return formatBeijingDateTime(value, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }, "来源时间未知", "sv-SE");
 }
 
 export function ChatArchivePage() {

@@ -188,26 +188,23 @@ func TestLoadUsesHTTPAddressOverride(t *testing.T) {
 	}
 }
 
-// TestLoadUsesMinifluxOverrides 验证投资文章来源通过 Miniflux API 独立配置。
-// 输入：Miniflux 根地址、API Token 和投资文章分类。
-// 输出：配置保留清理后的连接参数，不依赖旧 WeChatRSS 地址。
+// TestLoadUsesMinifluxAddresses 验证 Miniflux 独立服务的地址配置。
+// 输入：Miniflux 根地址和监控地址。
+// 输出：配置保留清理后的连接参数。
 // 副作用：无。
-func TestLoadUsesMinifluxOverrides(t *testing.T) {
-	// 1. 提供完整的 Miniflux API 配置。
+func TestLoadUsesMinifluxAddresses(t *testing.T) {
+	// 1. 提供 Miniflux 地址配置。
 	cfg, err := Load(newLookup(map[string]string{
 		"MINIFLUX_BASE_URL":    "http://127.0.0.1:5000/",
 		"MINIFLUX_MONITOR_URL": "https://miniflux.aowugong.top/",
-		"MINIFLUX_API_TOKEN":   "test-token",
-		"MINIFLUX_CATEGORY":    "投资文章",
 	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	// 2. 断言文章客户端参数进入唯一配置结构。
+	// 2. 断言地址进入配置结构。
 	if cfg.Clients.Miniflux.BaseURL != "http://127.0.0.1:5000/" ||
-		cfg.Clients.Miniflux.MonitorURL != "https://miniflux.aowugong.top/" ||
-		cfg.Clients.Miniflux.APIToken != "test-token" || cfg.Clients.Miniflux.Category != "投资文章" {
+		cfg.Clients.Miniflux.MonitorURL != "https://miniflux.aowugong.top/" {
 		t.Errorf("Clients.Miniflux = %#v", cfg.Clients.Miniflux)
 	}
 }
@@ -382,5 +379,21 @@ func newLookup(values map[string]string) LookupEnv {
 		// 2. 查询测试提供的环境变量。
 		value, ok := values[key]
 		return value, ok
+	}
+}
+
+// TestValidateRejectsNotificationTokensWithoutWebhook 验证通知 Token 必须搭配有效 Webhook。
+// 输入：只配置通知 Token，不配置企业微信 Webhook。
+// 输出：Validate 返回明确错误。
+// 副作用：无。
+func TestValidateRejectsNotificationTokensWithoutWebhook(t *testing.T) {
+	cfg, err := Load(newLookup(map[string]string{
+		"AOWUGONG_NOTIFICATION_TOKENS": `{"test":"01234567890123456789012345678901"}`,
+	}))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want missing webhook error")
 	}
 }

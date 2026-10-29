@@ -1,3 +1,4 @@
+import { beijingToday } from "@/lib/beijing-time";
 import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
@@ -590,9 +591,7 @@ function paddedDomain(values: number[]) {
 }
 
 function getTodayText() {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60000;
-  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+  return beijingToday();
 }
 
 function toNumber(value: string | number) {

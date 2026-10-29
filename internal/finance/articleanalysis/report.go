@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	appdatabase "github.com/howiedata/aowugong-go/internal/database"
 )
 
 // AnalysisSummary 构建投资文章分析页面摘要。
@@ -26,31 +28,6 @@ func (s *Service) AnalysisSummary(ctx context.Context) (PageSummary, error) {
 		Description: "统计最近资讯里的标的信号、市场氛围和涨跌预测。",
 		Metrics: []PageMetric{
 			{Label: "文章", Value: strconv.Itoa(counts.ArticleCount), Detail: "已入库文章", Status: "normal"},
-			{Label: "已分析", Value: strconv.Itoa(counts.AnalyzedCount), Detail: "结构化模型结果", Status: "normal"},
-		},
-		LatestArticleAt: counts.LatestAt,
-	}, nil
-}
-
-// FetchSummary 构建投资文章抓取页面摘要。
-// 输入：ctx 控制 PostgreSQL 查询。
-// 输出：返回来源、文章、待分析和已分析计数；失败时返回错误。
-// 副作用：只读 PostgreSQL。
-func (s *Service) FetchSummary(ctx context.Context) (PageSummary, error) {
-	// 1. 读取统一计数口径。
-	counts, err := s.repository.counts(ctx)
-	if err != nil {
-		return PageSummary{}, fmt.Errorf("读取文章抓取摘要: %w", err)
-	}
-
-	// 2. 组装抓取页状态卡片。
-	return PageSummary{
-		Title:       "投资文章抓取",
-		Description: "管理微信读书公众号，读取新文章并触发结构化模型分析。",
-		Metrics: []PageMetric{
-			{Label: "来源", Value: strconv.Itoa(counts.SourceCount), Detail: "启用的信息源", Status: "normal"},
-			{Label: "文章", Value: strconv.Itoa(counts.ArticleCount), Detail: "已入库文章", Status: "normal"},
-			{Label: "待分析", Value: strconv.Itoa(counts.PendingCount), Detail: "抓取后等待模型处理", Status: "normal"},
 			{Label: "已分析", Value: strconv.Itoa(counts.AnalyzedCount), Detail: "结构化模型结果", Status: "normal"},
 		},
 		LatestArticleAt: counts.LatestAt,
@@ -123,7 +100,7 @@ func (s *Service) Report(ctx context.Context, targetDays, marketDays int) (Repor
 	if err != nil {
 		return Report{}, err
 	}
-	historyEnd := dateOnly(shanghaiNowText())
+	historyEnd := dateOnly(appdatabase.TimestampText(time.Now()))
 	historyEndTime, _ := time.Parse("2006-01-02", historyEnd)
 	historyStart := historyEndTime.AddDate(0, 0, -(targetDays - 1)).Format("2006-01-02")
 	return Report{

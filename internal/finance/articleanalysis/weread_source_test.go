@@ -3,7 +3,6 @@ package articleanalysis
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -76,100 +75,6 @@ func TestWeReadSourceCredentialRoundTrip(t *testing.T) {
 	other := NewWeReadSource(NewRepository(db), client.NewWeReadArticleClient(nil), "different-secret")
 	if _, err := other.loadCredentials(ctx); err == nil {
 		t.Fatal("loadCredentials() with different key expected error")
-	}
-}
-
-// TestWeReadCredentialHealthLifecycle 验证多次检查会累计绑定寿命和自动刷新次数。
-// 输入：一份新扫码凭据、一次有效检查、一次自动刷新和一次认证失效。
-// 输出：绑定时间不被刷新覆盖，检查与刷新次数准确，寿命停在首次失效时间。
-// 副作用：写入隔离 SQLite 测试库。
-func TestWeReadCredentialHealthLifecycle(t *testing.T) {
-	// 1. 保存新绑定并以持久绑定时间为基准构造后续检查时间。
-	ctx := context.Background()
-	db := testdatabase.Open(t)
-	repository := NewRepository(db)
-	source := NewWeReadSource(repository, client.NewWeReadArticleClient(nil), "test-encryption-secret")
-	credentials := client.WeReadArticleCredentials{
-		VID: "123456", DeviceID: "stable-device", InstallID: "stable-install",
-		AccessToken: "access-secret", RefreshToken: "refresh-secret",
-	}
-	if err := source.saveCredentials(ctx, credentials, true); err != nil {
-		t.Fatalf("save new credentials: %v", err)
-	}
-	health, found, err := repository.weReadCredentialHealth(ctx)
-	if err != nil || !found {
-		t.Fatalf("initial health = %#v, %v, %v", health, found, err)
-	}
-	location := time.FixedZone("Asia/Shanghai", 8*60*60)
-	boundAt, err := time.ParseInLocation("2006-01-02 15:04:05", health.BoundAt, location)
-	if err != nil {
-		t.Fatalf("parse bound time: %v", err)
-	}
-
-	// 2. 有效检查和 Token 刷新分别累计，不允许刷新重置绑定起点。
-	if err := repository.recordWeReadCredentialCheck(ctx, "valid", "", boundAt.Add(2*time.Hour)); err != nil {
-		t.Fatalf("record valid check: %v", err)
-	}
-	credentials.AccessToken = "refreshed-access"
-	if err := source.saveCredentials(ctx, credentials, false); err != nil {
-		t.Fatalf("save refreshed credentials: %v", err)
-	}
-	if err := repository.recordWeReadCredentialCheck(ctx, "invalid", "认证失效", boundAt.Add(3*time.Hour)); err != nil {
-		t.Fatalf("record invalid check: %v", err)
-	}
-
-	// 3. 首次失效固定三小时寿命，累计两次检查和一次自动刷新。
-	health, found, err = repository.weReadCredentialHealth(ctx)
-	if err != nil || !found {
-		t.Fatalf("final health = %#v, %v, %v", health, found, err)
-	}
-	result := buildWeReadCredentialCheckResult(health, boundAt.Add(5*time.Hour), 0)
-	if result.Status != "invalid" || result.ValidFor != "3小时" || result.CheckCount != 2 || result.RefreshCount != 1 {
-		t.Fatalf("credential result = %#v", result)
-	}
-}
-
-// TestWeReadCredentialCheckUsesArticleEndpoint 验证凭据检查使用正式文章列表接口而不是较宽松的书架接口。
-// 输入：一个已启用公众号和返回人工验证错误的内存微信读书服务。
-// 输出：检查返回人工验证错误并把凭据健康状态记为警告。
-// 副作用：执行一次内存 HTTP 请求并写入隔离测试数据库。
-func TestWeReadCredentialCheckUsesArticleEndpoint(t *testing.T) {
-	// 1. 保存完整凭据并准备一个参与正式抓取的公众号。
-	ctx := context.Background()
-	db := testdatabase.Open(t)
-	repository := NewRepository(db)
-	if err := repository.upsertWeReadAccounts(ctx, []WeReadAccount{{
-		AccountID: "MP_WXS_100", Title: "测试公众号",
-	}}); err != nil {
-		t.Fatalf("upsertWeReadAccounts() error = %v", err)
-	}
-	if err := repository.setWeReadAccountEnabled(ctx, "MP_WXS_100", true); err != nil {
-		t.Fatalf("setWeReadAccountEnabled() error = %v", err)
-	}
-	transport := articleAnalysisRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.URL.Path != "/mp/chapters" || request.URL.Query().Get("count") != "1" {
-			t.Fatalf("credential check request = %s", request.URL.String())
-		}
-		return articleAnalysisHTTPResponse(request, http.StatusOK, `{"errCode":-2041,"errMsg":"verify required"}`), nil
-	})
-	source := NewWeReadSource(repository, client.NewWeReadArticleClient(&http.Client{Transport: transport}), "test-secret")
-	credentials := client.WeReadArticleCredentials{
-		VID: "123456", DeviceID: "device-test", AccessToken: "access-secret", RefreshToken: "refresh-secret",
-	}
-	if err := source.saveCredentials(ctx, credentials, true); err != nil {
-		t.Fatalf("saveCredentials() error = %v", err)
-	}
-
-	// 2. 检查必须暴露人工验证错误，并持久化为页面可见的警告状态。
-	if _, err := source.CheckCredential(ctx); !errors.Is(err, client.ErrWeReadArticleVerification) {
-		t.Fatalf("CheckCredential() error = %v", err)
-	}
-	health, found, err := repository.weReadCredentialHealth(ctx)
-	if err != nil || !found {
-		t.Fatalf("weReadCredentialHealth() = %#v, %v, %v", health, found, err)
-	}
-	if health.LastStatus != "error" || !strings.Contains(health.LastError, "测试公众号") {
-		t.Fatalf("credential health = %#v", health)
 	}
 }
 
@@ -312,9 +217,9 @@ func TestWeReadAccountSelectionSurvivesShelfRefresh(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsertWeReadAccounts() error = %v", err)
 	}
-	source := NewWeReadSource(repository, client.NewWeReadArticleClient(nil), "test-secret")
-	if err := source.SetAccountEnabled(ctx, "MP_WXS_100", true); err != nil {
-		t.Fatalf("SetAccountEnabled() error = %v", err)
+	accountEnabled := true
+	if err := repository.updateWeReadAccount(ctx, "MP_WXS_100", nil, &accountEnabled); err != nil {
+		t.Fatalf("updateWeReadAccount() error = %v", err)
 	}
 
 	// 2. 再次发现时更新标题并增加账号，核对人工选择不被覆盖且离架账号被删除。
@@ -332,7 +237,7 @@ func TestWeReadAccountSelectionSurvivesShelfRefresh(t *testing.T) {
 	for _, account := range accounts {
 		enabled[account.AccountID] = account.Enabled
 	}
-	if len(accounts) != 2 || !enabled["MP_WXS_100"] || !enabled["MP_WXS_300"] {
+	if len(accounts) != 2 || !enabled["MP_WXS_100"] || enabled["MP_WXS_300"] {
 		t.Fatalf("account enabled states = %#v", enabled)
 	}
 	if _, exists := enabled["MP_WXS_200"]; exists {

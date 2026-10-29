@@ -339,3 +339,26 @@ func (discardWriter) Write(p []byte) (int, error) {
 	// 1. 报告全部字节已处理。
 	return len(p), nil
 }
+
+// TestFailureTitleUsesDefinition 验证失败通知分类来自任务定义，不再按任务名硬编码。
+// 输入：默认、备份和监控三种任务定义。
+// 输出：标题分别回退到“任务”、使用“备份”和“监控 / 服务异常”。
+// 副作用：无。
+func TestFailureTitleUsesDefinition(t *testing.T) {
+	tests := []struct {
+		name string
+		def  Definition
+		want string
+	}{
+		{name: "default", def: Definition{Name: "sync_articles"}, want: "任务/sync_articles"},
+		{name: "backup", def: Definition{Name: "backup_postgres", Category: "备份"}, want: "备份/backup_postgres"},
+		{name: "monitor", def: Definition{Name: "check_service_monitors", Category: "监控", FailureTitle: "服务异常"}, want: "监控/服务异常"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := strings.Join(failureTitle(test.def), "/"); got != test.want {
+				t.Fatalf("failureTitle() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
