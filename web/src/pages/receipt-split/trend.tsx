@@ -137,18 +137,24 @@ export function ReceiptTrend({ days }: { days: ReceiptDay[] }) {
                 width={TOOLTIP_WIDTH}
                 height="64"
                 rx="6"
-                fill="var(--background)"
-                stroke="currentColor"
-                strokeOpacity=".2"
+                fill="#ffffff"
+                stroke="#cbd5e1"
+                strokeWidth="1"
               />
-              <text x="10" y="17" fontSize="11" fontWeight="600" fill="currentColor">
+              <text x="10" y="17" fontSize="11" fontWeight="600" fill="#0f172a">
                 {activeDay.date}
               </text>
-              <text x="10" y="37" fontSize="11" fill="currentColor">
-                识别用户 {activeDay.analysis_users}
+              <text x="10" y="37" fontSize="11" fill="#475569">
+                识别用户{" "}
+                <tspan fill="#2563eb" fontWeight="600">
+                  {activeDay.analysis_users}
+                </tspan>
               </text>
-              <text x="10" y="54" fontSize="11" fill="currentColor">
-                生成账单用户 {activeDay.bill_users}
+              <text x="10" y="54" fontSize="11" fill="#475569">
+                生成账单用户{" "}
+                <tspan fill="#0f766e" fontWeight="600">
+                  {activeDay.bill_users}
+                </tspan>
               </text>
             </g>
           </g>

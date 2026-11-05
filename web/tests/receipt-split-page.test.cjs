@@ -139,6 +139,10 @@ test("趋势图鼠标移动显示十字准线和最近日期提示", () => {
   assert.ok(labels.includes("2026-10-02"));
   assert.ok(labels.includes("识别用户 3"));
   assert.ok(labels.includes("生成账单用户 1"));
+  const tooltip = elements(tree).find((element) => element.type === "rect" && element.props.width === 168);
+  assert.equal(tooltip.props.fill, "#ffffff");
+  const dateLabel = elements(tree).find((element) => element.type === "text" && text(element) === "2026-10-02");
+  assert.equal(dateLabel.props.fill, "#0f172a");
 
   svg.props.onPointerLeave();
   tree = render();
