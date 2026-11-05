@@ -1,101 +1,31 @@
-import { formatBeijingDateTime } from "@/lib/beijing-time";
+import { TrendChart } from "@/components/charts/trend-chart";
 import type { AnalyticsReport } from "@/lib/analytics";
+import { formatBeijingDate } from "@/lib/beijing-time";
+
 import world from "./world.json";
 
 export const number = (n: number) =>
   n.toLocaleString("zh-CN", { maximumFractionDigits: 1 });
-export const timeLabel = (s: string) =>
-  formatBeijingDateTime(s, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }, s);
+
+/** Trend 展示最近 30 天的每日浏览量和访客，并跟随鼠标显示十字定位。 */
 export function Trend({ data }: { data: AnalyticsReport["trend"] }) {
-  const max = Math.max(1, ...data.map((p) => p.views));
-  const point = (v: number, i: number) =>
-    `${50 + (i * 900) / Math.max(data.length - 1, 1)},${235 - (v / max) * 205}`;
   return (
-    <div className="w-full overflow-hidden">
-      <svg
-        viewBox="0 0 980 285"
-        className="w-full min-h-44"
-        role="img"
-        aria-label="访客与浏览量趋势，蓝色为浏览量，青色为访客"
-      >
-        {[0, 0.25, 0.5, 0.75, 1].map((v) => (
-          <g key={v}>
-            <line
-              x1="50"
-              x2="950"
-              y1={235 - v * 205}
-              y2={235 - v * 205}
-              stroke="currentColor"
-              opacity=".1"
-            />
-            <text
-              x="40"
-              y={239 - v * 205}
-              textAnchor="end"
-              fontSize="11"
-              fill="currentColor"
-            >
-              {number(max * v)}
-            </text>
-          </g>
-        ))}
-        {(["views", "visitors"] as const).map((key, j) => (
-          <g key={key}>
-            <polyline
-              points={data.map((p, i) => point(p[key], i)).join(" ")}
-              fill="none"
-              stroke={j ? "#06b6d4" : "#3b82f6"}
-              strokeWidth="2.5"
-            />
-            {data.map((p, i) => (
-              <circle
-                key={p.time}
-                cx={50 + (i * 900) / Math.max(data.length - 1, 1)}
-                cy={235 - (p[key] / max) * 205}
-                r={data.length > 80 ? 1 : 3}
-                fill={j ? "#06b6d4" : "#3b82f6"}
-              >
-                <title>
-                  {timeLabel(p.time)}：{key === "views" ? "浏览量" : "访客"}{" "}
-                  {p[key]}
-                </title>
-              </circle>
-            ))}
-          </g>
-        ))}
-        {data
-          .filter(
-            (_, i) =>
-              i === 0 ||
-              i === data.length - 1 ||
-              i === Math.floor(data.length / 2),
-          )
-          .map((p) => (
-            <text
-              key={p.time}
-              x={50 + (data.indexOf(p) * 900) / Math.max(data.length - 1, 1)}
-              y="266"
-              textAnchor={
-                p === data[0]
-                  ? "start"
-                  : p === data[data.length - 1]
-                    ? "end"
-                    : "middle"
-              }
-              fontSize="11"
-              fill="currentColor"
-            >
-              {timeLabel(p.time)}
-            </text>
-          ))}
-      </svg>
-      <div className="flex justify-center gap-5 text-xs text-muted-foreground">
-        <span className="text-blue-500">● 浏览量</span>
-        <span className="text-cyan-500">● 访客</span>
-      </div>
-    </div>
+    <TrendChart
+      data={data.map((point) => ({
+        label: formatBeijingDate(point.time),
+        primary: point.views,
+        secondary: point.visitors,
+      }))}
+      primaryLabel="浏览量"
+      secondaryLabel="访客"
+      primaryColor="#3b82f6"
+      secondaryColor="#06b6d4"
+      ariaLabel="最近 30 天每日浏览量趋势"
+      emptyLabel="暂无访问记录"
+    />
   );
 }
+
 export function Heatmap({ data }: { data: AnalyticsReport["heat"] }) {
   const max = Math.max(1, ...data.map((x) => x.count));
   const values = new Map(data.map((x) => [`${x.day}-${x.hour}`, x.count]));
@@ -133,6 +63,7 @@ export function Heatmap({ data }: { data: AnalyticsReport["heat"] }) {
     </div>
   );
 }
+
 // Natural Earth 1:110m 国界，公共领域；原始来源与转换说明见 README。
 export function WorldMap({
   data,

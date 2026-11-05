@@ -52,17 +52,6 @@ function createRuntime() {
   };
 }
 
-function elements(tree) {
-  if (!React.isValidElement(tree)) return [];
-  return [tree, ...React.Children.toArray(tree.props.children).flatMap(elements)];
-}
-
-function text(tree) {
-  if (typeof tree === "string" || typeof tree === "number") return String(tree);
-  if (!React.isValidElement(tree)) return "";
-  return React.Children.toArray(tree.props.children).map(text).join("");
-}
-
 const days = [
   { date: "2026-10-01", analysis_users: 1, bill_users: 0, tasks: 1, succeeded: 1, failed: 0, running: 0, queued: 0, bills: 0 },
   { date: "2026-10-02", analysis_users: 3, bill_users: 1, tasks: 3, succeeded: 3, failed: 0, running: 0, queued: 0, bills: 1 },
@@ -94,7 +83,12 @@ test("小票页只保留最近 30 天的每日使用图", async () => {
     },
   };
   const { ReceiptSplitPage } = loadTypeScript("pages/receipt-split/index.tsx", {
-    moduleMocks: { "pages/receipt-split/index.tsx": { react: runtime.hooks } },
+    moduleMocks: {
+      "pages/receipt-split/index.tsx": {
+        react: runtime.hooks,
+        "./trend": { ReceiptTrend: () => "chart" },
+      },
+    },
     mocks: { "@/lib/receipt-split": api },
     globals: { AbortController },
   });
@@ -105,46 +99,26 @@ test("小票页只保留最近 30 天的每日使用图", async () => {
   assert.deepEqual(statisticsCalls, [["2026-10-07", "2026-11-06", true, true]]);
   assert.ok(html.includes("每日使用用户"));
   assert.ok(html.includes("最近 30 天"));
+  assert.ok(html.includes("chart"));
   for (const removed of ["历史登录用户", "识别任务", "识别成功率", "开始日期", "结束日期", "排除运营者", "每日明细", "数据生成"]) {
     assert.ok(!html.includes(removed), `unexpected ${removed}`);
   }
-  assert.ok(html.includes("<svg"));
 });
 
-test("趋势图鼠标移动显示十字准线和最近日期提示", () => {
-  const runtime = createRuntime();
+test("小票趋势把每日数据映射到统一图表", () => {
   const { ReceiptTrend } = loadTypeScript("pages/receipt-split/trend.tsx", {
-    moduleMocks: { "pages/receipt-split/trend.tsx": { react: runtime.hooks } },
+    mocks: {
+      "@/components/charts/trend-chart": {
+        TrendChart: () => null,
+      },
+    },
   });
-  const render = () => {
-    runtime.resetCursor();
-    return ReceiptTrend({ days });
-  };
-
-  let tree = render();
-  const svg = elements(tree).find((element) => element.type === "svg");
-  assert.ok(svg);
-  svg.props.onPointerMove({
-    currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 980, height: 260 }) },
-    clientX: 500,
-    clientY: 100,
-  });
-  tree = render();
-
-  const dashed = elements(tree).filter((element) => element.type === "line" && element.props.strokeDasharray === "4 4");
-  assert.equal(dashed.length, 2);
-  assert.equal(dashed[0].props.x1, 500);
-  assert.equal(dashed[1].props.y1, 100);
-  const labels = elements(tree).filter((element) => element.type === "text").map(text);
-  assert.ok(labels.includes("2026-10-02"));
-  assert.ok(labels.includes("识别用户 3"));
-  assert.ok(labels.includes("生成账单用户 1"));
-  const tooltip = elements(tree).find((element) => element.type === "rect" && element.props.width === 168);
-  assert.equal(tooltip.props.fill, "#ffffff");
-  const dateLabel = elements(tree).find((element) => element.type === "text" && text(element) === "2026-10-02");
-  assert.equal(dateLabel.props.fill, "#0f172a");
-
-  svg.props.onPointerLeave();
-  tree = render();
-  assert.equal(elements(tree).filter((element) => element.type === "line" && element.props.strokeDasharray === "4 4").length, 0);
+  const tree = ReceiptTrend({ days });
+  assert.equal(tree.props.primaryLabel, "识别用户");
+  assert.equal(tree.props.secondaryLabel, "生成账单用户");
+  assert.deepEqual(JSON.parse(JSON.stringify(tree.props.data)), [
+    { label: "2026-10-01", primary: 1, secondary: 0 },
+    { label: "2026-10-02", primary: 3, secondary: 1 },
+    { label: "2026-10-03", primary: 2, secondary: 2 },
+  ]);
 });
